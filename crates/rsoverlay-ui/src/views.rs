@@ -46,6 +46,8 @@ pub struct DevView {
     notifications_received: u64,
     media: Option<MediaInfo>,
     last_media_poll: Instant,
+    chat_draft: String,
+    pending_chat: Option<rsoverlay_osc::ChatMessage>,
 }
 
 impl Default for DevView {
@@ -60,6 +62,8 @@ impl Default for DevView {
             notifications_received: 0,
             media: None,
             last_media_poll: Instant::now() - Duration::from_secs(10),
+            chat_draft: String::new(),
+            pending_chat: None,
         }
     }
 }
@@ -83,6 +87,11 @@ impl DevView {
     /// this once per frame and forward valid hits to the input injector.
     pub fn take_mirror_hit(&mut self) -> Option<MirrorHit> {
         self.pending_hit.take()
+    }
+
+    /// Take the pending VRChat chatbox message, if any.
+    pub fn take_pending_chat(&mut self) -> Option<rsoverlay_osc::ChatMessage> {
+        self.pending_chat.take()
     }
 
     fn maybe_refresh_media(&mut self) {
@@ -114,6 +123,12 @@ impl DevView {
                         stats_card(ui, self.frame, self.last_fps, self.notifications_received);
                         ui.add_space(theme::GUTTER);
                         forward_toggle(ui, &mut self.forward_input);
+                        ui.add_space(theme::GUTTER);
+                        if let Some(msg) =
+                            chatbox_card(ui, &mut self.chat_draft)
+                        {
+                            self.pending_chat = Some(msg);
+                        }
                     });
                     ui.add_space(theme::GUTTER);
                     ui.vertical(|ui| {
@@ -195,6 +210,32 @@ fn stats_card(ui: &mut egui::Ui, frame_count: u64, fps: f32, notifs: u64) {
         kv(ui, "notifications", &notifs.to_string());
         kv(ui, "ws bind", "127.0.0.1:42069");
     });
+}
+
+fn chatbox_card(ui: &mut egui::Ui, draft: &mut String) -> Option<rsoverlay_osc::ChatMessage> {
+    let mut result = None;
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(theme::caption("VRChat chatbox"));
+        ui.add_space(6.0);
+        let edit = ui.add(
+            egui::TextEdit::singleline(draft)
+                .desired_width(f32::INFINITY)
+                .hint_text("message VRChat chatbox…"),
+        );
+        let submit =
+            (edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                || ui.button(egui::RichText::new("send").color(theme::ACCENT)).clicked();
+        if submit && !draft.trim().is_empty() {
+            result = Some(rsoverlay_osc::ChatMessage {
+                text: draft.clone(),
+                send_immediately: true,
+                play_notification: true,
+            });
+            draft.clear();
+        }
+    });
+    result
 }
 
 fn forward_toggle(ui: &mut egui::Ui, on: &mut bool) {

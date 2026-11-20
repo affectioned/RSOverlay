@@ -18,6 +18,7 @@ use anyhow::Result;
 use clap::Parser;
 use rsoverlay_core::RuntimeMode;
 use rsoverlay_notify::{spawn as spawn_notify, NotifyConfig};
+use rsoverlay_osc::spawn as spawn_osc;
 use std::net::SocketAddr;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -53,6 +54,14 @@ struct Args {
     /// Print detected monitors and exit.
     #[arg(long)]
     list_monitors: bool,
+
+    /// VRChat OSC input address (UDP). Default matches VRChat's listener.
+    #[arg(long, default_value = "127.0.0.1:9000")]
+    osc_addr: SocketAddr,
+
+    /// Disable the OSC sender entirely.
+    #[arg(long)]
+    no_osc: bool,
 }
 
 impl Args {
@@ -107,8 +116,14 @@ fn main() -> Result<()> {
         monitor_index: args.monitor,
     };
 
+    let osc = if args.no_osc {
+        None
+    } else {
+        Some(spawn_osc(&rt_handle, args.osc_addr))
+    };
+
     let result = match mode {
-        RuntimeMode::Preview => preview::run(notify_rx, capture_cfg),
+        RuntimeMode::Preview => preview::run(notify_rx, capture_cfg, osc),
         RuntimeMode::Vr => vr::run(notify_rx, rt_handle.clone()),
     };
 

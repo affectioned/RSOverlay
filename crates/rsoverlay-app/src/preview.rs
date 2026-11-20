@@ -41,7 +41,11 @@ const OVERLAY_TEX_SIZE: u32 = 1024;
 const INITIAL_WIN_W: u32 = 1024;
 const INITIAL_WIN_H: u32 = 1024;
 
-pub fn run(mut notify: Option<NotifyChannel>, capture_cfg: CaptureCfg) -> Result<()> {
+pub fn run(
+    mut notify: Option<NotifyChannel>,
+    capture_cfg: CaptureCfg,
+    osc: Option<rsoverlay_osc::OscClient>,
+) -> Result<()> {
     let event_loop = EventLoop::new().context("creating winit event loop")?;
     let window = Arc::new(
         WindowBuilder::new()
@@ -206,6 +210,18 @@ pub fn run(mut notify: Option<NotifyChannel>, capture_cfg: CaptureCfg) -> Result
                                 }
                             } else if let Err(e) = injector.move_to(&geom, hit.x, hit.y) {
                                 warn!("input inject move: {e:#}");
+                            }
+                        }
+
+                        // 0d. Forward any pending chatbox send.
+                        if let Some(msg) = dev_view.take_pending_chat() {
+                            match &osc {
+                                Some(client) => {
+                                    if let Err(e) = client.tx.send(msg) {
+                                        warn!("osc channel closed: {e:#}");
+                                    }
+                                }
+                                None => warn!("chatbox send ignored: OSC disabled via --no-osc"),
                             }
                         }
 
