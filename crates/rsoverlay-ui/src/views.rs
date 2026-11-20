@@ -4,9 +4,10 @@
 //! Tokens live in `theme::*`; no hardcoded colors in this module.
 
 use crate::icons::{self, icon};
+use crate::locale;
 use crate::media::{self, MediaInfo};
 use crate::theme;
-use chrono::{Local, Timelike};
+use chrono::Local;
 use rsoverlay_notify::Notification;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -174,7 +175,14 @@ impl DevView {
 
 fn clock_card(ui: &mut egui::Ui, accent: egui::Color32) {
     let now = Local::now();
-    let time = format!("{:02}:{:02}", now.hour(), now.minute());
+    // Follow the host's clock convention: 12h with AM/PM on US-English and
+    // friends, 24h everywhere else. Detected from the system locale, not
+    // from chrono; chrono formats, the OS decides.
+    let time = if locale::uses_24h_clock() {
+        now.format("%H:%M").to_string()
+    } else {
+        now.format("%-I:%M %p").to_string()
+    };
     let date = now.format("%A · %b %-d").to_string();
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());

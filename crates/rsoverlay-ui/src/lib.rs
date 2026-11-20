@@ -7,6 +7,7 @@ use egui_wgpu::{Renderer, ScreenDescriptor};
 use std::sync::Arc;
 
 pub mod icons;
+pub mod locale;
 pub mod media;
 pub mod theme;
 pub mod views;

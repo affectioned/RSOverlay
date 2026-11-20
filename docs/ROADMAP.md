@@ -20,20 +20,26 @@ WebSocket notification server with live toasts, VRChat OSC `/chatbox/input`,
 
 Ranked by cross-wishlist demand × implementation cost in a Rust + wgpu stack.
 
-1. **Notifications overhaul.** Clear-all, multi-stack (done — polish next),
+1. **GPU-to-GPU mirror interop (zero CPU readback).** Current mirror does a
+   full ~14 MB CPU round-trip per frame (`CopyResource` → `Map` → `Vec<u8>`
+   → `queue.write_texture`), which puts user-perceived latency in the
+   25-40 ms range. The fix: open the DXGI-duplicated `ID3D11Texture2D` as
+   a shared NT handle, open on the wgpu DX12 side via
+   `wgpu_hal::dx12::Device::texture_from_raw`, drop the memcpy entirely.
+   Target: sub-16 ms perceived latency on 60 Hz desktops. This is the
+   project's explicit hard rule ("GPU-to-GPU, no readback") and it's the
+   single biggest UX win available.
+2. **Notifications overhaul.** Clear-all, multi-stack (done — polish next),
    scrollable history pane. *XSO #127/#128/#131 cluster, 3 `Planned` tags.*
-2. **Window capture (Windows Graphics Capture API).** Per-window mirrors
+3. **Window capture (Windows Graphics Capture API).** Per-window mirrors
    alongside the whole-monitor path. Unlocks every "Discord window in VR"
    request. *OVR top complaint cluster + XSO #30/#117/#139.*
-3. **Keyboard layouts.** Save keyboard position/scale per layout +
+4. **Keyboard layouts.** Save keyboard position/scale per layout +
    favorites + quick-switch. Pure serde work. *XSO #185/#316/#337, all
    `Planned`; OVR #6 physical-keyboard calibration.*
-4. **Battery / HMD stats widget.** Configurable warning thresholds, hide
+5. **Battery / HMD stats widget.** Configurable warning thresholds, hide
    toggles per device, support for Vive-wireless, Index wand, Quest. *XSO
    #203/#216/#339; OVR #17.*
-5. **WASM plugin API (`wasmtime`).** The single most-reframed ask — users
-   want extensibility but we don't ship a dylib loader. Wasm sandbox turns
-   this from a security problem into a differentiator. *XSO #44/#150.*
 
 ## Mid-term
 
