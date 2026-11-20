@@ -40,6 +40,19 @@ struct Args {
     /// Disable the notification server entirely.
     #[arg(long)]
     no_notify: bool,
+
+    /// Desktop monitor index to mirror into the preview overlay. Use
+    /// `--list-monitors` to see the enumeration. Default: 0.
+    #[arg(long, default_value_t = 0)]
+    monitor: u32,
+
+    /// Disable desktop capture.
+    #[arg(long)]
+    no_mirror: bool,
+
+    /// Print detected monitors and exit.
+    #[arg(long)]
+    list_monitors: bool,
 }
 
 impl Args {
@@ -61,6 +74,14 @@ fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
+
+    if args.list_monitors {
+        for m in rsoverlay_capture::enumerate_monitors()? {
+            println!("[{}] {} {}x{}", m.index, m.device_name, m.width, m.height);
+        }
+        return Ok(());
+    }
+
     let mode = args.mode();
     info!("starting RSOverlay in {:?} mode", mode);
 
@@ -81,8 +102,13 @@ fn main() -> Result<()> {
         Some(spawn_notify(&rt_handle, cfg))
     };
 
+    let capture_cfg = preview::CaptureCfg {
+        enabled: !args.no_mirror,
+        monitor_index: args.monitor,
+    };
+
     let result = match mode {
-        RuntimeMode::Preview => preview::run(notify_rx),
+        RuntimeMode::Preview => preview::run(notify_rx, capture_cfg),
         RuntimeMode::Vr => vr::run(notify_rx, rt_handle.clone()),
     };
 

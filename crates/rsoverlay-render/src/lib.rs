@@ -7,6 +7,7 @@
 //!   for the desktop preview window.
 
 pub mod backend;
+pub mod mirror;
 pub mod panel_view;
 
 use anyhow::{Context, Result};

@@ -60,8 +60,8 @@ windows = { version = "0.52", features = [
 ] }
 
 # Internal crates
-rsoverlay-core   = { path = "crates/rsoverlay-core" }
-rsoverlay-openvr = { path = "crates/rsoverlay-openvr" }
+rsoverlay-core    = { path = "crates/rsoverlay-core" }
+rsoverlay-openvr  = { path = "crates/rsoverlay-openvr" }
 rsoverlay-capture = { path = "crates/rsoverlay-capture" }
 rsoverlay-notify = { path = "crates/rsoverlay-notify" }
 rsoverlay-render = { path = "crates/rsoverlay-render" }

@@ -4,6 +4,14 @@ use rsoverlay_notify::Notification;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+/// Handle to a wgpu-backed egui texture plus its intrinsic size.
+#[derive(Copy, Clone, Debug)]
+pub struct MirrorHandle {
+    pub id: egui::TextureId,
+    pub width: u32,
+    pub height: u32,
+}
+
 /// A notification that is currently on screen.
 struct Toast {
     n: Notification,
@@ -17,6 +25,7 @@ pub struct DevView {
     pub frame: u64,
     pub last_fps: f32,
     pub message: String,
+    pub mirror: Option<MirrorHandle>,
     toasts: VecDeque<Toast>,
     notifications_received: u64,
 }
@@ -27,6 +36,7 @@ impl Default for DevView {
             frame: 0,
             last_fps: 0.0,
             message: "RSOverlay preview".to_string(),
+            mirror: None,
             toasts: VecDeque::new(),
             notifications_received: 0,
         }
@@ -58,16 +68,25 @@ impl DevView {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
-                ui.add_space(24.0);
+                ui.add_space(12.0);
                 ui.heading("RSOverlay");
-                ui.add_space(8.0);
+                ui.add_space(4.0);
                 ui.label(egui::RichText::new(&self.message).weak());
-                ui.add_space(24.0);
-                ui.separator();
                 ui.add_space(8.0);
+                if let Some(m) = self.mirror {
+                    let avail = ui.available_size();
+                    let mirror_aspect = m.width as f32 / m.height as f32;
+                    let max_w = avail.x * 0.9;
+                    let max_h = (avail.y - 160.0).max(120.0);
+                    let (w, h) = fit(mirror_aspect, max_w, max_h);
+                    ui.image((m.id, egui::vec2(w, h)));
+                    ui.add_space(8.0);
+                }
+                ui.separator();
+                ui.add_space(6.0);
                 egui::Grid::new("dev-grid")
                     .num_columns(2)
-                    .spacing([24.0, 6.0])
+                    .spacing([24.0, 4.0])
                     .show(ui, |ui| {
                         ui.label("frame");
                         ui.monospace(self.frame.to_string());
@@ -84,6 +103,11 @@ impl DevView {
                         ui.label("ws bind");
                         ui.monospace("127.0.0.1:42069");
                         ui.end_row();
+                        if let Some(m) = self.mirror {
+                            ui.label("mirror");
+                            ui.monospace(format!("{}x{}", m.width, m.height));
+                            ui.end_row();
+                        }
                     });
             });
         });
@@ -103,6 +127,15 @@ impl DevView {
             // time instead of waiting for the next input event.
             ctx.request_repaint_after(Duration::from_millis(50));
         }
+    }
+}
+
+fn fit(aspect: f32, max_w: f32, max_h: f32) -> (f32, f32) {
+    let w_by_h = max_h * aspect;
+    if w_by_h <= max_w {
+        (w_by_h, max_h)
+    } else {
+        (max_w, max_w / aspect)
     }
 }
 

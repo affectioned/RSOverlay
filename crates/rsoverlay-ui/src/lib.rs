@@ -10,7 +10,7 @@ pub mod views;
 
 pub struct EguiPanel {
     pub ctx: egui::Context,
-    renderer: Renderer,
+    pub renderer: Renderer,
     width: u32,
     height: u32,
     ppp: f32,

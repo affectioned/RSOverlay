@@ -23,6 +23,7 @@ rsoverlay-core.workspace = true
 rsoverlay-render.workspace = true
 rsoverlay-notify.workspace = true
 rsoverlay-ui.workspace = true
+rsoverlay-capture.workspace = true
 egui.workspace = true
 egui-winit.workspace = true
 clap = { version = "4.5", features = ["derive"] }

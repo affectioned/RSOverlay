@@ -11,13 +11,24 @@
 //! eventually drive it.
 
 use anyhow::{Context, Result};
+use rsoverlay_capture::{DxgiDuplication, Frame};
 use rsoverlay_core::RuntimeMode;
 use rsoverlay_notify::NotifyChannel;
-use rsoverlay_render::{GpuCtx, OverlayTarget};
-use rsoverlay_ui::{views::DevView, EguiPanel};
+use rsoverlay_render::{mirror::MirrorTexture, GpuCtx, OverlayTarget};
+use rsoverlay_ui::{
+    views::{DevView, MirrorHandle},
+    EguiPanel,
+};
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
+
+#[derive(Copy, Clone, Debug)]
+pub struct CaptureCfg {
+    pub enabled: bool,
+    pub monitor_index: u32,
+}
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -29,7 +40,7 @@ const OVERLAY_TEX_SIZE: u32 = 1024;
 const INITIAL_WIN_W: u32 = 1024;
 const INITIAL_WIN_H: u32 = 1024;
 
-pub fn run(mut notify: Option<NotifyChannel>) -> Result<()> {
+pub fn run(mut notify: Option<NotifyChannel>, capture_cfg: CaptureCfg) -> Result<()> {
     let event_loop = EventLoop::new().context("creating winit event loop")?;
     let window = Arc::new(
         WindowBuilder::new()
@@ -89,6 +100,20 @@ pub fn run(mut notify: Option<NotifyChannel>) -> Result<()> {
     let mut dev_view = DevView::default();
     let mut fps_counter = FpsCounter::new();
 
+    // Desktop capture thread: writes one Frame at a time into a bounded
+    // channel; the UI thread drops older frames if it can't keep up.
+    let (capture_tx, capture_rx) = mpsc::sync_channel::<Frame>(2);
+    let mut mirror_texture: Option<MirrorTexture> = None;
+    let mut mirror_handle: Option<MirrorHandle> = None;
+    if capture_cfg.enabled {
+        let tx = capture_tx;
+        let idx = capture_cfg.monitor_index;
+        std::thread::Builder::new()
+            .name("rsoverlay-capture".into())
+            .spawn(move || capture_loop(idx, tx))
+            .context("spawning capture thread")?;
+    }
+
     info!("preview window up — close window or press Esc to exit");
 
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -112,12 +137,47 @@ pub fn run(mut notify: Option<NotifyChannel>) -> Result<()> {
                         surface.configure(&gpu.device, &config);
                     }
                     WindowEvent::RedrawRequested => {
-                        // 0. Drain any newly-arrived notifications.
+                        // 0a. Drain any newly-arrived notifications.
                         if let Some(n) = notify.as_mut() {
                             while let Ok(notif) = n.rx.try_recv() {
                                 dev_view.push_notification(notif);
                             }
                         }
+
+                        // 0b. Pull the latest captured frame (coalesce — we
+                        // only care about the newest).
+                        let mut latest: Option<Frame> = None;
+                        while let Ok(f) = capture_rx.try_recv() {
+                            latest = Some(f);
+                        }
+                        if let Some(frame) = latest {
+                            let (mt, needs_register) = match mirror_texture.as_ref() {
+                                Some(mt) if mt.width == frame.width && mt.height == frame.height => {
+                                    (mt, false)
+                                }
+                                _ => {
+                                    let mt = MirrorTexture::new(&gpu, frame.width, frame.height);
+                                    mirror_texture = Some(mt);
+                                    (mirror_texture.as_ref().unwrap(), true)
+                                }
+                            };
+                            if let Err(e) = mt.upload(&gpu, &frame) {
+                                warn!("mirror upload: {e:#}");
+                            }
+                            if needs_register {
+                                let id = egui_panel.renderer.register_native_texture(
+                                    &gpu.device,
+                                    &mt.view,
+                                    wgpu::FilterMode::Linear,
+                                );
+                                mirror_handle = Some(MirrorHandle {
+                                    id,
+                                    width: frame.width,
+                                    height: frame.height,
+                                });
+                            }
+                        }
+                        dev_view.mirror = mirror_handle;
 
                         // 1. Run egui into the overlay target.
                         dev_view.frame = dev_view.frame.wrapping_add(1);
@@ -161,6 +221,37 @@ pub fn run(mut notify: Option<NotifyChannel>) -> Result<()> {
         }
     })?;
     Ok(())
+}
+
+/// DXGI duplication pump. Runs on its own thread, publishes the newest frame
+/// every ~16 ms. On disconnection of the channel it exits cleanly. On any
+/// recoverable duplication error (e.g. output switch) it retries after a
+/// brief sleep.
+fn capture_loop(monitor_index: u32, tx: mpsc::SyncSender<Frame>) {
+    loop {
+        let mut dup = match DxgiDuplication::new(monitor_index) {
+            Ok(d) => d,
+            Err(e) => {
+                error!("desktop capture setup failed for monitor {monitor_index}: {e:#}");
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                continue;
+            }
+        };
+        info!("desktop capture started on monitor {monitor_index}");
+        loop {
+            match dup.next_frame(16) {
+                Ok(Some(frame)) => {
+                    // try_send: drop the frame if UI is behind, keep latency low.
+                    let _ = tx.try_send(frame);
+                }
+                Ok(None) => {} // timeout; no new frame this tick
+                Err(e) => {
+                    warn!("capture lost ({e:#}); retrying");
+                    break;
+                }
+            }
+        }
+    }
 }
 
 /// Rolling FPS counter — one sample per second.
