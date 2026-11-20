@@ -1944,6 +1944,7 @@ dependencies = [
  "raw-window-handle 0.6.2",
  "rsoverlay-capture",
  "rsoverlay-core",
+ "rsoverlay-input",
  "rsoverlay-notify",
  "rsoverlay-openvr",
  "rsoverlay-render",

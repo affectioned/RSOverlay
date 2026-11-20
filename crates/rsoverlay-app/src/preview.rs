@@ -11,7 +11,8 @@
 //! eventually drive it.
 
 use anyhow::{Context, Result};
-use rsoverlay_capture::{DxgiDuplication, Frame};
+use rsoverlay_capture::{enumerate_monitors, DxgiDuplication, Frame};
+use rsoverlay_input::{InputInjector, MonitorGeom, MouseButton};
 use rsoverlay_core::RuntimeMode;
 use rsoverlay_notify::NotifyChannel;
 use rsoverlay_render::{mirror::MirrorTexture, GpuCtx, OverlayTarget};
@@ -105,6 +106,7 @@ pub fn run(mut notify: Option<NotifyChannel>, capture_cfg: CaptureCfg) -> Result
     let (capture_tx, capture_rx) = mpsc::sync_channel::<Frame>(2);
     let mut mirror_texture: Option<MirrorTexture> = None;
     let mut mirror_handle: Option<MirrorHandle> = None;
+    let mut mirror_geom: Option<MonitorGeom> = None;
     if capture_cfg.enabled {
         let tx = capture_tx;
         let idx = capture_cfg.monitor_index;
@@ -112,7 +114,20 @@ pub fn run(mut notify: Option<NotifyChannel>, capture_cfg: CaptureCfg) -> Result
             .name("rsoverlay-capture".into())
             .spawn(move || capture_loop(idx, tx))
             .context("spawning capture thread")?;
+        // Resolve the chosen monitor's virtual-desktop origin so input
+        // injection can translate overlay-local coords back to pixels.
+        if let Ok(mons) = enumerate_monitors() {
+            if let Some(m) = mons.into_iter().find(|m| m.index == capture_cfg.monitor_index) {
+                mirror_geom = Some(MonitorGeom {
+                    origin_x: m.origin_x,
+                    origin_y: m.origin_y,
+                    width: m.width,
+                    height: m.height,
+                });
+            }
+        }
     }
+    let injector = InputInjector::new().context("initializing input injector")?;
 
     info!("preview window up — close window or press Esc to exit");
 
@@ -178,6 +193,21 @@ pub fn run(mut notify: Option<NotifyChannel>, capture_cfg: CaptureCfg) -> Result
                             }
                         }
                         dev_view.mirror = mirror_handle;
+
+                        // 0c. Forward any pending mirror hit to the real
+                        // desktop. Move always; click only if a click was
+                        // actually recorded this frame.
+                        if let (Some(hit), Some(geom)) =
+                            (dev_view.take_mirror_hit(), mirror_geom)
+                        {
+                            if hit.clicked {
+                                if let Err(e) = injector.click_at(&geom, hit.x, hit.y, MouseButton::Left) {
+                                    warn!("input inject click: {e:#}");
+                                }
+                            } else if let Err(e) = injector.move_to(&geom, hit.x, hit.y) {
+                                warn!("input inject move: {e:#}");
+                            }
+                        }
 
                         // 1. Run egui into the overlay target.
                         dev_view.frame = dev_view.frame.wrapping_add(1);

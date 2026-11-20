@@ -17,6 +17,11 @@ pub struct MonitorInfo {
     pub width: u32,
     pub height: u32,
     pub device_name: String,
+    /// Top-left of the monitor in the Windows virtual-desktop coordinate
+    /// space. Used by input injection to translate overlay-local coordinates
+    /// back to real pixel positions.
+    pub origin_x: i32,
+    pub origin_y: i32,
 }
 
 /// One captured frame — BGRA8 top-left origin.
@@ -93,6 +98,8 @@ mod dxgi {
                         width: (coords.right - coords.left) as u32,
                         height: (coords.bottom - coords.top) as u32,
                         device_name: name,
+                        origin_x: coords.left,
+                        origin_y: coords.top,
                     });
                     output_idx += 1;
                 }

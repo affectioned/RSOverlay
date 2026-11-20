@@ -23,10 +23,25 @@ struct Toast {
     expires: Instant,
 }
 
+/// Mouse interaction reported by the mirror this frame. Coordinates are in
+/// the monitor's pixel space (origin top-left of the monitor).
+#[derive(Copy, Clone, Debug)]
+pub struct MirrorHit {
+    pub x: i32,
+    pub y: i32,
+    pub clicked: bool,
+}
+
 pub struct DevView {
     pub frame: u64,
     pub last_fps: f32,
     pub mirror: Option<MirrorHandle>,
+    /// If true, the UI reports mirror cursor coords and clicks via
+    /// [`Self::take_mirror_hit`].
+    pub forward_input: bool,
+    /// Latched hit from the most recent frame. Consume via
+    /// [`Self::take_mirror_hit`].
+    pending_hit: Option<MirrorHit>,
     toasts: VecDeque<Toast>,
     notifications_received: u64,
     media: Option<MediaInfo>,
@@ -39,6 +54,8 @@ impl Default for DevView {
             frame: 0,
             last_fps: 0.0,
             mirror: None,
+            forward_input: false,
+            pending_hit: None,
             toasts: VecDeque::new(),
             notifications_received: 0,
             media: None,
@@ -60,6 +77,12 @@ impl DevView {
 
     pub fn notifications_received(&self) -> u64 {
         self.notifications_received
+    }
+
+    /// Take the pending mirror hit, if any. The caller is expected to drain
+    /// this once per frame and forward valid hits to the input injector.
+    pub fn take_mirror_hit(&mut self) -> Option<MirrorHit> {
+        self.pending_hit.take()
     }
 
     fn maybe_refresh_media(&mut self) {
@@ -89,10 +112,14 @@ impl DevView {
                         media_card(ui, self.media.as_ref());
                         ui.add_space(theme::GUTTER);
                         stats_card(ui, self.frame, self.last_fps, self.notifications_received);
+                        ui.add_space(theme::GUTTER);
+                        forward_toggle(ui, &mut self.forward_input);
                     });
                     ui.add_space(theme::GUTTER);
                     ui.vertical(|ui| {
-                        mirror_card(ui, self.mirror);
+                        if let Some(hit) = mirror_card(ui, self.mirror, self.forward_input) {
+                            self.pending_hit = Some(hit);
+                        }
                     });
                 });
             });
@@ -170,6 +197,22 @@ fn stats_card(ui: &mut egui::Ui, frame_count: u64, fps: f32, notifs: u64) {
     });
 }
 
+fn forward_toggle(ui: &mut egui::Ui, on: &mut bool) {
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(theme::caption("Input forwarding"));
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.checkbox(on, "");
+            ui.label(theme::body(if *on {
+                "clicks on the mirror reach the real desktop"
+            } else {
+                "clicks on the mirror are inert"
+            }));
+        });
+    });
+}
+
 fn kv(ui: &mut egui::Ui, k: &str, v: &str) {
     ui.horizontal(|ui| {
         ui.label(theme::body_muted(k));
@@ -179,7 +222,12 @@ fn kv(ui: &mut egui::Ui, k: &str, v: &str) {
     });
 }
 
-fn mirror_card(ui: &mut egui::Ui, mirror: Option<MirrorHandle>) {
+fn mirror_card(
+    ui: &mut egui::Ui,
+    mirror: Option<MirrorHandle>,
+    forward_input: bool,
+) -> Option<MirrorHit> {
+    let mut hit = None;
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::caption("Desktop"));
@@ -191,13 +239,32 @@ fn mirror_card(ui: &mut egui::Ui, mirror: Option<MirrorHandle>) {
                 let max_w = avail.x;
                 let max_h = (avail.y - 4.0).max(160.0);
                 let (w, h) = fit(aspect, max_w, max_h);
-                ui.image((m.id, egui::vec2(w, h)));
+                let sense = if forward_input {
+                    egui::Sense::click_and_drag()
+                } else {
+                    egui::Sense::hover()
+                };
+                let response = ui.add(
+                    egui::Image::new((m.id, egui::vec2(w, h))).sense(sense),
+                );
+                if forward_input {
+                    if let Some(pos) = response.hover_pos().or_else(|| response.interact_pointer_pos()) {
+                        let rect = response.rect;
+                        let u = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                        let v = ((pos.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
+                        let px = (u * m.width as f32) as i32;
+                        let py = (v * m.height as f32) as i32;
+                        let clicked = response.clicked();
+                        hit = Some(MirrorHit { x: px, y: py, clicked });
+                    }
+                }
             }
             None => {
                 ui.label(theme::body_muted("no monitor captured"));
             }
         }
     });
+    hit
 }
 
 fn fit(aspect: f32, max_w: f32, max_h: f32) -> (f32, f32) {
