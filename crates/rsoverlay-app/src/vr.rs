@@ -8,12 +8,14 @@
 //! quad), while the Preview mode exercises the full render path.
 
 use anyhow::{Context, Result};
+use rsoverlay_notify::NotifyChannel;
 use rsoverlay_openvr::{pose_translation, OpenVr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tokio::runtime::Handle;
 use tracing::{info, warn};
 
-pub fn run() -> Result<()> {
+pub fn run(_notify: Option<NotifyChannel>, rt: Handle) -> Result<()> {
     let vr = OpenVr::init().context("OpenVR init")?;
     let overlay = vr.overlay().context("acquiring IVROverlay")?;
 
@@ -31,7 +33,11 @@ pub fn run() -> Result<()> {
 
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
-    ctrlc_hook(move || r.store(false, Ordering::SeqCst));
+    rt.spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            r.store(false, Ordering::SeqCst);
+        }
+    });
 
     while running.load(Ordering::SeqCst) {
         std::thread::sleep(std::time::Duration::from_millis(16));
@@ -41,26 +47,4 @@ pub fn run() -> Result<()> {
     overlay.destroy(handle).ok();
     info!("clean shutdown");
     Ok(())
-}
-
-/// Minimal Ctrl+C hook using tokio::signal would pull in a runtime; we only
-/// need a one-shot, so install a plain signal handler via windows-rs on
-/// Windows and std on other platforms.
-fn ctrlc_hook(mut on_signal: impl FnMut() + Send + 'static) {
-    // tokio is already a workspace dep — stand up a tiny single-thread
-    // runtime just for the signal future. Keeps platform code centralized.
-    std::thread::spawn(move || {
-        let rt = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt,
-            Err(_) => return,
-        };
-        rt.block_on(async move {
-            if tokio::signal::ctrl_c().await.is_ok() {
-                on_signal();
-            }
-        });
-    });
 }

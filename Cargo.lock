@@ -2000,6 +2000,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "rsoverlay-core",
+ "rsoverlay-notify",
  "tracing",
  "wgpu",
 ]

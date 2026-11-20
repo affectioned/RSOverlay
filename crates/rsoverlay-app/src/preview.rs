@@ -12,6 +12,7 @@
 
 use anyhow::{Context, Result};
 use rsoverlay_core::RuntimeMode;
+use rsoverlay_notify::NotifyChannel;
 use rsoverlay_render::{GpuCtx, OverlayTarget};
 use rsoverlay_ui::{views::DevView, EguiPanel};
 use std::sync::Arc;
@@ -28,7 +29,7 @@ const OVERLAY_TEX_SIZE: u32 = 1024;
 const INITIAL_WIN_W: u32 = 1024;
 const INITIAL_WIN_H: u32 = 1024;
 
-pub fn run() -> Result<()> {
+pub fn run(mut notify: Option<NotifyChannel>) -> Result<()> {
     let event_loop = EventLoop::new().context("creating winit event loop")?;
     let window = Arc::new(
         WindowBuilder::new()
@@ -111,6 +112,13 @@ pub fn run() -> Result<()> {
                         surface.configure(&gpu.device, &config);
                     }
                     WindowEvent::RedrawRequested => {
+                        // 0. Drain any newly-arrived notifications.
+                        if let Some(n) = notify.as_mut() {
+                            while let Ok(notif) = n.rx.try_recv() {
+                                dev_view.push_notification(notif);
+                            }
+                        }
+
                         // 1. Run egui into the overlay target.
                         dev_view.frame = dev_view.frame.wrapping_add(1);
                         dev_view.last_fps = fps_counter.tick();

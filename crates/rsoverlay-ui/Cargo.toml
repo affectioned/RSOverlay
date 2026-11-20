@@ -12,3 +12,4 @@ egui.workspace = true
 egui-wgpu.workspace = true
 wgpu.workspace = true
 rsoverlay-core.workspace = true
+rsoverlay-notify.workspace = true
