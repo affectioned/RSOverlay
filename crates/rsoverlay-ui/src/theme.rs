@@ -17,7 +17,21 @@ pub const BG_CARD: Color32 = Color32::from_rgb(0x0F, 0x11, 0x15);
 pub const STROKE_CARD: Color32 = Color32::from_rgba_premultiplied(0xFF, 0xFF, 0xFF, 0x0F); // ~6%
 pub const FG_PRIMARY: Color32 = Color32::from_rgb(0xF2, 0xF3, 0xF5);
 pub const FG_MUTED: Color32 = Color32::from_rgb(0x8A, 0x8F, 0x99);
+/// Default accent — overridden at runtime by the user via the Appearance card.
 pub const ACCENT: Color32 = Color32::from_rgb(0x7D, 0xD3, 0xC0);
+
+/// A handful of brand-neutral accent choices offered in the Appearance picker.
+/// These are intentionally muted — no neon, so nothing reads as "gamer-tech"
+/// in SteamVR's compositor.
+pub const ACCENT_PRESETS: &[(&str, Color32)] = &[
+    ("teal",   Color32::from_rgb(0x7D, 0xD3, 0xC0)),
+    ("amber",  Color32::from_rgb(0xE6, 0xB3, 0x5C)),
+    ("mauve",  Color32::from_rgb(0xC6, 0x9C, 0xE6)),
+    ("sky",    Color32::from_rgb(0x82, 0xB1, 0xFF)),
+    ("rose",   Color32::from_rgb(0xE8, 0x8F, 0xA2)),
+    ("lime",   Color32::from_rgb(0xB2, 0xD9, 0x7C)),
+    ("white",  Color32::from_rgb(0xF2, 0xF3, 0xF5)),
+];
 
 pub const RADIUS_CARD: f32 = 10.0;
 pub const RADIUS_PILL: f32 = 14.0;
@@ -91,6 +105,6 @@ pub fn headline(text: &str) -> egui::RichText {
     egui::RichText::new(text).size(SIZE_HEADLINE).color(FG_PRIMARY).strong()
 }
 
-pub fn accent_dot() -> egui::RichText {
-    egui::RichText::new("●").color(ACCENT)
+pub fn accent_dot_for(c: Color32) -> egui::RichText {
+    egui::RichText::new("●").color(c)
 }

@@ -32,7 +32,10 @@ pub fn install_loaders(ctx: &egui::Context) {
     egui_extras::install_image_loaders(ctx);
 }
 
-/// Build a right-sized image widget for one of the bundled icons.
-pub fn icon(source: ImageSource<'static>, size: f32) -> egui::Image<'static> {
-    egui::Image::new(source).fit_to_exact_size(egui::vec2(size, size))
+/// Build a right-sized image widget for one of the bundled icons, tinted
+/// by the given color. Icons ship as white-fill SVGs so any tint lands cleanly.
+pub fn icon(source: ImageSource<'static>, size: f32, tint: egui::Color32) -> egui::Image<'static> {
+    egui::Image::new(source)
+        .fit_to_exact_size(egui::vec2(size, size))
+        .tint(tint)
 }

@@ -37,11 +37,11 @@ pub struct DevView {
     pub frame: u64,
     pub last_fps: f32,
     pub mirror: Option<MirrorHandle>,
-    /// If true, the UI reports mirror cursor coords and clicks via
-    /// [`Self::take_mirror_hit`].
     pub forward_input: bool,
-    /// Latched hit from the most recent frame. Consume via
-    /// [`Self::take_mirror_hit`].
+    pub accent: egui::Color32,
+    pub show_mirror: bool,
+    pub show_media: bool,
+    pub show_chat: bool,
     pending_hit: Option<MirrorHit>,
     toasts: VecDeque<Toast>,
     notifications_received: u64,
@@ -58,6 +58,10 @@ impl Default for DevView {
             last_fps: 0.0,
             mirror: None,
             forward_input: false,
+            accent: theme::ACCENT,
+            show_mirror: true,
+            show_media: true,
+            show_chat: true,
             pending_hit: None,
             toasts: VecDeque::new(),
             notifications_received: 0,
@@ -110,33 +114,48 @@ impl DevView {
         }
         self.maybe_refresh_media();
 
+        let accent = self.accent;
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(&ctx.style()).fill(theme::BG_ROOT))
             .show(ctx, |ui| {
                 ui.add_space(theme::GUTTER);
-                clock_card(ui);
+                clock_card(ui, accent);
                 ui.add_space(theme::GUTTER);
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
                         ui.set_width(theme::COL_LEFT_WIDTH);
-                        media_card(ui, self.media.as_ref());
-                        ui.add_space(theme::GUTTER);
-                        stats_card(ui, self.frame, self.last_fps, self.notifications_received);
-                        ui.add_space(theme::GUTTER);
-                        forward_toggle(ui, &mut self.forward_input);
-                        ui.add_space(theme::GUTTER);
-                        if let Some(msg) =
-                            chatbox_card(ui, &mut self.chat_draft)
-                        {
-                            self.pending_chat = Some(msg);
+                        if self.show_media {
+                            media_card(ui, self.media.as_ref(), accent);
+                            ui.add_space(theme::GUTTER);
                         }
+                        stats_card(ui, self.frame, self.last_fps, self.notifications_received, accent);
+                        ui.add_space(theme::GUTTER);
+                        forward_toggle(ui, &mut self.forward_input, accent);
+                        ui.add_space(theme::GUTTER);
+                        if self.show_chat {
+                            if let Some(msg) = chatbox_card(ui, &mut self.chat_draft, accent) {
+                                self.pending_chat = Some(msg);
+                            }
+                            ui.add_space(theme::GUTTER);
+                        }
+                        appearance_card(
+                            ui,
+                            &mut self.accent,
+                            &mut self.show_mirror,
+                            &mut self.show_media,
+                            &mut self.show_chat,
+                        );
                     });
                     ui.add_space(theme::GUTTER);
-                    ui.vertical(|ui| {
-                        if let Some(hit) = mirror_card(ui, self.mirror, self.forward_input) {
-                            self.pending_hit = Some(hit);
-                        }
-                    });
+                    if self.show_mirror {
+                        ui.vertical(|ui| {
+                            if let Some(hit) =
+                                mirror_card(ui, self.mirror, self.forward_input, accent)
+                            {
+                                self.pending_hit = Some(hit);
+                            }
+                        });
+                    }
                 });
             });
 
@@ -144,7 +163,7 @@ impl DevView {
             .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-theme::GUTTER, theme::GUTTER))
             .show(ctx, |ui| {
                 for t in self.toasts.iter() {
-                    toast_card(ui, &t.n);
+                    toast_card(ui, &t.n, accent);
                     ui.add_space(8.0);
                 }
             });
@@ -153,14 +172,14 @@ impl DevView {
     }
 }
 
-fn clock_card(ui: &mut egui::Ui) {
+fn clock_card(ui: &mut egui::Ui, accent: egui::Color32) {
     let now = Local::now();
     let time = format!("{:02}:{:02}", now.hour(), now.minute());
     let date = now.format("%A · %b %-d").to_string();
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
-            ui.add(icon(icons::BRAND, 44.0));
+            ui.add(icon(icons::BRAND, 44.0, accent));
             ui.add_space(14.0);
             ui.label(theme::headline(&time));
             ui.add_space(16.0);
@@ -169,7 +188,7 @@ fn clock_card(ui: &mut egui::Ui) {
             ui.vertical(|ui| {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    ui.add(icon(icons::CLOCK, 14.0));
+                    ui.add(icon(icons::CLOCK, 14.0, accent));
                     ui.add_space(4.0);
                     ui.label(theme::caption("RSOverlay"));
                 });
@@ -179,10 +198,10 @@ fn clock_card(ui: &mut egui::Ui) {
     });
 }
 
-fn media_card(ui: &mut egui::Ui, info: Option<&MediaInfo>) {
+fn media_card(ui: &mut egui::Ui, info: Option<&MediaInfo>, accent: egui::Color32) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        card_header(ui, icons::PULSE, "Now playing");
+        card_header(ui, icons::PULSE, "Now playing", accent);
         ui.add_space(6.0);
         match info {
             Some(m) if !m.title.is_empty() => {
@@ -192,7 +211,11 @@ fn media_card(ui: &mut egui::Ui, info: Option<&MediaInfo>) {
                 }
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    ui.add(icon(if m.playing { icons::PLAY } else { icons::PAUSE }, 14.0));
+                    ui.add(icon(
+                        if m.playing { icons::PLAY } else { icons::PAUSE },
+                        14.0,
+                        accent,
+                    ));
                     ui.add_space(4.0);
                     ui.label(theme::body_muted(if m.playing { "playing" } else { "paused" }));
                 });
@@ -204,18 +227,23 @@ fn media_card(ui: &mut egui::Ui, info: Option<&MediaInfo>) {
     });
 }
 
-fn card_header(ui: &mut egui::Ui, source: egui::ImageSource<'static>, label: &str) {
+fn card_header(
+    ui: &mut egui::Ui,
+    source: egui::ImageSource<'static>,
+    label: &str,
+    accent: egui::Color32,
+) {
     ui.horizontal(|ui| {
-        ui.add(icon(source, 14.0));
+        ui.add(icon(source, 14.0, accent));
         ui.add_space(4.0);
         ui.label(theme::caption(label));
     });
 }
 
-fn stats_card(ui: &mut egui::Ui, frame_count: u64, fps: f32, notifs: u64) {
+fn stats_card(ui: &mut egui::Ui, frame_count: u64, fps: f32, notifs: u64, accent: egui::Color32) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        card_header(ui, icons::SETTINGS, "Stats");
+        card_header(ui, icons::SETTINGS, "Stats", accent);
         ui.add_space(6.0);
         kv(ui, "frame", &frame_count.to_string());
         kv(ui, "fps", &format!("{:.1}", fps));
@@ -224,11 +252,56 @@ fn stats_card(ui: &mut egui::Ui, frame_count: u64, fps: f32, notifs: u64) {
     });
 }
 
-fn chatbox_card(ui: &mut egui::Ui, draft: &mut String) -> Option<rsoverlay_osc::ChatMessage> {
+fn appearance_card(
+    ui: &mut egui::Ui,
+    accent: &mut egui::Color32,
+    show_mirror: &mut bool,
+    show_media: &mut bool,
+    show_chat: &mut bool,
+) {
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::SETTINGS, "Appearance", *accent);
+        ui.add_space(6.0);
+        ui.label(theme::body_muted("Accent"));
+        ui.horizontal_wrapped(|ui| {
+            for (name, preset) in theme::ACCENT_PRESETS {
+                let selected = *accent == *preset;
+                let size = egui::vec2(22.0, 22.0);
+                let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+                let painter = ui.painter();
+                let center = rect.center();
+                painter.circle_filled(center, 9.0, *preset);
+                if selected {
+                    painter.circle_stroke(
+                        center,
+                        11.0,
+                        egui::Stroke::new(1.5_f32, theme::FG_PRIMARY),
+                    );
+                }
+                resp.on_hover_text(*name).clicked().then(|| *accent = *preset);
+            }
+        });
+        ui.add_space(8.0);
+        ui.label(theme::body_muted("Custom"));
+        ui.color_edit_button_srgba(accent);
+        ui.add_space(10.0);
+        ui.label(theme::body_muted("Cards"));
+        ui.checkbox(show_mirror, "Desktop mirror");
+        ui.checkbox(show_media, "Now playing");
+        ui.checkbox(show_chat, "VRChat chatbox");
+    });
+}
+
+fn chatbox_card(
+    ui: &mut egui::Ui,
+    draft: &mut String,
+    accent: egui::Color32,
+) -> Option<rsoverlay_osc::ChatMessage> {
     let mut result = None;
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        card_header(ui, icons::CHAT, "VRChat chatbox");
+        card_header(ui, icons::CHAT, "VRChat chatbox", accent);
         ui.add_space(6.0);
         let edit = ui.add(
             egui::TextEdit::singleline(draft)
@@ -237,7 +310,7 @@ fn chatbox_card(ui: &mut egui::Ui, draft: &mut String) -> Option<rsoverlay_osc::
         );
         let submit =
             (edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                || ui.button(egui::RichText::new("send").color(theme::ACCENT)).clicked();
+                || ui.button(egui::RichText::new("send").color(accent)).clicked();
         if submit && !draft.trim().is_empty() {
             result = Some(rsoverlay_osc::ChatMessage {
                 text: draft.clone(),
@@ -250,10 +323,10 @@ fn chatbox_card(ui: &mut egui::Ui, draft: &mut String) -> Option<rsoverlay_osc::
     result
 }
 
-fn forward_toggle(ui: &mut egui::Ui, on: &mut bool) {
+fn forward_toggle(ui: &mut egui::Ui, on: &mut bool, accent: egui::Color32) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        card_header(ui, icons::POINTER, "Input forwarding");
+        card_header(ui, icons::POINTER, "Input forwarding", accent);
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.checkbox(on, "");
@@ -279,11 +352,12 @@ fn mirror_card(
     ui: &mut egui::Ui,
     mirror: Option<MirrorHandle>,
     forward_input: bool,
+    accent: egui::Color32,
 ) -> Option<MirrorHit> {
     let mut hit = None;
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        card_header(ui, icons::MONITOR, "Desktop");
+        card_header(ui, icons::MONITOR, "Desktop", accent);
         ui.add_space(6.0);
         match mirror {
             Some(m) => {
@@ -329,11 +403,11 @@ fn fit(aspect: f32, max_w: f32, max_h: f32) -> (f32, f32) {
     }
 }
 
-fn toast_card(ui: &mut egui::Ui, n: &Notification) {
+fn toast_card(ui: &mut egui::Ui, n: &Notification, accent: egui::Color32) {
     theme::pill().show(ui, |ui| {
         ui.set_width(260.0);
         ui.horizontal(|ui| {
-            ui.add(icon(icons::BELL, 20.0));
+            ui.add(icon(icons::BELL, 20.0, accent));
             ui.add_space(6.0);
             ui.vertical(|ui| {
                 if !n.title.is_empty() {
