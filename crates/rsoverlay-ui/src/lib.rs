@@ -7,6 +7,7 @@ use egui_wgpu::{Renderer, ScreenDescriptor};
 use std::sync::Arc;
 
 pub mod media;
+pub mod theme;
 pub mod views;
 
 pub struct EguiPanel {
@@ -24,6 +25,7 @@ impl EguiPanel {
         // Default pixels-per-point so the UI reads at a reasonable size inside
         // a 1024x1024 overlay texture.
         ctx.set_pixels_per_point(1.5);
+        theme::install(&ctx);
         Self { ctx, renderer, width, height, ppp: 1.5 }
     }
 
@@ -61,9 +63,8 @@ impl EguiPanel {
                     view: target,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.08, g: 0.08, b: 0.10, a: 1.0,
-                        }),
+                        // BG_ROOT = pure black (AMOLED).
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
