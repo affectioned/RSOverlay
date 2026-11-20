@@ -6,6 +6,7 @@
 use egui_wgpu::{Renderer, ScreenDescriptor};
 use std::sync::Arc;
 
+pub mod media;
 pub mod views;
 
 pub struct EguiPanel {

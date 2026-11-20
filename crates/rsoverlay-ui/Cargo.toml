@@ -13,3 +13,11 @@ egui-wgpu.workspace = true
 wgpu.workspace = true
 rsoverlay-core.workspace = true
 rsoverlay-notify.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Foundation",
+    "Media_Control",
+    "Storage_Streams",
+] }
