@@ -33,7 +33,10 @@ mod imp {
     };
     use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
 
-    const TEX_SIZE: u32 = 512;
+    // See preview.rs OVERLAY_TEX_SIZE for the per-HMD sizing math — same
+    // rationale applies here, we're painting the texture the compositor
+    // samples onto the headset display.
+    const TEX_SIZE: u32 = 2048;
     const CLEAR_RGBA: [f32; 4] = [0.85, 0.07, 0.14, 1.0];
 
     pub fn run(_notify: Option<NotifyChannel>, rt: Handle) -> Result<()> {

@@ -104,6 +104,52 @@ Panels → `OverlayTarget` → presentation backend.
 - **No `unsafe`** outside FFI boundaries (`rsoverlay-openvr` and the Windows
   capture crates). Every `unsafe` block carries a `# Safety` comment.
 
+## Overlay texture sizing — the HMD math
+
+The overlay texture is a SteamVR-side resource that the compositor samples
+onto whatever screen-space region the physical quad occupies. The relevant
+quantity is **texels per display pixel** in that region. If that ratio
+drops below ~1.0 the quad visibly blurs; 1.5–2.0 is the comfortable zone.
+
+Reference case: a 1 m-wide overlay centered 2 m from the HMD. Horizontal
+angular coverage is `2·atan(0.5/2) ≈ 28°`. Dividing per-eye panel width
+(scaled by SteamVR's ~1.4× recommended render target) by that fraction of
+horizontal FOV gives the pixel budget to cover:
+
+| HMD | Per-eye panel | Rec. render target (1.4×) | Display px across 1 m @ 2 m |
+|---|---|---|---|
+| Valve Index | 1440×1600 | 2016×2240 | ~560 |
+| Quest 2 | 1832×1920 | 2560×2688 | ~720 |
+| Quest 3 | 2064×2208 | 2850×3056 | ~800 |
+| Quest Pro | 1800×1920 | 2520×2688 | ~705 |
+| Pico 4 | 2160×2160 | 3024×3024 | ~850 |
+| HTC Vive Pro 2 | 2448×2448 | 3427×3427 | ~960 |
+| Vive Focus 3 | 2448×2448 | 3427×3427 | ~960 |
+| Bigscreen Beyond | 2560×2560 | 3584×3584 | ~1005 |
+| Pimax Crystal | 2880×2880 | 4032×4032 | ~1130 |
+| Varjo Aero | 2880×2720 | 4320×4080 | ~1210 |
+
+Default overlay texture: **2048×2048**. Against the worst current retail
+case (~1200 display pixels) that's a 1.7× texel-to-pixel ratio — crisp
+with headroom to pull the overlay closer or size it up. Memory cost is
+`2048² × 4 = 16 MB` of GPU VRAM per overlay.
+
+Users on headsets we haven't listed (Crystal Super, XR-4, Simula) can set
+a larger value in `%APPDATA%\RSOverlay\config.toml`:
+
+```toml
+[render]
+overlay_texture_size = 2560  # or 3072
+```
+
+### Sub-pixel stroke caution
+
+OLED panels on Quest / Beyond / Crystal have sub-pixel RGB arrangements
+that aren't square. Any UI stroke thinner than ~2 physical pixels tends
+to chromatic-aberrate across the FOV. The icon set is authored with 3-5px
+strokes on 48-64px viewBoxes, which keeps every stroke above ~3 physical
+pixels even at the smallest card-header size.
+
 ## Cross-platform story
 
 The workspace is written so Linux support stays viable even though Windows is

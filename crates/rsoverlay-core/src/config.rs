@@ -20,6 +20,20 @@ pub struct Render {
     /// Preview window logical size. The overlay texture itself is independent.
     pub preview_window_width: u32,
     pub preview_window_height: u32,
+    /// Side length of the square overlay texture, in pixels.
+    ///
+    /// Sizing rule of thumb: for a 1 m-wide overlay at 2 m from the HMD,
+    /// the Pimax Crystal / Varjo Aero class of headsets will cover the
+    /// overlay with ≈1200 display pixels. A ratio of texels-to-display-
+    /// pixels of 1.5-2.0 is where SteamVR overlay sampling stays crisp.
+    ///
+    /// - 1024 — fine for Index / Quest 2 and mild oversampling
+    /// - **2048** (default) — safe across all current retail HMDs
+    /// - 2560 — Bigscreen Beyond, Pimax Crystal power users
+    /// - 3072 — Crystal Super, XR-4, Varjo XR-4 class
+    ///
+    /// Memory cost is `size × size × 4` bytes (BGRA8). 2048 = 16 MB.
+    pub overlay_texture_size: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -42,8 +56,9 @@ impl Default for Render {
     fn default() -> Self {
         Self {
             preview_vsync: true,
-            preview_window_width: 1024,
-            preview_window_height: 1024,
+            preview_window_width: 1200,
+            preview_window_height: 1200,
+            overlay_texture_size: 2048,
         }
     }
 }

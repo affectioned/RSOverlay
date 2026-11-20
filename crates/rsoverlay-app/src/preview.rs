@@ -37,10 +37,15 @@ use winit::{
     window::WindowBuilder,
 };
 
-/// Overlay texture resolution. Larger = more pixels per icon = less aliasing.
-/// 1536 is a sweet spot vs 1024: ~2.25× the pixel budget, still comfortably
-/// below a real-HMD per-eye overlay texture budget.
-const OVERLAY_TEX_SIZE: u32 = 1536;
+/// Overlay texture resolution.
+///
+/// Sized to stay crisp at ~1.5-2× texels-per-display-pixel on current retail
+/// HMDs for a 1 m-wide overlay at 2 m. The worst case we size for today is
+/// Pimax Crystal / Varjo Aero (~1200 display pixels across the quad). 2048
+/// gives a ~1.7× sampling ratio and ~16 MB of GPU memory — safe for every
+/// shipping headset through late-2026. Power users on Crystal Super / XR-4
+/// can override via `[render] overlay_texture_size` in config.toml.
+const OVERLAY_TEX_SIZE: u32 = 2048;
 const INITIAL_WIN_W: u32 = 1200;
 const INITIAL_WIN_H: u32 = 1200;
 
