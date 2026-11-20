@@ -1,0 +1,17 @@
+[package]
+name = "rsoverlay-openvr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+libloading = "0.8"
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Graphics_Direct3D11",
+    "Win32_Foundation",
+] }

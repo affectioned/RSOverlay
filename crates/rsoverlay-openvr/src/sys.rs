@@ -1,0 +1,87 @@
+//! Raw FFI types and bindings for OpenVR.
+//!
+//! Clean-room hand-rolled from the public headers (openvr_capi.h, openvr.h).
+//! We bind only the handful of entry points and interface methods we actually use.
+
+#![allow(non_snake_case, non_camel_case_types, non_upper_case_globals, dead_code)]
+
+use std::os::raw::{c_char, c_void};
+
+pub type EVRInitError = i32;
+pub type EVROverlayError = u32;
+pub type TrackedDeviceIndex_t = u32;
+pub type VROverlayHandle_t = u64;
+pub type EVRApplicationType = i32;
+
+pub const EVRApplicationType_Overlay: EVRApplicationType = 2;
+
+pub const EVRInitError_None: EVRInitError = 0;
+
+pub const EVROverlayError_None: EVROverlayError = 0;
+
+/// Tracking universe origin — standing room-scale frame.
+pub type ETrackingUniverseOrigin = i32;
+pub const ETrackingUniverseOrigin_Standing: ETrackingUniverseOrigin = 1;
+
+pub type ETextureType = i32;
+pub const ETextureType_DirectX: ETextureType = 0;
+pub const ETextureType_OpenGL: ETextureType = 1;
+pub const ETextureType_Vulkan: ETextureType = 2;
+pub const ETextureType_DXGISharedHandle: ETextureType = 5;
+
+pub type EColorSpace = i32;
+pub const EColorSpace_Auto: EColorSpace = 0;
+pub const EColorSpace_Gamma: EColorSpace = 1;
+pub const EColorSpace_Linear: EColorSpace = 2;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct HmdMatrix34_t {
+    pub m: [[f32; 4]; 3],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct Texture_t {
+    pub handle: *mut c_void,
+    pub eType: ETextureType,
+    pub eColorSpace: EColorSpace,
+}
+
+/// Opaque interface pointer. OpenVR returns a vtable-backed struct; we only ever
+/// treat it as an opaque pointer and reach into the vtable by offset via the
+/// generated wrapper struct below.
+#[repr(C)]
+pub struct IVROverlayFnTable {
+    pub FindOverlay: unsafe extern "system" fn(pchOverlayKey: *const c_char, pOverlayHandle: *mut VROverlayHandle_t) -> EVROverlayError,
+    pub CreateOverlay: unsafe extern "system" fn(pchOverlayKey: *const c_char, pchOverlayName: *const c_char, pOverlayHandle: *mut VROverlayHandle_t) -> EVROverlayError,
+    pub DestroyOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
+    pub _pad_01: [*const c_void; 24],
+    pub SetOverlayWidthInMeters: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fWidthInMeters: f32) -> EVROverlayError,
+    pub _pad_02: [*const c_void; 32],
+    pub SetOverlayTransformAbsolute: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, eTrackingOrigin: ETrackingUniverseOrigin, pMatTrackingOriginToOverlayTransform: *const HmdMatrix34_t) -> EVROverlayError,
+    pub _pad_03: [*const c_void; 20],
+    pub ShowOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
+    pub HideOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
+    pub _pad_04: [*const c_void; 8],
+    pub SetOverlayTexture: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, pTexture: *const Texture_t) -> EVROverlayError,
+    pub ClearOverlayTexture: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
+}
+
+// Note: real vtable layout is version-specific. The padding above is a placeholder
+// until we lock the OpenVR SDK version we target. In the real FFI we use the
+// `FnTable:IVROverlay_NNN` interface accessor from `VR_GetGenericInterface`,
+// which returns a stable function-pointer table defined per-version.
+//
+// For this scaffold we deliberately use the stable FnTable path, which OpenVR
+// guarantees per interface-version string. The accessor pattern:
+//   let p = VR_GetGenericInterface(b"FnTable:IVROverlay_024\0", &mut err);
+// returns a *const IVROverlay_FnTable where every field is a function pointer
+// in the exact order declared in openvr_capi.h. The full vtable is wired in
+// src/overlay.rs once we pin the SDK version in the build script.
+
+pub type FnVR_InitInternal = unsafe extern "system" fn(peError: *mut EVRInitError, eType: EVRApplicationType) -> isize;
+pub type FnVR_ShutdownInternal = unsafe extern "system" fn();
+pub type FnVR_IsHmdPresent = unsafe extern "system" fn() -> bool;
+pub type FnVR_IsRuntimeInstalled = unsafe extern "system" fn() -> bool;
+pub type FnVR_GetGenericInterface = unsafe extern "system" fn(pchInterfaceVersion: *const c_char, peError: *mut EVRInitError) -> *mut c_void;
