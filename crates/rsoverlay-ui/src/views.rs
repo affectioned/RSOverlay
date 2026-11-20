@@ -179,7 +179,7 @@ fn clock_card(ui: &mut egui::Ui, accent: egui::Color32) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
-            ui.add(icon(icons::BRAND, 44.0, accent));
+            ui.add(icon(icons::BRAND, 56.0, accent));
             ui.add_space(14.0);
             ui.label(theme::headline(&time));
             ui.add_space(16.0);
@@ -188,8 +188,8 @@ fn clock_card(ui: &mut egui::Ui, accent: egui::Color32) {
             ui.vertical(|ui| {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    ui.add(icon(icons::CLOCK, 14.0, accent));
-                    ui.add_space(4.0);
+                    ui.add(icon(icons::CLOCK, 18.0, accent));
+                    ui.add_space(6.0);
                     ui.label(theme::caption("RSOverlay"));
                 });
                 ui.label(theme::body_muted(&date));
@@ -213,10 +213,10 @@ fn media_card(ui: &mut egui::Ui, info: Option<&MediaInfo>, accent: egui::Color32
                 ui.horizontal(|ui| {
                     ui.add(icon(
                         if m.playing { icons::PLAY } else { icons::PAUSE },
-                        14.0,
+                        18.0,
                         accent,
                     ));
-                    ui.add_space(4.0);
+                    ui.add_space(6.0);
                     ui.label(theme::body_muted(if m.playing { "playing" } else { "paused" }));
                 });
             }
@@ -234,8 +234,8 @@ fn card_header(
     accent: egui::Color32,
 ) {
     ui.horizontal(|ui| {
-        ui.add(icon(source, 14.0, accent));
-        ui.add_space(4.0);
+        ui.add(icon(source, 18.0, accent));
+        ui.add_space(6.0);
         ui.label(theme::caption(label));
     });
 }
@@ -407,8 +407,8 @@ fn toast_card(ui: &mut egui::Ui, n: &Notification, accent: egui::Color32) {
     theme::pill().show(ui, |ui| {
         ui.set_width(260.0);
         ui.horizontal(|ui| {
-            ui.add(icon(icons::BELL, 20.0, accent));
-            ui.add_space(6.0);
+            ui.add(icon(icons::BELL, 26.0, accent));
+            ui.add_space(8.0);
             ui.vertical(|ui| {
                 if !n.title.is_empty() {
                     ui.label(theme::card_title(&n.title));

@@ -36,9 +36,14 @@ impl GpuCtx {
         } else {
             Backends::PRIMARY
         };
+        // Default off: the Vulkan validation layers + D3D12 debug layer dump
+        // thousands of lines per run on dev machines that have the SDK
+        // installed, and almost all of it is wgpu-0.19-known quirks (present
+        // mode enum unknowns, swapchain-semaphore reuse warnings, fence-zero
+        // waits). Opt back in with `WGPU_DEBUG=1` / `WGPU_VALIDATION=1`.
         let instance = wgpu::Instance::new(InstanceDescriptor {
             backends,
-            flags: InstanceFlags::default(),
+            flags: InstanceFlags::empty().with_env(),
             dx12_shader_compiler: wgpu::Dx12Compiler::Fxc,
             gles_minor_version: wgpu::Gles3MinorVersion::Automatic,
         });

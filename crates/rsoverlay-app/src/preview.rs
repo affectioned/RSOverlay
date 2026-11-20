@@ -37,9 +37,12 @@ use winit::{
     window::WindowBuilder,
 };
 
-const OVERLAY_TEX_SIZE: u32 = 1024;
-const INITIAL_WIN_W: u32 = 1024;
-const INITIAL_WIN_H: u32 = 1024;
+/// Overlay texture resolution. Larger = more pixels per icon = less aliasing.
+/// 1536 is a sweet spot vs 1024: ~2.25× the pixel budget, still comfortably
+/// below a real-HMD per-eye overlay texture budget.
+const OVERLAY_TEX_SIZE: u32 = 1536;
+const INITIAL_WIN_W: u32 = 1200;
+const INITIAL_WIN_H: u32 = 1200;
 
 pub fn run(
     mut notify: Option<NotifyChannel>,
