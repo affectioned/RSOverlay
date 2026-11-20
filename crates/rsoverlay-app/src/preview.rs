@@ -59,6 +59,7 @@ pub fn run(
         WindowBuilder::new()
             .with_title("RSOverlay — Preview")
             .with_inner_size(winit::dpi::LogicalSize::new(INITIAL_WIN_W, INITIAL_WIN_H))
+            .with_min_inner_size(winit::dpi::LogicalSize::new(900u32, 760u32))
             .build(&event_loop)
             .context("creating preview window")?,
     );

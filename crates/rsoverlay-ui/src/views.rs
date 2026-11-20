@@ -122,31 +122,48 @@ impl DevView {
                 ui.add_space(theme::GUTTER);
                 clock_card(ui, accent);
                 ui.add_space(theme::GUTTER);
+                // Content row: left column scrolls so its cards are always
+                // reachable even when the window is short. Right column holds
+                // the mirror, which sizes itself to the remaining width.
+                let row_height = ui.available_height();
                 ui.horizontal_top(|ui| {
-                    ui.vertical(|ui| {
-                        ui.set_width(theme::COL_LEFT_WIDTH);
-                        if self.show_media {
-                            media_card(ui, self.media.as_ref(), accent);
-                            ui.add_space(theme::GUTTER);
-                        }
-                        stats_card(ui, self.frame, self.last_fps, self.notifications_received, accent);
-                        ui.add_space(theme::GUTTER);
-                        forward_toggle(ui, &mut self.forward_input, accent);
-                        ui.add_space(theme::GUTTER);
-                        if self.show_chat {
-                            if let Some(msg) = chatbox_card(ui, &mut self.chat_draft, accent) {
-                                self.pending_chat = Some(msg);
+                    egui::ScrollArea::vertical()
+                        .id_source("left-col-scroll")
+                        .max_height(row_height)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_width(theme::COL_LEFT_WIDTH);
+                            if self.show_media {
+                                media_card(ui, self.media.as_ref(), accent);
+                                ui.add_space(theme::GUTTER);
                             }
+                            stats_card(
+                                ui,
+                                self.frame,
+                                self.last_fps,
+                                self.notifications_received,
+                                accent,
+                            );
                             ui.add_space(theme::GUTTER);
-                        }
-                        appearance_card(
-                            ui,
-                            &mut self.accent,
-                            &mut self.show_mirror,
-                            &mut self.show_media,
-                            &mut self.show_chat,
-                        );
-                    });
+                            forward_toggle(ui, &mut self.forward_input, accent);
+                            ui.add_space(theme::GUTTER);
+                            if self.show_chat {
+                                if let Some(msg) =
+                                    chatbox_card(ui, &mut self.chat_draft, accent)
+                                {
+                                    self.pending_chat = Some(msg);
+                                }
+                                ui.add_space(theme::GUTTER);
+                            }
+                            appearance_card(
+                                ui,
+                                &mut self.accent,
+                                &mut self.show_mirror,
+                                &mut self.show_media,
+                                &mut self.show_chat,
+                            );
+                            ui.add_space(theme::GUTTER);
+                        });
                     ui.add_space(theme::GUTTER);
                     if self.show_mirror {
                         ui.vertical(|ui| {
