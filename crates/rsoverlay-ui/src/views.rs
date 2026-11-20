@@ -3,6 +3,7 @@
 //! Visual language: Terminal Brutalist chassis + Spatial Glass-Lite cards.
 //! Tokens live in `theme::*`; no hardcoded colors in this module.
 
+use crate::icons::{self, icon};
 use crate::media::{self, MediaInfo};
 use crate::theme;
 use chrono::{Local, Timelike};
@@ -159,6 +160,8 @@ fn clock_card(ui: &mut egui::Ui) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
+            ui.add(icon(icons::BRAND, 44.0));
+            ui.add_space(14.0);
             ui.label(theme::headline(&time));
             ui.add_space(16.0);
             ui.separator();
@@ -166,7 +169,8 @@ fn clock_card(ui: &mut egui::Ui) {
             ui.vertical(|ui| {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    ui.label(theme::accent_dot());
+                    ui.add(icon(icons::CLOCK, 14.0));
+                    ui.add_space(4.0);
                     ui.label(theme::caption("RSOverlay"));
                 });
                 ui.label(theme::body_muted(&date));
@@ -178,7 +182,7 @@ fn clock_card(ui: &mut egui::Ui) {
 fn media_card(ui: &mut egui::Ui, info: Option<&MediaInfo>) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.label(theme::caption("Now playing"));
+        card_header(ui, icons::PULSE, "Now playing");
         ui.add_space(6.0);
         match info {
             Some(m) if !m.title.is_empty() => {
@@ -187,10 +191,10 @@ fn media_card(ui: &mut egui::Ui, info: Option<&MediaInfo>) {
                     ui.label(theme::body_muted(&m.artist));
                 }
                 ui.add_space(6.0);
-                let state = if m.playing { "▶  playing" } else { "⏸  paused" };
                 ui.horizontal(|ui| {
-                    ui.label(theme::accent_dot());
-                    ui.label(theme::body_muted(state));
+                    ui.add(icon(if m.playing { icons::PLAY } else { icons::PAUSE }, 14.0));
+                    ui.add_space(4.0);
+                    ui.label(theme::body_muted(if m.playing { "playing" } else { "paused" }));
                 });
             }
             _ => {
@@ -200,10 +204,18 @@ fn media_card(ui: &mut egui::Ui, info: Option<&MediaInfo>) {
     });
 }
 
+fn card_header(ui: &mut egui::Ui, source: egui::ImageSource<'static>, label: &str) {
+    ui.horizontal(|ui| {
+        ui.add(icon(source, 14.0));
+        ui.add_space(4.0);
+        ui.label(theme::caption(label));
+    });
+}
+
 fn stats_card(ui: &mut egui::Ui, frame_count: u64, fps: f32, notifs: u64) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.label(theme::caption("Stats"));
+        card_header(ui, icons::SETTINGS, "Stats");
         ui.add_space(6.0);
         kv(ui, "frame", &frame_count.to_string());
         kv(ui, "fps", &format!("{:.1}", fps));
@@ -216,7 +228,7 @@ fn chatbox_card(ui: &mut egui::Ui, draft: &mut String) -> Option<rsoverlay_osc::
     let mut result = None;
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.label(theme::caption("VRChat chatbox"));
+        card_header(ui, icons::CHAT, "VRChat chatbox");
         ui.add_space(6.0);
         let edit = ui.add(
             egui::TextEdit::singleline(draft)
@@ -241,7 +253,7 @@ fn chatbox_card(ui: &mut egui::Ui, draft: &mut String) -> Option<rsoverlay_osc::
 fn forward_toggle(ui: &mut egui::Ui, on: &mut bool) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.label(theme::caption("Input forwarding"));
+        card_header(ui, icons::POINTER, "Input forwarding");
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.checkbox(on, "");
@@ -271,7 +283,7 @@ fn mirror_card(
     let mut hit = None;
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.label(theme::caption("Desktop"));
+        card_header(ui, icons::MONITOR, "Desktop");
         ui.add_space(6.0);
         match mirror {
             Some(m) => {
@@ -320,19 +332,20 @@ fn fit(aspect: f32, max_w: f32, max_h: f32) -> (f32, f32) {
 fn toast_card(ui: &mut egui::Ui, n: &Notification) {
     theme::pill().show(ui, |ui| {
         ui.set_width(260.0);
-        ui.vertical(|ui| {
-            if !n.title.is_empty() {
-                ui.horizontal(|ui| {
-                    ui.label(theme::accent_dot());
+        ui.horizontal(|ui| {
+            ui.add(icon(icons::BELL, 20.0));
+            ui.add_space(6.0);
+            ui.vertical(|ui| {
+                if !n.title.is_empty() {
                     ui.label(theme::card_title(&n.title));
-                });
-            }
-            if !n.content.is_empty() {
-                ui.label(theme::body(&n.content));
-            }
-            if !n.source_app.is_empty() {
-                ui.label(theme::caption(&n.source_app));
-            }
+                }
+                if !n.content.is_empty() {
+                    ui.label(theme::body(&n.content));
+                }
+                if !n.source_app.is_empty() {
+                    ui.label(theme::caption(&n.source_app));
+                }
+            });
         });
     });
 }

@@ -6,6 +6,7 @@
 use egui_wgpu::{Renderer, ScreenDescriptor};
 use std::sync::Arc;
 
+pub mod icons;
 pub mod media;
 pub mod theme;
 pub mod views;
@@ -26,6 +27,7 @@ impl EguiPanel {
         // a 1024x1024 overlay texture.
         ctx.set_pixels_per_point(1.5);
         theme::install(&ctx);
+        icons::install_loaders(&ctx);
         Self { ctx, renderer, width, height, ppp: 1.5 }
     }
 

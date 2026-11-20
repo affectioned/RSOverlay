@@ -10,6 +10,7 @@ anyhow.workspace = true
 tracing.workspace = true
 egui.workspace = true
 egui-wgpu.workspace = true
+egui_extras.workspace = true
 wgpu.workspace = true
 rsoverlay-core.workspace = true
 rsoverlay-notify.workspace = true
