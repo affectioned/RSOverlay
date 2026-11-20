@@ -27,18 +27,21 @@ Unity player.
 
 | Tier | Feature | Status |
 |------|---------|--------|
-| P0 | OpenVR overlay registration + texture submission | scaffolded |
-| P0 | Desktop & window mirror (DXGI DDA + WGC) | scaffolded |
-| P0 | Laser pointer + virtual keyboard | scaffolded |
-| P0 | Panel grab / resize / anchor (wrist, HMD, world) | scaffolded |
 | **P0** | **Desktop preview mode (no HMD required)** | **working** |
-| P1 | XSOverlay-compatible websocket API (`127.0.0.1:42069`) | schema done |
-| P1 | Toast notifications with icons | planned |
-| P1 | Media controls (SMTC) | planned |
+| **P0** | **OpenVR overlay registration + texture submission (D3D11)** | **working** |
+| **P0** | **Desktop mirror (DXGI Desktop Duplication)** | **working** |
+| **P0** | **Input injection (`SendInput`, mirror → real desktop)** | **working** |
+| P0 | Window mirror (Windows Graphics Capture) | planned |
+| P0 | Virtual keyboard | planned |
+| P0 | Panel grab / resize / anchor (wrist, HMD, world) | planned |
+| **P1** | **XSOverlay-compatible websocket API (`127.0.0.1:42069`)** | **working** |
+| **P1** | **Toast notifications (XSOverlay JSON compat)** | **working** |
+| **P1** | **Media controls — now-playing via SMTC** | **working** (read-only) |
+| **P1** | **VRChat OSC chatbox (`/chatbox/input`)** | **working** |
 | P1 | Wrist / radial menu | planned |
-| P1 | VRChat OSC chatbox | planned |
+| **P2** | **Clock / stats widget** | **working** |
 | P2 | `wry` WebView2 browser overlay (opt-in) | planned |
-| P2 | Clock / battery / stats widget | planned |
+| P2 | Battery / controller stats | planned |
 | P2 | Discord / OBS bridges | planned |
 | P2 | Hotkeys (global + VR controller) | planned |
 | P2 | WASM plugin API (`wasmtime` only, never dylib loading) | planned |
@@ -72,9 +75,30 @@ Iterate here, verify in VR once per milestone.
 cargo run -p rsoverlay-app -- --vr
 ```
 
-Requires a running SteamVR compositor + HMD. Current milestone registers the
-overlay at (0, 1.5, -2) in standing-universe space; texture submission lands
-next milestone.
+Requires a running SteamVR compositor + HMD. Current milestone: a solid-red
+BGRA texture is submitted to the overlay at (0, 1.5, -2) in standing-universe
+space. Richer rendering (egui dashboard in VR) is gated behind the
+wgpu → DXGI shared-handle interop milestone.
+
+### Test the notification server
+
+```bash
+# From an elevated / regular PowerShell:
+.\tools\send-toast.ps1 -Title "Build green" -Content "cargo clippy clean"
+```
+
+### Common flags
+
+```
+--preview / --vr             mode (default: --preview)
+--list-monitors              print monitors and exit
+--monitor <idx>              which monitor to mirror (default 0)
+--no-mirror                  disable desktop capture
+--notify-bind <addr>         notification server bind (default 127.0.0.1:42069)
+--no-notify                  disable the notification server
+--osc-addr <addr>            VRChat OSC input address (default 127.0.0.1:9000)
+--no-osc                     disable the OSC sender
+```
 
 ## Performance targets
 
