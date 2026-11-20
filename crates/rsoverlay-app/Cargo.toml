@@ -31,4 +31,9 @@ winit = { version = "0.29", features = ["rwh_06"] }
 
 [target.'cfg(windows)'.dependencies]
 rsoverlay-openvr.workspace = true
-windows = { workspace = true }
+windows = { workspace = true, features = [
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+] }
