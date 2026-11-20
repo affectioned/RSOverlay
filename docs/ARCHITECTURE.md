@@ -104,6 +104,31 @@ Panels → `OverlayTarget` → presentation backend.
 - **No `unsafe`** outside FFI boundaries (`rsoverlay-openvr` and the Windows
   capture crates). Every `unsafe` block carries a `# Safety` comment.
 
+## Cross-platform story
+
+The workspace is written so Linux support stays viable even though Windows is
+the primary target. Compiling on Linux today produces a working **preview**
+binary (window + egui + OSC + notifications). Platform-specific features gate
+cleanly:
+
+| Crate | Windows | Linux | Why |
+|-------|---------|-------|-----|
+| `rsoverlay-core` | ✅ | ✅ | pure types |
+| `rsoverlay-render` | ✅ | ✅ | wgpu is cross-platform (DX12 / Vulkan / GL) |
+| `rsoverlay-ui` | ✅ | ✅ | egui + chrono; SMTC `media::poll` stubs to `None` on non-Windows |
+| `rsoverlay-notify` | ✅ | ✅ | tokio + tungstenite; portable |
+| `rsoverlay-osc` | ✅ | ✅ | UDP only |
+| `rsoverlay-capture` | ✅ | stub | DXGI Desktop Duplication is Windows-only. Linux needs a PipeWire screencast backend via xdg-desktop-portal. |
+| `rsoverlay-input` | ✅ | stub | `SendInput`. Linux needs uinput or ydotool. |
+| `rsoverlay-openvr` | ✅ | ⚠ | OpenVR has Linux builds of `libopenvr_api.so`, and the FFI already loads by platform-specific filename. Untested end-to-end on Linux. |
+| `rsoverlay-app` | ✅ | ✅ | `cfg(windows)` gates the VR-mode D3D11 submission; Linux build will have Preview but `--vr` will err until the Linux submission path lands. |
+
+Minimum Linux milestones to reach parity with Windows:
+1. PipeWire screencast capture backend in `rsoverlay-capture`.
+2. uinput / libei input injection in `rsoverlay-input`.
+3. Linux OpenVR submission path in `rsoverlay-app/vr.rs` (OpenGL texture via
+   `ETextureType_OpenGL` is simplest — avoids Vulkan interop complexity).
+
 ## Clean-room notes
 
 - OpenVR FFI is hand-rolled from the public C ABI (`openvr_capi.h`) and the
