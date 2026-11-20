@@ -2,14 +2,20 @@
 //!
 //! Opens a winit window, builds a wgpu surface on it, and runs the same panel
 //! render pipeline the VR path uses. The overlay texture is rendered
-//! offscreen into an [`OverlayTarget`] and then blitted onto the window via a
-//! fullscreen-triangle pass. This matches the VR flow one-to-one; only the
-//! final presentation step differs.
+//! offscreen into an [`OverlayTarget`] via egui-wgpu and then blitted onto the
+//! window via a fullscreen-triangle pass. This matches the VR flow one-to-one;
+//! only the final presentation step differs.
+//!
+//! Window events are forwarded to `egui-winit` so the UI inside the overlay
+//! responds to the cursor exactly the way VR laser-pointer input will
+//! eventually drive it.
 
 use anyhow::{Context, Result};
-use rsoverlay_core::{Panel, RuntimeMode};
-use rsoverlay_render::{panel_view, GpuCtx, OverlayTarget};
+use rsoverlay_core::RuntimeMode;
+use rsoverlay_render::{GpuCtx, OverlayTarget};
+use rsoverlay_ui::{views::DevView, EguiPanel};
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::{info, warn};
 use winit::{
     event::{Event, WindowEvent},
@@ -65,54 +71,81 @@ pub fn run() -> Result<()> {
     // Blit pipeline: fullscreen triangle samples the overlay texture.
     let blit = BlitPipeline::new(&gpu.device, &overlay_target, surface_format);
 
-    // P0 test panel: a solid red square.
-    let panel = Panel::solid(0, [217, 18, 36, 255]);
+    // egui panel drawing into the overlay target.
+    let mut egui_panel = EguiPanel::new(
+        &gpu.device,
+        overlay_target.format,
+        overlay_target.width,
+        overlay_target.height,
+    );
+    let mut egui_winit = egui_winit::State::new(
+        egui_panel.ctx.clone(),
+        egui::ViewportId::ROOT,
+        &*window,
+        Some(window.scale_factor() as f32),
+        None,
+    );
+    let mut dev_view = DevView::default();
+    let mut fps_counter = FpsCounter::new();
 
     info!("preview window up — close window or press Esc to exit");
 
     event_loop.set_control_flow(ControlFlow::Poll);
     event_loop.run(move |event, elwt| {
         match event {
-            Event::WindowEvent { event, window_id } if window_id == window.id() => match event {
-                WindowEvent::CloseRequested => elwt.exit(),
-                WindowEvent::KeyboardInput { event, .. } => {
-                    if event.state == winit::event::ElementState::Pressed
-                        && event.logical_key == Key::Named(NamedKey::Escape)
-                    {
-                        elwt.exit();
+            Event::WindowEvent { event, window_id } if window_id == window.id() => {
+                // Forward to egui first so the UI gets input.
+                let _ = egui_winit.on_window_event(&window, &event);
+                match event {
+                    WindowEvent::CloseRequested => elwt.exit(),
+                    WindowEvent::KeyboardInput { event, .. } => {
+                        if event.state == winit::event::ElementState::Pressed
+                            && event.logical_key == Key::Named(NamedKey::Escape)
+                        {
+                            elwt.exit();
+                        }
                     }
-                }
-                WindowEvent::Resized(new_size) => {
-                    config.width = new_size.width.max(1);
-                    config.height = new_size.height.max(1);
-                    surface.configure(&gpu.device, &config);
-                }
-                WindowEvent::RedrawRequested => {
-                    // 1. Render the overlay texture (what VR mode will submit).
-                    panel_view::render_panel(&gpu, &overlay_target, &panel);
+                    WindowEvent::Resized(new_size) => {
+                        config.width = new_size.width.max(1);
+                        config.height = new_size.height.max(1);
+                        surface.configure(&gpu.device, &config);
+                    }
+                    WindowEvent::RedrawRequested => {
+                        // 1. Run egui into the overlay target.
+                        dev_view.frame = dev_view.frame.wrapping_add(1);
+                        dev_view.last_fps = fps_counter.tick();
+                        let raw_input = egui_winit.take_egui_input(&window);
+                        egui_panel.render(
+                            &gpu.device,
+                            &gpu.queue,
+                            &overlay_target.view,
+                            raw_input,
+                            |ctx| dev_view.ui(ctx),
+                        );
 
-                    // 2. Present it into the preview window.
-                    let frame = match surface.get_current_texture() {
-                        Ok(f) => f,
-                        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                            surface.configure(&gpu.device, &config);
-                            return;
-                        }
-                        Err(e) => {
-                            warn!("surface error: {e:?}");
-                            return;
-                        }
-                    };
-                    let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-                    let mut enc = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("preview-blit-encoder"),
-                    });
-                    blit.record(&mut enc, &view);
-                    gpu.queue.submit(Some(enc.finish()));
-                    frame.present();
+                        // 2. Blit the overlay target into the window.
+                        let frame = match surface.get_current_texture() {
+                            Ok(f) => f,
+                            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                                surface.configure(&gpu.device, &config);
+                                return;
+                            }
+                            Err(e) => {
+                                warn!("surface error: {e:?}");
+                                return;
+                            }
+                        };
+                        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+                        let mut enc = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("preview-blit-encoder"),
+                        });
+                        blit.record(&mut enc, &view);
+                        gpu.queue.submit(Some(enc.finish()));
+                        frame.present();
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             Event::AboutToWait => {
                 window.request_redraw();
             }
@@ -120,6 +153,29 @@ pub fn run() -> Result<()> {
         }
     })?;
     Ok(())
+}
+
+/// Rolling FPS counter — one sample per second.
+struct FpsCounter {
+    last_sample: Instant,
+    frames: u32,
+    cached: f32,
+}
+
+impl FpsCounter {
+    fn new() -> Self {
+        Self { last_sample: Instant::now(), frames: 0, cached: 0.0 }
+    }
+    fn tick(&mut self) -> f32 {
+        self.frames += 1;
+        let elapsed = self.last_sample.elapsed().as_secs_f32();
+        if elapsed >= 0.5 {
+            self.cached = self.frames as f32 / elapsed;
+            self.frames = 0;
+            self.last_sample = Instant::now();
+        }
+        self.cached
+    }
 }
 
 /// Fullscreen-triangle blit of a sampled texture onto the swapchain view.

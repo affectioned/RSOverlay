@@ -1,2 +1,85 @@
-//! egui panels rendered into overlay textures. Scaffolding only; egui wiring
-//! lands with the first real UI panel.
+//! egui-backed UI for RSOverlay panels.
+//!
+//! One [`EguiPanel`] renders an egui scene into a wgpu texture view — the
+//! same `OverlayTarget` the renderer hands to OpenVR / the preview blit.
+
+use egui_wgpu::{Renderer, ScreenDescriptor};
+use std::sync::Arc;
+
+pub mod views;
+
+pub struct EguiPanel {
+    pub ctx: egui::Context,
+    renderer: Renderer,
+    width: u32,
+    height: u32,
+    ppp: f32,
+}
+
+impl EguiPanel {
+    pub fn new(device: &wgpu::Device, output_format: wgpu::TextureFormat, width: u32, height: u32) -> Self {
+        let renderer = Renderer::new(device, output_format, None, 1);
+        let ctx = egui::Context::default();
+        // Default pixels-per-point so the UI reads at a reasonable size inside
+        // a 1024x1024 overlay texture.
+        ctx.set_pixels_per_point(1.5);
+        Self { ctx, renderer, width, height, ppp: 1.5 }
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.width = width;
+        self.height = height;
+    }
+
+    /// Run a frame of egui and encode its render into the given texture view.
+    pub fn render<F: FnOnce(&egui::Context)>(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        target: &wgpu::TextureView,
+        raw_input: egui::RawInput,
+        build_ui: F,
+    ) {
+        let output = self.ctx.run(raw_input, build_ui);
+        let clipped = self.ctx.tessellate(output.shapes, output.pixels_per_point);
+        let desc = ScreenDescriptor {
+            size_in_pixels: [self.width, self.height],
+            pixels_per_point: self.ppp,
+        };
+        for (id, image_delta) in &output.textures_delta.set {
+            self.renderer.update_texture(device, queue, *id, image_delta);
+        }
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("egui-encoder"),
+        });
+        self.renderer.update_buffers(device, queue, &mut enc, &clipped, &desc);
+        {
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("egui-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.08, g: 0.08, b: 0.10, a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            self.renderer.render(&mut pass, &clipped, &desc);
+        }
+        for id in &output.textures_delta.free {
+            self.renderer.free_texture(id);
+        }
+        queue.submit(Some(enc.finish()));
+    }
+}
+
+/// Avoid leaking the wgpu `Arc<Device>` type through the public API by taking
+/// it by reference above. Shared types live in `rsoverlay-core`.
+#[allow(dead_code)]
+type _Phantom = Arc<()>;

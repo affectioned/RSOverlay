@@ -43,6 +43,9 @@ toml = "0.8"
 wgpu = "0.19"
 pollster = "0.3"
 raw-window-handle = "0.6"
+egui = "0.26"
+egui-wgpu = "0.26"
+egui-winit = "0.26"
 
 # Windows
 windows = { version = "0.52", features = [
@@ -64,6 +67,7 @@ rsoverlay-notify = { path = "crates/rsoverlay-notify" }
 rsoverlay-render = { path = "crates/rsoverlay-render" }
 rsoverlay-input  = { path = "crates/rsoverlay-input" }
 rsoverlay-ui     = { path = "crates/rsoverlay-ui" }
+rsoverlay-app    = { path = "crates/rsoverlay-app" }
 
 [profile.release]
 opt-level = 3

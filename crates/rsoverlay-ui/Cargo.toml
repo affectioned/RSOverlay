@@ -8,3 +8,7 @@ authors.workspace = true
 [dependencies]
 anyhow.workspace = true
 tracing.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+wgpu.workspace = true
+rsoverlay-core.workspace = true
