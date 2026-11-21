@@ -215,6 +215,15 @@ pub fn run(
 
                     frame.present();
 
+                    if dev_view.reset_requested {
+                        let base = rsoverlay_core::Config::default();
+                        crate::preview::seed_dev_view(
+                            &mut dev_view,
+                            &base,
+                            &crate::preview::TestHooks::default(),
+                        );
+                        dev_view.reset_requested = false;
+                    }
                     let current = crate::preview::config_from_dev_view(&dev_view, &config_base);
                     persister.tick(&current);
 

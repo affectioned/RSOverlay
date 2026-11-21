@@ -696,6 +696,15 @@ pub fn run(
 
                         frame.present();
 
+                        // "Reset defaults" clicked: snap DevView back to
+                        // pristine state. Persistence tick on the next
+                        // line notices the drift and writes that out.
+                        if dev_view.reset_requested {
+                            let base = rsoverlay_core::Config::default();
+                            seed_dev_view(&mut dev_view, &base, &TestHooks::default());
+                            dev_view.reset_requested = false;
+                        }
+
                         // Persist state changes (debounced inside the
                         // persister). Slider/toggle writes land on disk
                         // ~400ms after the last change.

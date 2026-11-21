@@ -107,6 +107,9 @@ pub struct DevView {
     pub show_chat: bool,
     pub show_keyboard: bool,
     pub show_history: bool,
+    /// Set to true when the user clicks "Reset defaults" in the
+    /// Appearance card. The main loop consumes it on the next tick.
+    pub reset_requested: bool,
     /// Spatial placement of the overlay quad. The VR preview reads
     /// this every frame to position the quad; VR mode will too.
     pub placement: Placement,
@@ -134,6 +137,7 @@ impl Default for DevView {
             show_chat: true,
             show_keyboard: false,
             show_history: false,
+            reset_requested: false,
             placement: Placement::default(),
             keyboard: crate::keyboard::Keyboard::default(),
             pending_hit: None,
@@ -260,7 +264,7 @@ impl DevView {
                             }
                             ui.add_space(theme::GUTTER);
                         }
-                        appearance_card(
+                        if appearance_card(
                             ui,
                             &mut self.accent,
                             &mut self.show_mirror,
@@ -268,7 +272,9 @@ impl DevView {
                             &mut self.show_chat,
                             &mut self.show_keyboard,
                             &mut self.show_history,
-                        );
+                        ) {
+                            self.reset_requested = true;
+                        }
                         ui.add_space(theme::GUTTER);
                         placement_card(ui, &mut self.placement, accent);
                     });
@@ -554,6 +560,8 @@ fn relative_time(d: Duration) -> String {
     }
 }
 
+/// Returns `true` when the user clicked the "Reset defaults" button —
+/// the caller resets its DevView to defaults + re-saves config.
 fn appearance_card(
     ui: &mut egui::Ui,
     accent: &mut egui::Color32,
@@ -562,10 +570,30 @@ fn appearance_card(
     show_chat: &mut bool,
     show_keyboard: &mut bool,
     show_history: &mut bool,
-) {
+) -> bool {
+    let mut reset_clicked = false;
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        card_header(ui, icons::SETTINGS, "Appearance", *accent);
+        ui.horizontal(|ui| {
+            card_header(ui, icons::SETTINGS, "Appearance", *accent);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let btn = egui::Button::new(
+                    egui::RichText::new("Reset defaults")
+                        .color(theme::FG_MUTED)
+                        .size(theme::SIZE_CAPTION)
+                        .extra_letter_spacing(1.0),
+                );
+                if ui
+                    .add(btn)
+                    .on_hover_text(
+                        "Clear accent, placement, card toggles back to defaults",
+                    )
+                    .clicked()
+                {
+                    reset_clicked = true;
+                }
+            });
+        });
         ui.add_space(6.0);
         // One row: all accent swatches + custom color picker, inline.
         ui.horizontal_wrapped(|ui| {
@@ -597,6 +625,7 @@ fn appearance_card(
             ui.checkbox(show_history, "History");
         });
     });
+    reset_clicked
 }
 
 fn chatbox_card(
