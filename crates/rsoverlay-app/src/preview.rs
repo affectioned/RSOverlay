@@ -102,11 +102,18 @@ pub fn run(
     };
     surface.configure(&gpu.device, &config);
 
-    // The overlay texture — same type/role as the one we would hand to OpenVR.
-    let overlay_target = OverlayTarget::new(&gpu, OVERLAY_TEX_SIZE, OVERLAY_TEX_SIZE);
+    // In preview mode we size the overlay texture to match the window
+    // surface so blit is 1:1 — this means mouse clicks and egui's
+    // rendered widgets agree in coordinates (no non-uniform stretch).
+    // In VR mode a separate code path pins the overlay to the
+    // HMD-tuned OVERLAY_TEX_SIZE; the preview just needs
+    // input/render consistency.
+    let mut overlay_target =
+        OverlayTarget::new(&gpu, size.width.max(1), size.height.max(1));
+    let _ = OVERLAY_TEX_SIZE;
 
     // Blit pipeline: fullscreen triangle samples the overlay texture.
-    let blit = BlitPipeline::new(&gpu.device, &overlay_target, surface_format);
+    let mut blit = BlitPipeline::new(&gpu.device, &overlay_target, surface_format);
 
     // egui panel drawing into the overlay target.
     let mut egui_panel = EguiPanel::new(
@@ -115,11 +122,15 @@ pub fn run(
         overlay_target.width,
         overlay_target.height,
     );
+    // native_pixels_per_point = None so egui-winit reads from
+    // ctx.pixels_per_point() each frame. Combined with overlay_target
+    // tracking window size 1:1 this keeps mouse hit-testing aligned
+    // with egui's rendered widget positions.
     let mut egui_winit = egui_winit::State::new(
         egui_panel.ctx.clone(),
         egui::ViewportId::ROOT,
         &*window,
-        Some(window.scale_factor() as f32),
+        None,
         None,
     );
     let mut dev_view = DevView::default();
@@ -216,6 +227,18 @@ pub fn run(
                         config.width = new_size.width.max(1);
                         config.height = new_size.height.max(1);
                         surface.configure(&gpu.device, &config);
+                        // Rebuild the overlay target + blit pipeline so
+                        // the overlay texture stays 1:1 with the window
+                        // surface — mouse coordinates flow straight
+                        // through without a non-uniform stretch.
+                        overlay_target =
+                            OverlayTarget::new(&gpu, config.width, config.height);
+                        blit = BlitPipeline::new(
+                            &gpu.device,
+                            &overlay_target,
+                            surface_format,
+                        );
+                        egui_panel.resize(config.width, config.height);
                     }
                     WindowEvent::RedrawRequested => {
                         // 0a. Drain any newly-arrived notifications.
