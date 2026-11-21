@@ -38,6 +38,108 @@ pub struct CaptureCfg {
     /// around driver bugs we haven't shaken out yet.
     pub force_cpu: bool,
 }
+
+/// Automation affordances for running the preview non-interactively —
+/// an LLM or CI driver can launch with `--screenshot path.png
+/// --exit-after 120` and come back to a single PNG without needing to
+/// drive the window.
+#[derive(Clone, Debug, Default)]
+pub struct TestHooks {
+    pub screenshot: Option<std::path::PathBuf>,
+    pub exit_after: Option<u64>,
+}
+
+/// Save the given surface frame to a PNG. BGRA → RGBA swizzle, then
+/// `png` crate for a minimal encoder footprint. Returns the number of
+/// bytes written so the caller can log it. Called from the frame-tick
+/// handlers of both preview modes once they've reached their capture
+/// frame.
+pub fn save_surface_as_png(
+    gpu: &rsoverlay_render::GpuCtx,
+    surface_texture: &wgpu::Texture,
+    width: u32,
+    height: u32,
+    path: &std::path::Path,
+) -> anyhow::Result<usize> {
+    use anyhow::Context;
+
+    // wgpu requires row-pitch to be a multiple of 256 bytes for texture
+    // → buffer copies. BGRA8 at 4 bytes/px → row pitch = width * 4
+    // rounded up.
+    let bpp = 4u32;
+    let unpadded = width * bpp;
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let padded = unpadded.div_ceil(align) * align;
+    let buffer_size = (padded as u64) * height as u64;
+
+    let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("screenshot-staging"),
+        size: buffer_size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let mut enc = gpu
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("screenshot-encoder"),
+        });
+    enc.copy_texture_to_buffer(
+        wgpu::ImageCopyTexture {
+            texture: surface_texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::ImageCopyBuffer {
+            buffer: &buffer,
+            layout: wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(padded),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+    );
+    gpu.queue.submit(Some(enc.finish()));
+
+    let slice = buffer.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |r| {
+        let _ = tx.send(r);
+    });
+    gpu.device.poll(wgpu::Maintain::Wait);
+    rx.recv()
+        .context("map_async channel")?
+        .context("map_async")?;
+
+    let data = slice.get_mapped_range();
+    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+    for row in 0..height {
+        let start = (row * padded) as usize;
+        let row_slice = &data[start..start + unpadded as usize];
+        for px in row_slice.as_chunks::<4>().0 {
+            // wgpu swapchain is BGRA on Windows → emit as RGBA.
+            rgba.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+        }
+    }
+    drop(data);
+    buffer.unmap();
+
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).context("creating output dir")?;
+        }
+    }
+    let file = std::fs::File::create(path)
+        .with_context(|| format!("creating PNG at {}", path.display()))?;
+    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().context("PNG header")?;
+    writer.write_image_data(&rgba).context("PNG data")?;
+    Ok(rgba.len())
+}
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -64,6 +166,7 @@ pub fn run(
     mut notify: Option<NotifyChannel>,
     capture_cfg: CaptureCfg,
     osc: Option<rsoverlay_osc::OscClient>,
+    test: TestHooks,
 ) -> Result<()> {
     let event_loop = EventLoop::new().context("creating winit event loop")?;
     let window = Arc::new(
@@ -91,7 +194,7 @@ pub fn run(
         .find(|f| f.is_srgb())
         .unwrap_or(caps.formats[0]);
     let mut config = wgpu::SurfaceConfiguration {
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         format: surface_format,
         width: size.width.max(1),
         height: size.height.max(1),
@@ -135,6 +238,9 @@ pub fn run(
     );
     let mut dev_view = DevView::default();
     let mut fps_counter = FpsCounter::new();
+    let mut frame_counter: u64 = 0;
+    let screenshot_path = test.screenshot.clone();
+    let exit_after = test.exit_after;
 
     // Capture pipeline. We try the GPU-to-GPU shared-handle path first
     // (see `rsoverlay-capture::shared` + `rsoverlay-render::shared`). If
@@ -353,6 +459,34 @@ pub fn run(
                         });
                         blit.record(&mut enc, &view);
                         gpu.queue.submit(Some(enc.finish()));
+
+                        // Snap the OverlayTarget (what VR would receive)
+                        // before presenting, so the PNG matches what a
+                        // headset would actually render.
+                        frame_counter = frame_counter.wrapping_add(1);
+                        if let Some(trigger) = exit_after {
+                            if frame_counter == trigger {
+                                if let Some(path) = &screenshot_path {
+                                    match save_surface_as_png(
+                                        &gpu,
+                                        &overlay_target.texture,
+                                        overlay_target.width,
+                                        overlay_target.height,
+                                        path,
+                                    ) {
+                                        Ok(n) => info!(
+                                            "wrote screenshot {} ({} bytes)",
+                                            path.display(),
+                                            n
+                                        ),
+                                        Err(e) => warn!("screenshot failed: {e:#}"),
+                                    }
+                                }
+                                info!("--exit-after {trigger} reached; clean exit");
+                                elwt.exit();
+                            }
+                        }
+
                         frame.present();
                     }
                     _ => {}

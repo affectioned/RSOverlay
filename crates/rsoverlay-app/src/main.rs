@@ -12,6 +12,7 @@
 //! work later), independent of the UI mode.
 
 mod preview;
+mod preview_vr;
 mod vr;
 
 use anyhow::Result;
@@ -27,12 +28,18 @@ use tracing_subscriber::EnvFilter;
 #[command(name = "rsoverlay", version, about = "Open-source SteamVR overlay")]
 struct Args {
     /// Force desktop preview mode (no HMD required). Default.
-    #[arg(long, conflicts_with = "vr")]
+    #[arg(long, conflicts_with_all = ["vr", "vr_preview"])]
     preview: bool,
 
     /// Run in SteamVR. Requires a running compositor + HMD.
-    #[arg(long, conflicts_with = "preview")]
+    #[arg(long, conflicts_with_all = ["preview", "vr_preview"])]
     vr: bool,
+
+    /// Render a SteamVR-style 3D preview of the overlay — floor grid,
+    /// 100° FOV camera, overlay quad at a wrist position. Mouse drag
+    /// looks around. No HMD required.
+    #[arg(long, conflicts_with_all = ["preview", "vr"])]
+    vr_preview: bool,
 
     /// Notification server bind address.
     #[arg(long, default_value = "127.0.0.1:42069")]
@@ -68,12 +75,26 @@ struct Args {
     /// Disable the OSC sender entirely.
     #[arg(long)]
     no_osc: bool,
+
+    /// Save a PNG screenshot of the preview window N frames after
+    /// launch. Combined with --exit-after this gives a headless
+    /// render-to-PNG flow so automated runs can verify the UI without
+    /// an interactive window.
+    #[arg(long, value_name = "PATH")]
+    screenshot: Option<std::path::PathBuf>,
+
+    /// Exit cleanly after this many frames. Pair with --screenshot for
+    /// a non-interactive capture.
+    #[arg(long, value_name = "N")]
+    exit_after: Option<u64>,
 }
 
 impl Args {
     fn mode(&self) -> RuntimeMode {
         if self.vr {
             RuntimeMode::Vr
+        } else if self.vr_preview {
+            RuntimeMode::VrPreview
         } else {
             RuntimeMode::Preview
         }
@@ -129,8 +150,14 @@ fn main() -> Result<()> {
         Some(spawn_osc(&rt_handle, args.osc_addr))
     };
 
+    let test_cfg = preview::TestHooks {
+        screenshot: args.screenshot.clone(),
+        exit_after: args.exit_after,
+    };
+
     let result = match mode {
-        RuntimeMode::Preview => preview::run(notify_rx, capture_cfg, osc),
+        RuntimeMode::Preview => preview::run(notify_rx, capture_cfg, osc, test_cfg),
+        RuntimeMode::VrPreview => preview_vr::run(notify_rx, test_cfg),
         RuntimeMode::Vr => vr::run(notify_rx, rt_handle.clone()),
     };
 

@@ -6,14 +6,18 @@ pub enum RuntimeMode {
     /// Submit textures to OpenVR; requires SteamVR + HMD.
     Vr,
     /// Present textures into a desktop window for iterative development.
-    /// No HMD required. Feature parity with Vr for every subsystem except
-    /// the final texture submission step.
+    /// No HMD required.
     Preview,
+    /// Render the overlay inside a SteamVR-style 3D preview with a
+    /// chaperone-grid floor, 100° HFOV camera, and the overlay quad
+    /// placed where a wrist-mounted overlay would sit. Mouse drag
+    /// looks around; scroll dollies. No HMD required.
+    VrPreview,
 }
 
 impl RuntimeMode {
     pub fn is_preview(self) -> bool {
-        matches!(self, Self::Preview)
+        matches!(self, Self::Preview | Self::VrPreview)
     }
 
     pub fn is_vr(self) -> bool {
