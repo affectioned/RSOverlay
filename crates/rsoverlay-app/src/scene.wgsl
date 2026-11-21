@@ -15,7 +15,13 @@ struct CameraUniforms {
 };
 
 struct QuadUniforms {
+    /// Rotation + translation of the overlay anchor point. Scale is
+    /// applied in the shader so we can insert the curvature bend
+    /// cleanly in metres space.
     model: mat4x4<f32>,
+    /// x = curvature in [0,1], y = width in metres, z = height in
+    /// metres, w reserved.
+    params: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> cam: CameraUniforms;
@@ -54,7 +60,25 @@ fn vs_quad(@builtin(vertex_index) vid: u32) -> VsOut {
         vec2<f32>(1.0, 0.0),
     );
     let p = positions[vid];
-    let world4 = q.model * vec4<f32>(p.x, p.y, 0.0, 1.0);
+    // Curvature bend: wrap the quad around a vertical cylinder of
+    // radius `width / (curvature * PI)`. c=0 → flat; c=1 → the full
+    // width spans 180° around a tight radius so edges tuck behind the
+    // center.
+    let c = clamp(q.params.x, 0.0, 1.0);
+    let width = q.params.y;
+    let height = q.params.z;
+    let x_m = p.x * width;
+    let y_m = p.y * height;
+    var local_x = x_m;
+    var local_z = 0.0;
+    if (c > 1e-4) {
+        let radius = width / max(c * 3.14159265, 1e-3);
+        let angle = x_m / radius;
+        local_x = radius * sin(angle);
+        local_z = radius * (1.0 - cos(angle));
+    }
+    // `model` has no scale baked in, so we pass metres through.
+    let world4 = q.model * vec4<f32>(local_x, y_m, local_z, 1.0);
     var out: VsOut;
     out.pos = cam.view_proj * world4;
     out.uv = uvs[vid];

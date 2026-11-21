@@ -323,17 +323,12 @@ impl OrbitCamera {
 /// matrix that scales a unit quad into the overlay's physical size.
 const HEAD_DEFAULT: Vec3 = Vec3::new(0.0, 1.6, 0.0);
 
-/// Compute the model matrix for the overlay given the current
-/// placement + camera. For Anchor::Wrist / Anchor::World the quad is
-/// anchored in world space and auto-faces the viewer. For Anchor::Hmd
-/// the quad rides along with the camera's forward vector so it stays
-/// pinned in front of the head.
+/// Compute the overlay's anchor matrix: rotation + translation only,
+/// no scale. The shader applies width/height in metres so curvature
+/// math can bend the quad in physical units before this transform.
 fn overlay_model(placement: &Placement, camera: &OrbitCamera) -> Mat4 {
-    let scale = Mat4::from_scale(Vec3::new(placement.size_w, placement.size_h, 1.0));
     match placement.anchor {
         Anchor::Hmd => {
-            // Pin to the head — orient in the camera's local frame,
-            // place forward in front of the eyes by |offset_z|.
             let eye = camera.eye();
             let forward = camera.forward();
             let right = forward.cross(Vec3::Y).normalize();
@@ -344,17 +339,13 @@ fn overlay_model(placement: &Placement, camera: &OrbitCamera) -> Mat4 {
                 + up * (placement.offset_y - camera.head_height);
             let look_dir = (eye - pos).normalize();
             let quat = Quat::from_rotation_arc(Vec3::Z, look_dir);
-            Mat4::from_translation(pos) * Mat4::from_quat(quat) * scale
+            Mat4::from_translation(pos) * Mat4::from_quat(quat)
         }
         Anchor::Wrist | Anchor::World => {
-            // Anchored in world space. Auto-face the default head pose
-            // so the panel reads cleanly from the natural standing
-            // viewpoint. Real VR wrist-mode will swap this for a
-            // controller-tracked position each frame.
             let pos = Vec3::new(placement.offset_x, placement.offset_y, placement.offset_z);
             let forward = (HEAD_DEFAULT - pos).normalize();
             let quat = Quat::from_rotation_arc(Vec3::Z, forward);
-            Mat4::from_translation(pos) * Mat4::from_quat(quat) * scale
+            Mat4::from_translation(pos) * Mat4::from_quat(quat)
         }
     }
 }
@@ -420,6 +411,7 @@ impl SceneRenderer {
                 label: Some("vr-quad-model"),
                 contents: bytemuck::bytes_of(&QuadGpu {
                     model: Mat4::IDENTITY.to_cols_array_2d(),
+                    params: [0.0, 0.36, 0.225, 0.0],
                 }),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
@@ -588,11 +580,17 @@ impl SceneRenderer {
         gpu.queue
             .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cam_gpu));
 
-        // Push the up-to-date overlay model matrix so sliders take
-        // effect next frame.
+        // Push the up-to-date overlay model matrix + size + curvature
+        // so sliders take effect next frame.
         let model = overlay_model(placement, camera).to_cols_array_2d();
+        let params = [
+            placement.curvature,
+            placement.size_w,
+            placement.size_h,
+            0.0,
+        ];
         gpu.queue
-            .write_buffer(&self.quad_buf, 0, bytemuck::bytes_of(&QuadGpu { model }));
+            .write_buffer(&self.quad_buf, 0, bytemuck::bytes_of(&QuadGpu { model, params }));
 
         let mut enc = gpu
             .device
@@ -641,4 +639,7 @@ struct CameraGpu {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct QuadGpu {
     model: [[f32; 4]; 4],
+    // x = curvature in [0,1], y = width in metres, z = height in
+    // metres, w reserved.
+    params: [f32; 4],
 }

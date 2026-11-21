@@ -121,6 +121,7 @@ pub fn seed_dev_view(
     dev.placement.offset_z = cfg.placement.offset_z;
     dev.placement.size_w = cfg.placement.size_w;
     dev.placement.size_h = cfg.placement.size_h;
+    dev.placement.curvature = cfg.placement.curvature;
     if let Some((x, y, z)) = test.overlay_pos {
         dev.placement.offset_x = x;
         dev.placement.offset_y = y;
@@ -172,6 +173,7 @@ pub fn config_from_dev_view(
     out.placement.offset_z = dev.placement.offset_z;
     out.placement.size_w = dev.placement.size_w;
     out.placement.size_h = dev.placement.size_h;
+    out.placement.curvature = dev.placement.curvature;
     out
 }
 
@@ -303,6 +305,7 @@ fn configs_equivalent(a: &rsoverlay_core::Config, b: &rsoverlay_core::Config) ->
         && (a.placement.offset_z - b.placement.offset_z).abs() < 0.001
         && (a.placement.size_w - b.placement.size_w).abs() < 0.001
         && (a.placement.size_h - b.placement.size_h).abs() < 0.001
+        && (a.placement.curvature - b.placement.curvature).abs() < 0.001
 }
 
 /// Save the given surface frame to a PNG. BGRA → RGBA swizzle, then

@@ -64,6 +64,10 @@ pub struct Placement {
     pub offset_z: f32,
     pub size_w: f32,
     pub size_h: f32,
+    /// 0.0 flat → 1.0 fully wrapped around a cylinder. Curves the
+    /// overlay toward the viewer for immersive feel at wider sizes.
+    /// Matches XSO's curved overlay option.
+    pub curvature: f32,
 }
 
 impl Default for Placement {
@@ -75,6 +79,7 @@ impl Default for Placement {
             offset_z: -0.40,
             size_w: 0.36,
             size_h: 0.225,
+            curvature: 0.0,
         }
     }
 }

@@ -79,6 +79,10 @@ pub struct Placement {
     pub offset_z: f32,
     pub size_w: f32,
     pub size_h: f32,
+    /// 0.0 = flat, 1.0 = fully wrapped around a cylinder of the quad's
+    /// width. Bends the panel toward the viewer so edges are closer
+    /// than the center — XSO's "curved overlay" option.
+    pub curvature: f32,
 }
 
 impl Default for Placement {
@@ -92,6 +96,7 @@ impl Default for Placement {
             offset_z: -0.40,
             size_w: 0.36,
             size_h: 0.225,
+            curvature: 0.0,
         }
     }
 }
@@ -458,6 +463,8 @@ fn placement_card(ui: &mut egui::Ui, p: &mut Placement, accent: egui::Color32) {
         ui.add_space(4.0);
         placement_slider(ui, "W", &mut p.size_w, 0.1, 0.8);
         placement_slider(ui, "H", &mut p.size_h, 0.08, 0.6);
+        ui.add_space(4.0);
+        placement_slider(ui, "Curve", &mut p.curvature, 0.0, 1.0);
     });
 }
 
