@@ -149,6 +149,18 @@ fn main() -> Result<()> {
 
     let args = Args::parse();
 
+    // Load persistent config (accent / placement / toggles). Missing
+    // file → defaults. Malformed file → log and fall back so a corrupt
+    // config can never brick launch.
+    let config_path = rsoverlay_core::Config::default_path();
+    let config = match rsoverlay_core::Config::load(&config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("config load failed, using defaults: {e:#}");
+            rsoverlay_core::Config::default()
+        }
+    };
+
     if args.list_monitors {
         for m in rsoverlay_capture::enumerate_monitors()? {
             println!("[{}] {} {}x{}", m.index, m.device_name, m.width, m.height);
@@ -198,9 +210,18 @@ fn main() -> Result<()> {
     };
 
     let result = match mode {
-        RuntimeMode::Preview => preview::run(notify_rx, capture_cfg, osc, test_cfg),
-        RuntimeMode::VrPreview => preview_vr::run(notify_rx, test_cfg),
-        RuntimeMode::Vr => vr::run(notify_rx, rt_handle.clone()),
+        RuntimeMode::Preview => preview::run(
+            notify_rx,
+            capture_cfg,
+            osc,
+            test_cfg,
+            config.clone(),
+            config_path.clone(),
+        ),
+        RuntimeMode::VrPreview => {
+            preview_vr::run(notify_rx, test_cfg, config.clone(), config_path.clone())
+        }
+        RuntimeMode::Vr => vr::run(notify_rx, rt_handle.clone(), config.clone()),
     };
 
     // Give the runtime a bounded shutdown window so background tasks drain.

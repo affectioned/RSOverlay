@@ -22,21 +22,27 @@ mod imp {
     const OVERLAY_TEX_W: u32 = 2048;
     const OVERLAY_TEX_H: u32 = 1280;
 
-    pub fn run(_notify: Option<NotifyChannel>, rt: Handle) -> Result<()> {
+    pub fn run(
+        _notify: Option<NotifyChannel>,
+        rt: Handle,
+        config: rsoverlay_core::Config,
+    ) -> Result<()> {
         let vr = OpenVr::init().context("OpenVR init")?;
         let overlay = vr.overlay().context("acquiring IVROverlay")?;
 
         let handle = overlay
             .create("rsoverlay.main", "RSOverlay")
             .context("CreateOverlay")?;
+        // Use the persisted Placement from config. Wrist anchor still
+        // resolves to the saved world-space offset until controller
+        // pose polling lands in a follow-up milestone — that's when
+        // anchor=Wrist will switch to SetOverlayTransformTrackedDevice
+        // Relative with the user's non-dominant controller.
+        let p = &config.placement;
         overlay
-            .set_width(handle, 0.6)
+            .set_width(handle, p.size_w)
             .context("SetOverlayWidthInMeters")?;
-        // Pose: world-fixed overlay 1.5m in front of the standing-universe
-        // origin at eye level. Wrist / HMD / World anchoring is wired for
-        // preview already; adding controller-tracked poses lands next
-        // milestone (needs IVRInput + pose polling).
-        let pose = pose_translation(0.0, 1.5, -1.5);
+        let pose = pose_translation(p.offset_x, p.offset_y, p.offset_z);
         overlay
             .set_transform_absolute(handle, &pose)
             .context("SetOverlayTransformAbsolute")?;

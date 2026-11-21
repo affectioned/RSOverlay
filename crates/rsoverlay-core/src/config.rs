@@ -10,6 +10,71 @@ pub struct Config {
     pub render: Render,
     pub notify: Notify,
     pub preview: Preview,
+    pub appearance: Appearance,
+    pub placement: Placement,
+}
+
+/// User-tweakable dashboard appearance. Persisted so your accent choice
+/// and card visibility toggles survive a restart.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Appearance {
+    /// Accent color stored as `#rrggbb` hex. Falls back to the muted
+    /// teal default if missing or malformed.
+    pub accent_hex: String,
+    pub show_mirror: bool,
+    pub show_media: bool,
+    pub show_chat: bool,
+    pub show_keyboard: bool,
+    pub forward_input: bool,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            accent_hex: "#7DD3C0".into(),
+            show_mirror: true,
+            show_media: true,
+            show_chat: true,
+            show_keyboard: false,
+            forward_input: false,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PlacementAnchor {
+    #[default]
+    Wrist,
+    Hmd,
+    World,
+}
+
+/// Spatial placement of the main overlay. Persisted so your position
+/// tweaks survive a restart.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Placement {
+    pub anchor: PlacementAnchor,
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub offset_z: f32,
+    pub size_w: f32,
+    pub size_h: f32,
+}
+
+impl Default for Placement {
+    fn default() -> Self {
+        Self {
+            anchor: PlacementAnchor::Wrist,
+            offset_x: -0.22,
+            offset_y: 1.30,
+            offset_z: -0.40,
+            size_w: 0.36,
+            size_h: 0.225,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -91,5 +156,22 @@ impl Config {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
         base.join("RSOverlay").join("config.toml")
+    }
+
+    /// Serialize to TOML and write atomically (write to `.tmp`, then
+    /// rename). Keeps the file consistent even if the process dies
+    /// mid-write.
+    pub fn save(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating dir {}", parent.display()))?;
+        }
+        let text = toml::to_string_pretty(self).context("serialize config to TOML")?;
+        let tmp = path.with_extension("toml.tmp");
+        std::fs::write(&tmp, text)
+            .with_context(|| format!("writing config at {}", tmp.display()))?;
+        std::fs::rename(&tmp, path)
+            .with_context(|| format!("committing config at {}", path.display()))?;
+        Ok(())
     }
 }

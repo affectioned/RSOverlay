@@ -54,7 +54,10 @@ pub struct TestHooks {
 }
 
 /// Apply CLI overrides to a default Placement. Any field not overridden
-/// keeps its default value.
+/// keeps its default value. Kept public so external callers (tests,
+/// future tooling) can reuse the CLI-override logic independently of
+/// the broader `seed_dev_view` flow.
+#[allow(dead_code)]
 pub fn placement_with_overrides(test: &TestHooks) -> rsoverlay_ui::views::Placement {
     let mut p = rsoverlay_ui::views::Placement::default();
     if let Some((x, y, z)) = test.overlay_pos {
@@ -75,6 +78,170 @@ pub fn placement_with_overrides(test: &TestHooks) -> rsoverlay_ui::views::Placem
         };
     }
     p
+}
+
+/// Seed a fresh [`DevView`] with values from the persisted config,
+/// then layer any CLI test-hook overrides on top. Keeps the "load →
+/// override → use" ordering in one place so every entry mode
+/// (preview, preview_vr, vr) picks the same initial state.
+pub fn seed_dev_view(
+    dev: &mut rsoverlay_ui::views::DevView,
+    cfg: &rsoverlay_core::Config,
+    test: &TestHooks,
+) {
+    use rsoverlay_core::PlacementAnchor;
+    use rsoverlay_ui::views::Anchor as UiAnchor;
+
+    // Appearance.
+    if let Some(c) = parse_hex_color(&cfg.appearance.accent_hex) {
+        dev.accent = c;
+    }
+    dev.show_mirror = cfg.appearance.show_mirror;
+    dev.show_media = cfg.appearance.show_media;
+    dev.show_chat = cfg.appearance.show_chat;
+    dev.show_keyboard = cfg.appearance.show_keyboard;
+    dev.forward_input = cfg.appearance.forward_input;
+    if test.show_keyboard {
+        dev.show_keyboard = true;
+    }
+
+    // Placement.
+    dev.placement.anchor = match cfg.placement.anchor {
+        PlacementAnchor::Wrist => UiAnchor::Wrist,
+        PlacementAnchor::Hmd => UiAnchor::Hmd,
+        PlacementAnchor::World => UiAnchor::World,
+    };
+    dev.placement.offset_x = cfg.placement.offset_x;
+    dev.placement.offset_y = cfg.placement.offset_y;
+    dev.placement.offset_z = cfg.placement.offset_z;
+    dev.placement.size_w = cfg.placement.size_w;
+    dev.placement.size_h = cfg.placement.size_h;
+    if let Some((x, y, z)) = test.overlay_pos {
+        dev.placement.offset_x = x;
+        dev.placement.offset_y = y;
+        dev.placement.offset_z = z;
+    }
+    if let Some((w, h)) = test.overlay_size {
+        dev.placement.size_w = w;
+        dev.placement.size_h = h;
+    }
+    if let Some(a) = test.overlay_anchor.as_deref() {
+        dev.placement.anchor = match a.to_ascii_lowercase().as_str() {
+            "wrist" => UiAnchor::Wrist,
+            "hmd" | "head" => UiAnchor::Hmd,
+            "world" => UiAnchor::World,
+            _ => dev.placement.anchor,
+        };
+    }
+}
+
+/// Extract the current DevView state into a fresh Config body, ready
+/// to persist. Preserves fields we don't touch (notify, render, etc.)
+/// from the given template.
+pub fn config_from_dev_view(
+    dev: &rsoverlay_ui::views::DevView,
+    base: &rsoverlay_core::Config,
+) -> rsoverlay_core::Config {
+    use rsoverlay_core::PlacementAnchor;
+    use rsoverlay_ui::views::Anchor as UiAnchor;
+    let mut out = base.clone();
+    out.appearance.accent_hex = format!(
+        "#{:02X}{:02X}{:02X}",
+        dev.accent.r(),
+        dev.accent.g(),
+        dev.accent.b()
+    );
+    out.appearance.show_mirror = dev.show_mirror;
+    out.appearance.show_media = dev.show_media;
+    out.appearance.show_chat = dev.show_chat;
+    out.appearance.show_keyboard = dev.show_keyboard;
+    out.appearance.forward_input = dev.forward_input;
+    out.placement.anchor = match dev.placement.anchor {
+        UiAnchor::Wrist => PlacementAnchor::Wrist,
+        UiAnchor::Hmd => PlacementAnchor::Hmd,
+        UiAnchor::World => PlacementAnchor::World,
+    };
+    out.placement.offset_x = dev.placement.offset_x;
+    out.placement.offset_y = dev.placement.offset_y;
+    out.placement.offset_z = dev.placement.offset_z;
+    out.placement.size_w = dev.placement.size_w;
+    out.placement.size_h = dev.placement.size_h;
+    out
+}
+
+fn parse_hex_color(hex: &str) -> Option<egui::Color32> {
+    let h = hex.trim().trim_start_matches('#');
+    if h.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&h[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&h[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&h[4..6], 16).ok()?;
+    Some(egui::Color32::from_rgb(r, g, b))
+}
+
+/// Debounced "save when something changed" helper. Owns the last
+/// saved Config and compares what's live each tick. Writes at most
+/// once per `SAVE_DEBOUNCE_MS` even if the user is dragging a slider.
+pub struct ConfigPersister {
+    path: std::path::PathBuf,
+    last_saved: rsoverlay_core::Config,
+    pending_since: Option<std::time::Instant>,
+}
+
+impl ConfigPersister {
+    const SAVE_DEBOUNCE_MS: u64 = 400;
+
+    pub fn new(path: std::path::PathBuf, initial: rsoverlay_core::Config) -> Self {
+        Self { path, last_saved: initial, pending_since: None }
+    }
+
+    /// Call once per frame. If `now` differs from the last saved
+    /// snapshot, start / restart the debounce. Once the debounce
+    /// window elapses without further changes, write to disk.
+    pub fn tick(&mut self, now: &rsoverlay_core::Config) {
+        use std::time::Instant;
+        let changed = !configs_equivalent(&self.last_saved, now);
+        if changed {
+            self.pending_since = Some(Instant::now());
+            self.last_saved = now.clone();
+        }
+        if let Some(since) = self.pending_since {
+            if since.elapsed().as_millis() as u64 >= Self::SAVE_DEBOUNCE_MS {
+                if let Err(e) = self.last_saved.save(&self.path) {
+                    tracing::warn!("config save failed: {e:#}");
+                }
+                self.pending_since = None;
+            }
+        }
+    }
+
+    /// Final flush — write unconditionally. Call on clean shutdown.
+    #[allow(dead_code)]
+    pub fn flush(&mut self) {
+        if let Err(e) = self.last_saved.save(&self.path) {
+            tracing::warn!("config final flush failed: {e:#}");
+        }
+        self.pending_since = None;
+    }
+}
+
+/// Field-by-field compare of the two Config variants that matter for
+/// debouncing. Ignores Render / Notify / Preview defaults the user
+/// can't change from inside the UI yet.
+fn configs_equivalent(a: &rsoverlay_core::Config, b: &rsoverlay_core::Config) -> bool {
+    a.appearance.accent_hex == b.appearance.accent_hex
+        && a.appearance.show_mirror == b.appearance.show_mirror
+        && a.appearance.show_media == b.appearance.show_media
+        && a.appearance.show_chat == b.appearance.show_chat
+        && a.appearance.show_keyboard == b.appearance.show_keyboard
+        && a.appearance.forward_input == b.appearance.forward_input
+        && a.placement.anchor == b.placement.anchor
+        && (a.placement.offset_x - b.placement.offset_x).abs() < 0.001
+        && (a.placement.offset_y - b.placement.offset_y).abs() < 0.001
+        && (a.placement.offset_z - b.placement.offset_z).abs() < 0.001
+        && (a.placement.size_w - b.placement.size_w).abs() < 0.001
+        && (a.placement.size_h - b.placement.size_h).abs() < 0.001
 }
 
 /// Save the given surface frame to a PNG. BGRA → RGBA swizzle, then
@@ -195,6 +362,8 @@ pub fn run(
     capture_cfg: CaptureCfg,
     osc: Option<rsoverlay_osc::OscClient>,
     test: TestHooks,
+    app_config: rsoverlay_core::Config,
+    config_path: std::path::PathBuf,
 ) -> Result<()> {
     let event_loop = EventLoop::new().context("creating winit event loop")?;
     let window = Arc::new(
@@ -265,8 +434,9 @@ pub fn run(
         None,
     );
     let mut dev_view = DevView::default();
-    dev_view.placement = placement_with_overrides(&test);
-    dev_view.show_keyboard = test.show_keyboard;
+    seed_dev_view(&mut dev_view, &app_config, &test);
+    let mut persister = ConfigPersister::new(config_path.clone(), app_config.clone());
+    let config_base = app_config.clone();
     let mut fps_counter = FpsCounter::new();
     let mut frame_counter: u64 = 0;
     let screenshot_path = test.screenshot.clone();
@@ -518,6 +688,12 @@ pub fn run(
                         }
 
                         frame.present();
+
+                        // Persist state changes (debounced inside the
+                        // persister). Slider/toggle writes land on disk
+                        // ~400ms after the last change.
+                        let current = config_from_dev_view(&dev_view, &config_base);
+                        persister.tick(&current);
                     }
                     _ => {}
                 }

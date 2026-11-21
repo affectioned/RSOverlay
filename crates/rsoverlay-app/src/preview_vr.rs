@@ -38,7 +38,12 @@ const OVERLAY_TEX_H: u32 = 1280;
 const INITIAL_WIN_W: u32 = 1280;
 const INITIAL_WIN_H: u32 = 800;
 
-pub fn run(_notify: Option<NotifyChannel>, test: crate::preview::TestHooks) -> Result<()> {
+pub fn run(
+    _notify: Option<NotifyChannel>,
+    test: crate::preview::TestHooks,
+    app_config: rsoverlay_core::Config,
+    config_path: std::path::PathBuf,
+) -> Result<()> {
     let event_loop = EventLoop::new().context("event loop")?;
     let window = Arc::new(
         WindowBuilder::new()
@@ -92,7 +97,10 @@ pub fn run(_notify: Option<NotifyChannel>, test: crate::preview::TestHooks) -> R
         None,
     );
     let mut dev_view = DevView::default();
-    dev_view.placement = crate::preview::placement_with_overrides(&test);
+    crate::preview::seed_dev_view(&mut dev_view, &app_config, &test);
+    let mut persister =
+        crate::preview::ConfigPersister::new(config_path.clone(), app_config.clone());
+    let config_base = app_config.clone();
 
     let mut scene = SceneRenderer::new(&gpu, surface_format, &overlay_target)?;
     let mut camera = OrbitCamera::default();
@@ -206,6 +214,9 @@ pub fn run(_notify: Option<NotifyChannel>, test: crate::preview::TestHooks) -> R
                     }
 
                     frame.present();
+
+                    let current = crate::preview::config_from_dev_view(&dev_view, &config_base);
+                    persister.tick(&current);
 
                     let now = Instant::now();
                     dev_view.frame = dev_view.frame.wrapping_add(1);
