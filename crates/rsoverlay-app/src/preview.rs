@@ -189,17 +189,31 @@ fn parse_hex_color(hex: &str) -> Option<egui::Color32> {
 /// Debounced "save when something changed" helper. Owns the last
 /// saved Config and compares what's live each tick. Writes at most
 /// once per `SAVE_DEBOUNCE_MS` even if the user is dragging a slider.
+///
+/// Also watches the backing file for external edits — the user can
+/// hand-edit `config.toml` in a text editor and the running overlay
+/// picks up the changes within ~1 second without restart.
 pub struct ConfigPersister {
     path: std::path::PathBuf,
     last_saved: rsoverlay_core::Config,
     pending_since: Option<std::time::Instant>,
+    last_known_mtime: Option<std::time::SystemTime>,
+    last_watch_check: std::time::Instant,
 }
 
 impl ConfigPersister {
     const SAVE_DEBOUNCE_MS: u64 = 400;
+    const WATCH_INTERVAL_MS: u64 = 1000;
 
     pub fn new(path: std::path::PathBuf, initial: rsoverlay_core::Config) -> Self {
-        Self { path, last_saved: initial, pending_since: None }
+        let last_known_mtime = Self::read_mtime(&path);
+        Self {
+            path,
+            last_saved: initial,
+            pending_since: None,
+            last_known_mtime,
+            last_watch_check: std::time::Instant::now(),
+        }
     }
 
     /// Call once per frame. If `now` differs from the last saved
@@ -217,9 +231,49 @@ impl ConfigPersister {
                 if let Err(e) = self.last_saved.save(&self.path) {
                     tracing::warn!("config save failed: {e:#}");
                 }
+                // Our own write bumps mtime; track it so the hot-reload
+                // check below doesn't fire on our own writes.
+                self.last_known_mtime = Self::read_mtime(&self.path);
                 self.pending_since = None;
             }
         }
+    }
+
+    /// Check whether the backing file was modified externally since
+    /// our last tick. Returns the reloaded config if so.
+    ///
+    /// Call once per frame alongside `tick`. The poll itself runs at
+    /// most once per [`WATCH_INTERVAL_MS`] to keep the stat() rate
+    /// trivial.
+    pub fn poll_external_change(&mut self) -> Option<rsoverlay_core::Config> {
+        use std::time::Instant;
+        if self.last_watch_check.elapsed().as_millis() as u64 <= Self::WATCH_INTERVAL_MS {
+            return None;
+        }
+        self.last_watch_check = Instant::now();
+        let current_mtime = Self::read_mtime(&self.path);
+        if current_mtime == self.last_known_mtime {
+            return None;
+        }
+        // File changed externally. Reload and adopt as our new
+        // "last_saved" so tick() doesn't immediately re-save.
+        match rsoverlay_core::Config::load(&self.path) {
+            Ok(cfg) => {
+                tracing::info!("config.toml changed externally — reloading");
+                self.last_saved = cfg.clone();
+                self.last_known_mtime = current_mtime;
+                self.pending_since = None;
+                Some(cfg)
+            }
+            Err(e) => {
+                tracing::warn!("external config.toml reload failed: {e:#}");
+                None
+            }
+        }
+    }
+
+    fn read_mtime(path: &std::path::Path) -> Option<std::time::SystemTime> {
+        std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
     }
 
     /// Final flush — write unconditionally. Call on clean shutdown.
@@ -703,6 +757,12 @@ pub fn run(
                             let base = rsoverlay_core::Config::default();
                             seed_dev_view(&mut dev_view, &base, &TestHooks::default());
                             dev_view.reset_requested = false;
+                        }
+
+                        // Pick up external edits (user opened
+                        // config.toml in a text editor and saved).
+                        if let Some(cfg) = persister.poll_external_change() {
+                            seed_dev_view(&mut dev_view, &cfg, &TestHooks::default());
                         }
 
                         // Persist state changes (debounced inside the

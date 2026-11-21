@@ -224,6 +224,13 @@ pub fn run(
                         );
                         dev_view.reset_requested = false;
                     }
+                    if let Some(cfg) = persister.poll_external_change() {
+                        crate::preview::seed_dev_view(
+                            &mut dev_view,
+                            &cfg,
+                            &crate::preview::TestHooks::default(),
+                        );
+                    }
                     let current = crate::preview::config_from_dev_view(&dev_view, &config_base);
                     persister.tick(&current);
 
