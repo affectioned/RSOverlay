@@ -24,10 +24,13 @@ impl EguiPanel {
     pub fn new(device: &wgpu::Device, output_format: wgpu::TextureFormat, width: u32, height: u32) -> Self {
         let renderer = Renderer::new(device, output_format, None, 1);
         let ctx = egui::Context::default();
-        // Pixels-per-point tuned so SVG icons rasterize at a sharp physical
-        // resolution — resvg paints at `logical_px * ppp`, so smaller icons
-        // (14-18px logical) need ppp≥2.0 to stay crisp.
-        let ppp = 2.0;
+        // Pixels-per-point: the trade-off here is logical vertical budget
+        // vs icon rasterization sharpness. At 1.5 the dashboard's 6 left-
+        // column cards fit in a 1360px window comfortably, and because
+        // the icon SVGs are now authored on 48-64px viewBoxes with 3-5px
+        // strokes, resvg still produces crisp output at 18px logical ×
+        // 1.5 = 27 physical pixels per icon.
+        let ppp = 1.5;
         ctx.set_pixels_per_point(ppp);
         theme::install(&ctx);
         icons::install_loaders(&ctx);

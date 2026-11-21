@@ -11,11 +11,15 @@
 //! eventually drive it.
 
 use anyhow::{Context, Result};
-use rsoverlay_capture::{enumerate_monitors, DxgiDuplication, Frame};
+use rsoverlay_capture::{enumerate_monitors, DxgiDuplication, Frame, SharedCapture};
 use rsoverlay_input::{InputInjector, MonitorGeom, MouseButton};
 use rsoverlay_core::RuntimeMode;
 use rsoverlay_notify::NotifyChannel;
-use rsoverlay_render::{mirror::MirrorTexture, GpuCtx, OverlayTarget};
+use rsoverlay_render::{
+    mirror::MirrorTexture,
+    shared::{wgpu_adapter_luid, SharedMirror},
+    GpuCtx, OverlayTarget,
+};
 use rsoverlay_ui::{
     views::{DevView, MirrorHandle},
     EguiPanel,
@@ -29,6 +33,10 @@ use tracing::{error, info, warn};
 pub struct CaptureCfg {
     pub enabled: bool,
     pub monitor_index: u32,
+    /// When true, skip the GPU-to-GPU shared-handle path entirely and
+    /// use the CPU readback path. Useful for A/B testing and for working
+    /// around driver bugs we haven't shaken out yet.
+    pub force_cpu: bool,
 }
 use winit::{
     event::{Event, WindowEvent},
@@ -46,8 +54,11 @@ use winit::{
 /// shipping headset through late-2026. Power users on Crystal Super / XR-4
 /// can override via `[render] overlay_texture_size` in config.toml.
 const OVERLAY_TEX_SIZE: u32 = 2048;
-const INITIAL_WIN_W: u32 = 1200;
-const INITIAL_WIN_H: u32 = 1200;
+// Tall enough that every left-column card (Media, Stats, Forward,
+// Chatbox, Appearance) plus the Clock bar fits without scrolling at
+// default ppp. If users want smaller they can resize down.
+const INITIAL_WIN_W: u32 = 1280;
+const INITIAL_WIN_H: u32 = 1360;
 
 pub fn run(
     mut notify: Option<NotifyChannel>,
@@ -114,21 +125,18 @@ pub fn run(
     let mut dev_view = DevView::default();
     let mut fps_counter = FpsCounter::new();
 
-    // Desktop capture thread: writes one Frame at a time into a bounded
-    // channel; the UI thread drops older frames if it can't keep up.
+    // Capture pipeline. We try the GPU-to-GPU shared-handle path first
+    // (see `rsoverlay-capture::shared` + `rsoverlay-render::shared`). If
+    // anything along that path fails — or the user forced CPU mode —
+    // we fall back to the original CPU readback through an mpsc channel.
     let (capture_tx, capture_rx) = mpsc::sync_channel::<Frame>(2);
     let mut mirror_texture: Option<MirrorTexture> = None;
     let mut mirror_handle: Option<MirrorHandle> = None;
     let mut mirror_geom: Option<MonitorGeom> = None;
+    let mut shared_mirror: Option<SharedMirror> = None;
+    let mut using_gpu_path = false;
+
     if capture_cfg.enabled {
-        let tx = capture_tx;
-        let idx = capture_cfg.monitor_index;
-        std::thread::Builder::new()
-            .name("rsoverlay-capture".into())
-            .spawn(move || capture_loop(idx, tx))
-            .context("spawning capture thread")?;
-        // Resolve the chosen monitor's virtual-desktop origin so input
-        // injection can translate overlay-local coords back to pixels.
         if let Ok(mons) = enumerate_monitors() {
             if let Some(m) = mons.into_iter().find(|m| m.index == capture_cfg.monitor_index) {
                 mirror_geom = Some(MonitorGeom {
@@ -138,6 +146,51 @@ pub fn run(
                     height: m.height,
                 });
             }
+        }
+
+        if !capture_cfg.force_cpu {
+            match try_setup_shared(&gpu, capture_cfg.monitor_index) {
+                Ok((mut capture, mirror)) => {
+                    let w = mirror.width;
+                    let h = mirror.height;
+                    // Capture thread: drives the shared texture GPU-side; no
+                    // Vec, no mpsc data, just keyed-mutex ping-pong.
+                    std::thread::Builder::new()
+                        .name("rsoverlay-shared-capture".into())
+                        .spawn(move || loop {
+                            if let Err(e) = capture.capture_next_frame(16) {
+                                warn!("shared capture lost ({e:#}); thread exit");
+                                break;
+                            }
+                        })
+                        .context("spawning shared-capture thread")?;
+                    let id = egui_panel.renderer.register_native_texture(
+                        &gpu.device,
+                        &mirror.view,
+                        wgpu::FilterMode::Linear,
+                    );
+                    mirror_handle = Some(MirrorHandle { id, width: w, height: h });
+                    shared_mirror = Some(mirror);
+                    using_gpu_path = true;
+                    info!(
+                        "desktop capture: GPU-to-GPU shared handle ({}x{}) — \
+                         zero CPU readback",
+                        w, h
+                    );
+                }
+                Err(e) => {
+                    warn!("GPU-to-GPU capture unavailable, falling back to CPU: {e:#}");
+                }
+            }
+        }
+
+        if !using_gpu_path {
+            let tx = capture_tx;
+            let idx = capture_cfg.monitor_index;
+            std::thread::Builder::new()
+                .name("rsoverlay-capture".into())
+                .spawn(move || capture_loop(idx, tx))
+                .context("spawning CPU capture thread")?;
         }
     }
     let injector = InputInjector::new().context("initializing input injector")?;
@@ -172,40 +225,53 @@ pub fn run(
                             }
                         }
 
-                        // 0b. Pull the latest captured frame (coalesce — we
-                        // only care about the newest).
-                        let mut latest: Option<Frame> = None;
-                        while let Ok(f) = capture_rx.try_recv() {
-                            latest = Some(f);
-                        }
-                        if let Some(frame) = latest {
-                            let (mt, needs_register) = match mirror_texture.as_ref() {
-                                Some(mt) if mt.width == frame.width && mt.height == frame.height => {
-                                    (mt, false)
-                                }
-                                _ => {
-                                    let mt = MirrorTexture::new(&gpu, frame.width, frame.height);
-                                    mirror_texture = Some(mt);
-                                    (mirror_texture.as_ref().unwrap(), true)
-                                }
-                            };
-                            if let Err(e) = mt.upload(&gpu, &frame) {
-                                warn!("mirror upload: {e:#}");
+                        // 0b. CPU path only: drain the latest captured frame
+                        // (coalesce — only the newest matters) and upload it.
+                        // On the GPU path the shared texture is already
+                        // kept current by the capture thread; nothing to do
+                        // here except acquire a read lease below.
+                        if !using_gpu_path {
+                            let mut latest: Option<Frame> = None;
+                            while let Ok(f) = capture_rx.try_recv() {
+                                latest = Some(f);
                             }
-                            if needs_register {
-                                let id = egui_panel.renderer.register_native_texture(
-                                    &gpu.device,
-                                    &mt.view,
-                                    wgpu::FilterMode::Linear,
-                                );
-                                mirror_handle = Some(MirrorHandle {
-                                    id,
-                                    width: frame.width,
-                                    height: frame.height,
-                                });
+                            if let Some(frame) = latest {
+                                let (mt, needs_register) = match mirror_texture.as_ref() {
+                                    Some(mt) if mt.width == frame.width && mt.height == frame.height => {
+                                        (mt, false)
+                                    }
+                                    _ => {
+                                        let mt = MirrorTexture::new(&gpu, frame.width, frame.height);
+                                        mirror_texture = Some(mt);
+                                        (mirror_texture.as_ref().unwrap(), true)
+                                    }
+                                };
+                                if let Err(e) = mt.upload(&gpu, &frame) {
+                                    warn!("mirror upload: {e:#}");
+                                }
+                                if needs_register {
+                                    let id = egui_panel.renderer.register_native_texture(
+                                        &gpu.device,
+                                        &mt.view,
+                                        wgpu::FilterMode::Linear,
+                                    );
+                                    mirror_handle = Some(MirrorHandle {
+                                        id,
+                                        width: frame.width,
+                                        height: frame.height,
+                                    });
+                                }
                             }
                         }
                         dev_view.mirror = mirror_handle;
+
+                        // Acquire the keyed-mutex read lease on the GPU
+                        // path for the duration of this frame. Dropped at
+                        // the end of RedrawRequested, handing write
+                        // ownership back to the capture thread.
+                        let _read_lease = shared_mirror
+                            .as_ref()
+                            .and_then(|m| m.acquire_read(8).ok());
 
                         // 0c. Forward any pending mirror hit to the real
                         // desktop. Move always; click only if a click was
@@ -276,6 +342,23 @@ pub fn run(
         }
     })?;
     Ok(())
+}
+
+/// Build both ends of the GPU-to-GPU mirror. Either returns the pair
+/// ready to drive, or an error describing which step failed so the
+/// caller can decide whether to fall back.
+fn try_setup_shared(
+    gpu: &GpuCtx,
+    monitor_index: u32,
+) -> Result<(SharedCapture, SharedMirror)> {
+    let luid = wgpu_adapter_luid(gpu);
+    let capture = SharedCapture::new(monitor_index, luid)
+        .context("SharedCapture::new")?;
+    let mirror = unsafe {
+        SharedMirror::open(gpu, capture.shared_handle_raw(), capture.width, capture.height)
+    }
+    .context("SharedMirror::open on wgpu DX12 device")?;
+    Ok((capture, mirror))
 }
 
 /// DXGI duplication pump. Runs on its own thread, publishes the newest frame

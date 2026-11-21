@@ -9,6 +9,8 @@
 pub mod backend;
 pub mod mirror;
 pub mod panel_view;
+#[cfg(windows)]
+pub mod shared;
 
 use anyhow::{Context, Result};
 use rsoverlay_core::RuntimeMode;
@@ -28,14 +30,15 @@ impl GpuCtx {
     pub async fn new(mode: RuntimeMode) -> Result<Self> {
         // For VR we must pick the DX12/DX11 adapter the HMD is on; for preview
         // we take whatever is primary.
-        // wgpu 0.19 removed DX11 as a distinct backend; DX12 is what we hand to
-        // OpenVR via the shared-handle interop (ID3D12Resource → ID3D11Texture2D
-        // via resource sharing). Preview mode takes the primary adapter.
-        let backends = if mode.is_vr() {
+        // DX12 on Windows is required for the GPU-to-GPU shared-handle
+        // interop (`rsoverlay-render::shared`). On Linux/macOS fall back
+        // to the primary (Vulkan / Metal).
+        let backends = if cfg!(windows) {
             Backends::DX12
         } else {
             Backends::PRIMARY
         };
+        let _ = mode;
         // Default off: the Vulkan validation layers + D3D12 debug layer dump
         // thousands of lines per run on dev machines that have the SDK
         // installed, and almost all of it is wgpu-0.19-known quirks (present

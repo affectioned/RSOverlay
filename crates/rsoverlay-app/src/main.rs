@@ -51,6 +51,12 @@ struct Args {
     #[arg(long)]
     no_mirror: bool,
 
+    /// Force the CPU readback capture path instead of the default
+    /// GPU-to-GPU shared-handle path. Useful for A/B latency comparison
+    /// and for working around driver bugs we haven't shaken out yet.
+    #[arg(long)]
+    no_gpu_mirror: bool,
+
     /// Print detected monitors and exit.
     #[arg(long)]
     list_monitors: bool,
@@ -114,6 +120,7 @@ fn main() -> Result<()> {
     let capture_cfg = preview::CaptureCfg {
         enabled: !args.no_mirror,
         monitor_index: args.monitor,
+        force_cpu: args.no_gpu_mirror,
     };
 
     let osc = if args.no_osc {

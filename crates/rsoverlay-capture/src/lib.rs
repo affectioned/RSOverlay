@@ -35,6 +35,11 @@ pub struct Frame {
 #[cfg(windows)]
 pub use dxgi::{enumerate_monitors, DxgiDuplication};
 
+#[cfg(windows)]
+pub mod shared;
+#[cfg(windows)]
+pub use shared::SharedCapture;
+
 #[cfg(not(windows))]
 pub fn enumerate_monitors() -> Result<Vec<MonitorInfo>> {
     Ok(Vec::new())

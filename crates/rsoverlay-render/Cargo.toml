@@ -16,3 +16,15 @@ pollster.workspace = true
 raw-window-handle.workspace = true
 rsoverlay-core.workspace = true
 rsoverlay-capture.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+wgpu-hal = { version = "0.19", features = ["dx12"] }
+d3d12 = "0.19"
+winapi = { version = "0.3", features = ["d3d12", "dxgi", "dxgi1_2", "dxgiformat", "unknwnbase"] }
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+] }

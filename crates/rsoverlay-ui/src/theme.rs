@@ -57,6 +57,18 @@ pub fn install(ctx: &egui::Context) {
     style.visuals.extreme_bg_color = BG_CARD;
     style.visuals.widgets.noninteractive.bg_fill = BG_CARD;
     style.spacing.item_spacing = egui::vec2(GUTTER, 8.0);
+    // Scrollbar — wide enough and bright enough to actually read against
+    // AMOLED-true-black. Default egui scrollbars disappear on #000.
+    style.spacing.scroll.bar_width = 10.0;
+    style.spacing.scroll.bar_inner_margin = 4.0;
+    style.spacing.scroll.bar_outer_margin = 2.0;
+    style.spacing.scroll.handle_min_length = 32.0;
+    style.visuals.widgets.inactive.bg_fill =
+        egui::Color32::from_rgb(0x2A, 0x2E, 0x34);
+    style.visuals.widgets.hovered.bg_fill =
+        egui::Color32::from_rgb(0x3A, 0x3E, 0x44);
+    style.visuals.widgets.active.bg_fill =
+        egui::Color32::from_rgb(0x55, 0x5A, 0x62);
     ctx.set_style(style);
 
     // Tabular numerals look right on data; we fake it by using the monospace

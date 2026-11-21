@@ -122,48 +122,44 @@ impl DevView {
                 ui.add_space(theme::GUTTER);
                 clock_card(ui, accent);
                 ui.add_space(theme::GUTTER);
-                // Content row: left column scrolls so its cards are always
-                // reachable even when the window is short. Right column holds
-                // the mirror, which sizes itself to the remaining width.
-                let row_height = ui.available_height();
+                // Content row: left column packs all cards vertically,
+                // right column holds the mirror. Default window height
+                // is sized to fit every left-column card without
+                // scrolling — if the user shrinks the window, bottom
+                // cards clip but that's a conscious resize choice.
                 ui.horizontal_top(|ui| {
-                    egui::ScrollArea::vertical()
-                        .id_source("left-col-scroll")
-                        .max_height(row_height)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.set_width(theme::COL_LEFT_WIDTH);
-                            if self.show_media {
-                                media_card(ui, self.media.as_ref(), accent);
-                                ui.add_space(theme::GUTTER);
+                    ui.vertical(|ui| {
+                        ui.set_width(theme::COL_LEFT_WIDTH);
+                        if self.show_media {
+                            media_card(ui, self.media.as_ref(), accent);
+                            ui.add_space(theme::GUTTER);
+                        }
+                        stats_card(
+                            ui,
+                            self.frame,
+                            self.last_fps,
+                            self.notifications_received,
+                            accent,
+                        );
+                        ui.add_space(theme::GUTTER);
+                        forward_toggle(ui, &mut self.forward_input, accent);
+                        ui.add_space(theme::GUTTER);
+                        if self.show_chat {
+                            if let Some(msg) =
+                                chatbox_card(ui, &mut self.chat_draft, accent)
+                            {
+                                self.pending_chat = Some(msg);
                             }
-                            stats_card(
-                                ui,
-                                self.frame,
-                                self.last_fps,
-                                self.notifications_received,
-                                accent,
-                            );
                             ui.add_space(theme::GUTTER);
-                            forward_toggle(ui, &mut self.forward_input, accent);
-                            ui.add_space(theme::GUTTER);
-                            if self.show_chat {
-                                if let Some(msg) =
-                                    chatbox_card(ui, &mut self.chat_draft, accent)
-                                {
-                                    self.pending_chat = Some(msg);
-                                }
-                                ui.add_space(theme::GUTTER);
-                            }
-                            appearance_card(
-                                ui,
-                                &mut self.accent,
-                                &mut self.show_mirror,
-                                &mut self.show_media,
-                                &mut self.show_chat,
-                            );
-                            ui.add_space(theme::GUTTER);
-                        });
+                        }
+                        appearance_card(
+                            ui,
+                            &mut self.accent,
+                            &mut self.show_mirror,
+                            &mut self.show_media,
+                            &mut self.show_chat,
+                        );
+                    });
                     ui.add_space(theme::GUTTER);
                     if self.show_mirror {
                         ui.vertical(|ui| {
@@ -288,33 +284,33 @@ fn appearance_card(
         ui.set_width(ui.available_width());
         card_header(ui, icons::SETTINGS, "Appearance", *accent);
         ui.add_space(6.0);
-        ui.label(theme::body_muted("Accent"));
+        // One row: all accent swatches + custom color picker, inline.
         ui.horizontal_wrapped(|ui| {
             for (name, preset) in theme::ACCENT_PRESETS {
                 let selected = *accent == *preset;
-                let size = egui::vec2(22.0, 22.0);
+                let size = egui::vec2(20.0, 20.0);
                 let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
                 let painter = ui.painter();
                 let center = rect.center();
-                painter.circle_filled(center, 9.0, *preset);
+                painter.circle_filled(center, 8.0, *preset);
                 if selected {
                     painter.circle_stroke(
                         center,
-                        11.0,
+                        10.0,
                         egui::Stroke::new(1.5_f32, theme::FG_PRIMARY),
                     );
                 }
                 resp.on_hover_text(*name).clicked().then(|| *accent = *preset);
             }
+            ui.color_edit_button_srgba(accent);
         });
-        ui.add_space(8.0);
-        ui.label(theme::body_muted("Custom"));
-        ui.color_edit_button_srgba(accent);
-        ui.add_space(10.0);
-        ui.label(theme::body_muted("Cards"));
-        ui.checkbox(show_mirror, "Desktop mirror");
-        ui.checkbox(show_media, "Now playing");
-        ui.checkbox(show_chat, "VRChat chatbox");
+        ui.add_space(6.0);
+        // One row: all card show/hide checkboxes side by side.
+        ui.horizontal_wrapped(|ui| {
+            ui.checkbox(show_mirror, "Mirror");
+            ui.checkbox(show_media, "Media");
+            ui.checkbox(show_chat, "Chat");
+        });
     });
 }
 
