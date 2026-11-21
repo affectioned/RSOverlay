@@ -47,6 +47,33 @@ pub struct CaptureCfg {
 pub struct TestHooks {
     pub screenshot: Option<std::path::PathBuf>,
     pub exit_after: Option<u64>,
+    pub overlay_pos: Option<(f32, f32, f32)>,
+    pub overlay_size: Option<(f32, f32)>,
+    pub overlay_anchor: Option<String>,
+}
+
+/// Apply CLI overrides to a default Placement. Any field not overridden
+/// keeps its default value.
+pub fn placement_with_overrides(test: &TestHooks) -> rsoverlay_ui::views::Placement {
+    let mut p = rsoverlay_ui::views::Placement::default();
+    if let Some((x, y, z)) = test.overlay_pos {
+        p.offset_x = x;
+        p.offset_y = y;
+        p.offset_z = z;
+    }
+    if let Some((w, h)) = test.overlay_size {
+        p.size_w = w;
+        p.size_h = h;
+    }
+    if let Some(a) = test.overlay_anchor.as_deref() {
+        p.anchor = match a.to_ascii_lowercase().as_str() {
+            "wrist" => rsoverlay_ui::views::Anchor::Wrist,
+            "hmd" | "head" => rsoverlay_ui::views::Anchor::Hmd,
+            "world" => rsoverlay_ui::views::Anchor::World,
+            _ => p.anchor,
+        };
+    }
+    p
 }
 
 /// Save the given surface frame to a PNG. BGRA → RGBA swizzle, then
@@ -160,7 +187,7 @@ const OVERLAY_TEX_SIZE: u32 = 2048;
 // Chatbox, Appearance) plus the Clock bar fits without scrolling at
 // default ppp. If users want smaller they can resize down.
 const INITIAL_WIN_W: u32 = 1280;
-const INITIAL_WIN_H: u32 = 1360;
+const INITIAL_WIN_H: u32 = 1600;
 
 pub fn run(
     mut notify: Option<NotifyChannel>,
@@ -237,6 +264,7 @@ pub fn run(
         None,
     );
     let mut dev_view = DevView::default();
+    dev_view.placement = placement_with_overrides(&test);
     let mut fps_counter = FpsCounter::new();
     let mut frame_counter: u64 = 0;
     let screenshot_path = test.screenshot.clone();

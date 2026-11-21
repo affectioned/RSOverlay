@@ -15,7 +15,10 @@ use glam::{Mat4, Quat, Vec3};
 use rsoverlay_core::RuntimeMode;
 use rsoverlay_notify::NotifyChannel;
 use rsoverlay_render::{GpuCtx, OverlayTarget};
-use rsoverlay_ui::{views::DevView, EguiPanel};
+use rsoverlay_ui::{
+    views::{Anchor, DevView, Placement},
+    EguiPanel,
+};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{info, warn};
@@ -89,6 +92,7 @@ pub fn run(_notify: Option<NotifyChannel>, test: crate::preview::TestHooks) -> R
         None,
     );
     let mut dev_view = DevView::default();
+    dev_view.placement = crate::preview::placement_with_overrides(&test);
 
     let mut scene = SceneRenderer::new(&gpu, surface_format, &overlay_target)?;
     let mut camera = OrbitCamera::default();
@@ -168,7 +172,14 @@ pub fn run(_notify: Option<NotifyChannel>, test: crate::preview::TestHooks) -> R
                         .texture
                         .create_view(&wgpu::TextureViewDescriptor::default());
                     let aspect = config.width as f32 / config.height.max(1) as f32;
-                    scene.render(&gpu, &camera, aspect, &view);
+                    scene.render(
+                        &gpu,
+                        &camera,
+                        &dev_view.placement,
+                        dev_view.accent,
+                        aspect,
+                        &view,
+                    );
 
                     frame_counter = frame_counter.wrapping_add(1);
                     if let Some(trigger) = exit_after {
@@ -283,27 +294,42 @@ impl OrbitCamera {
 /// Where the overlay quad lives relative to the viewer. Default: left
 /// wrist area, raised and tilted toward the face. Returns a model
 /// matrix that scales a unit quad into the overlay's physical size.
-const WRIST_POS: Vec3 = Vec3::new(-0.22, 1.30, -0.40);
 const HEAD_DEFAULT: Vec3 = Vec3::new(0.0, 1.6, 0.0);
 
-fn wrist_overlay_model() -> Mat4 {
-    // Physical overlay size: 36cm wide × 22.5cm tall (16:10 landscape,
-    // same aspect as the overlay texture). A bit larger than the default
-    // wrist panel in XSO/OVRT so the dashboard content reads at first
-    // glance without the user bringing their wrist to their face.
-    let width = 0.36;
-    let height = 0.225;
-    let scale = Mat4::from_scale(Vec3::new(width, height, 1.0));
-    let translate = Mat4::from_translation(WRIST_POS);
-
-    // Orient the quad so its +Z normal points at the viewer's default
-    // head position. This is the "facing you square" pose — same
-    // behaviour as an OVRT wrist panel that auto-tilts to face the HMD.
-    let forward = (HEAD_DEFAULT - WRIST_POS).normalize();
-    let quat = Quat::from_rotation_arc(Vec3::Z, forward);
-    let rot = Mat4::from_quat(quat);
-
-    translate * rot * scale
+/// Compute the model matrix for the overlay given the current
+/// placement + camera. For Anchor::Wrist / Anchor::World the quad is
+/// anchored in world space and auto-faces the viewer. For Anchor::Hmd
+/// the quad rides along with the camera's forward vector so it stays
+/// pinned in front of the head.
+fn overlay_model(placement: &Placement, camera: &OrbitCamera) -> Mat4 {
+    let scale = Mat4::from_scale(Vec3::new(placement.size_w, placement.size_h, 1.0));
+    match placement.anchor {
+        Anchor::Hmd => {
+            // Pin to the head — orient in the camera's local frame,
+            // place forward in front of the eyes by |offset_z|.
+            let eye = camera.eye();
+            let forward = camera.forward();
+            let right = forward.cross(Vec3::Y).normalize();
+            let up = right.cross(forward).normalize();
+            let pos = eye
+                + forward * (-placement.offset_z)
+                + right * placement.offset_x
+                + up * (placement.offset_y - camera.head_height);
+            let look_dir = (eye - pos).normalize();
+            let quat = Quat::from_rotation_arc(Vec3::Z, look_dir);
+            Mat4::from_translation(pos) * Mat4::from_quat(quat) * scale
+        }
+        Anchor::Wrist | Anchor::World => {
+            // Anchored in world space. Auto-face the default head pose
+            // so the panel reads cleanly from the natural standing
+            // viewpoint. Real VR wrist-mode will swap this for a
+            // controller-tracked position each frame.
+            let pos = Vec3::new(placement.offset_x, placement.offset_y, placement.offset_z);
+            let forward = (HEAD_DEFAULT - pos).normalize();
+            let quat = Quat::from_rotation_arc(Vec3::Z, forward);
+            Mat4::from_translation(pos) * Mat4::from_quat(quat) * scale
+        }
+    }
 }
 
 struct SceneRenderer {
@@ -312,7 +338,6 @@ struct SceneRenderer {
     camera_bgl: wgpu::BindGroupLayout,
     camera_bg: wgpu::BindGroup,
 
-    #[allow(dead_code)]
     quad_buf: wgpu::Buffer,
     quad_bg: wgpu::BindGroup,
     quad_pipeline: wgpu::RenderPipeline,
@@ -367,7 +392,7 @@ impl SceneRenderer {
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("vr-quad-model"),
                 contents: bytemuck::bytes_of(&QuadGpu {
-                    model: wrist_overlay_model().to_cols_array_2d(),
+                    model: Mat4::IDENTITY.to_cols_array_2d(),
                 }),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
@@ -511,10 +536,17 @@ impl SceneRenderer {
         })
     }
 
-    fn render(&mut self, gpu: &GpuCtx, camera: &OrbitCamera, aspect: f32, view: &wgpu::TextureView) {
+    fn render(
+        &mut self,
+        gpu: &GpuCtx,
+        camera: &OrbitCamera,
+        placement: &Placement,
+        accent: egui::Color32,
+        aspect: f32,
+        view: &wgpu::TextureView,
+    ) {
         let vp = camera.proj(aspect) * camera.view();
         let eye = camera.eye();
-        let accent = rsoverlay_ui::theme::ACCENT;
         let accent_v = [
             accent.r() as f32 / 255.0,
             accent.g() as f32 / 255.0,
@@ -528,6 +560,12 @@ impl SceneRenderer {
         };
         gpu.queue
             .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cam_gpu));
+
+        // Push the up-to-date overlay model matrix so sliders take
+        // effect next frame.
+        let model = overlay_model(placement, camera).to_cols_array_2d();
+        gpu.queue
+            .write_buffer(&self.quad_buf, 0, bytemuck::bytes_of(&QuadGpu { model }));
 
         let mut enc = gpu
             .device

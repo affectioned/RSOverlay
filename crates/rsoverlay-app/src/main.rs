@@ -87,6 +87,40 @@ struct Args {
     /// a non-interactive capture.
     #[arg(long, value_name = "N")]
     exit_after: Option<u64>,
+
+    /// Override the overlay position as x,y,z metres. Letting LLMs
+    /// test placement variants without a real click.
+    #[arg(long, value_name = "X,Y,Z", value_parser = parse_vec3)]
+    overlay_pos: Option<(f32, f32, f32)>,
+
+    /// Override the overlay size as w,h metres.
+    #[arg(long, value_name = "W,H", value_parser = parse_vec2)]
+    overlay_size: Option<(f32, f32)>,
+
+    /// Override the overlay anchor: wrist / hmd / world.
+    #[arg(long, value_name = "ANCHOR")]
+    overlay_anchor: Option<String>,
+}
+
+fn parse_vec3(s: &str) -> Result<(f32, f32, f32), String> {
+    let parts: Vec<&str> = s.split(',').collect();
+    if parts.len() != 3 {
+        return Err("expected X,Y,Z".into());
+    }
+    let x = parts[0].trim().parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
+    let y = parts[1].trim().parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
+    let z = parts[2].trim().parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
+    Ok((x, y, z))
+}
+
+fn parse_vec2(s: &str) -> Result<(f32, f32), String> {
+    let parts: Vec<&str> = s.split(',').collect();
+    if parts.len() != 2 {
+        return Err("expected W,H".into());
+    }
+    let w = parts[0].trim().parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
+    let h = parts[1].trim().parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
+    Ok((w, h))
 }
 
 impl Args {
@@ -153,6 +187,9 @@ fn main() -> Result<()> {
     let test_cfg = preview::TestHooks {
         screenshot: args.screenshot.clone(),
         exit_after: args.exit_after,
+        overlay_pos: args.overlay_pos,
+        overlay_size: args.overlay_size,
+        overlay_anchor: args.overlay_anchor.clone(),
     };
 
     let result = match mode {

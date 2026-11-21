@@ -16,6 +16,28 @@ runtime accent/card customization, SMTC now-playing, XSOverlay-compatible
 WebSocket notification server with live toasts, VRChat OSC `/chatbox/input`,
 `SendInput` mirror-to-desktop click forwarding.
 
+## XSOverlay feature-parity track
+
+These are the behaviors ex-XSO users expect, lifted from XSO's own
+Steam-page feature list. The RS-unique brutalist AMOLED visual design
+stays — only the interaction model matches.
+
+| XSO feature | RSOverlay status |
+|---|---|
+| SteamVR Input 2.0 bindings | planned |
+| Left / Middle / Right click + long-press / drag via laser | planned |
+| Window re-centering + grid view | planned |
+| Window move/scale/management at any range | **Placement card + CLI shipped**, grab/drag planned |
+| Curved overlays | planned (shader warp) |
+| User-editable localization | planned |
+| Auto keyboard layout from system | planned |
+| Custom keyboard sounds | planned |
+| Layout save / load | planned (serde to config.toml) |
+| Optional background-input blocking | planned |
+| **Notifications API** (toasts from 3rd-party apps) | **shipped** (M2) |
+| **Media player integrations** (now-playing, controls planned) | **shipped** (M5) — controls pending |
+| Discord Rich Presence | planned |
+
 ## Near-term (next 5 milestones, chosen by signal)
 
 Ranked by cross-wishlist demand × implementation cost in a Rust + wgpu stack.

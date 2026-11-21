@@ -34,6 +34,58 @@ pub struct MirrorHit {
     pub clicked: bool,
 }
 
+/// Where the overlay is anchored in space. XSOverlay-style spatial
+/// states, so users migrating from XSO have the same mental model.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Anchor {
+    /// Follows the non-dominant hand controller.
+    Wrist,
+    /// Follows the HMD — always in view.
+    Hmd,
+    /// Pinned to a fixed world-space position. Doesn't move with
+    /// the body or head.
+    World,
+}
+
+impl Anchor {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Wrist => "Wrist",
+            Self::Hmd => "HMD-locked",
+            Self::World => "World-pinned",
+        }
+    }
+}
+
+/// Placement state the VR preview + eventual real-VR submission pipe
+/// both read from. Offset coordinates are in metres, local to whatever
+/// the current anchor is. This mirrors XSO's "Edit → Position" workflow:
+/// pick an anchor, tweak offset, grab-to-undock (future milestone).
+#[derive(Copy, Clone, Debug)]
+pub struct Placement {
+    pub anchor: Anchor,
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub offset_z: f32,
+    pub size_w: f32,
+    pub size_h: f32,
+}
+
+impl Default for Placement {
+    fn default() -> Self {
+        Self {
+            anchor: Anchor::Wrist,
+            // Natural wrist-glance offset, same numbers the VR preview
+            // used to hardcode. Tweakable by the user now.
+            offset_x: -0.22,
+            offset_y: 1.30,
+            offset_z: -0.40,
+            size_w: 0.36,
+            size_h: 0.225,
+        }
+    }
+}
+
 pub struct DevView {
     pub frame: u64,
     pub last_fps: f32,
@@ -43,6 +95,9 @@ pub struct DevView {
     pub show_mirror: bool,
     pub show_media: bool,
     pub show_chat: bool,
+    /// Spatial placement of the overlay quad. The VR preview reads
+    /// this every frame to position the quad; VR mode will too.
+    pub placement: Placement,
     pending_hit: Option<MirrorHit>,
     toasts: VecDeque<Toast>,
     notifications_received: u64,
@@ -63,6 +118,7 @@ impl Default for DevView {
             show_mirror: true,
             show_media: true,
             show_chat: true,
+            placement: Placement::default(),
             pending_hit: None,
             toasts: VecDeque::new(),
             notifications_received: 0,
@@ -159,6 +215,8 @@ impl DevView {
                             &mut self.show_media,
                             &mut self.show_chat,
                         );
+                        ui.add_space(theme::GUTTER);
+                        placement_card(ui, &mut self.placement, accent);
                     });
                     ui.add_space(theme::GUTTER);
                     if self.show_mirror {
@@ -270,6 +328,42 @@ fn stats_card(ui: &mut egui::Ui, frame_count: u64, fps: f32, notifs: u64, accent
         kv(ui, "fps", &format!("{:.1}", fps));
         kv(ui, "notifications", &notifs.to_string());
         kv(ui, "ws bind", "127.0.0.1:42069");
+    });
+}
+
+fn placement_card(ui: &mut egui::Ui, p: &mut Placement, accent: egui::Color32) {
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::POINTER, "Placement", accent);
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            for a in [Anchor::Wrist, Anchor::Hmd, Anchor::World] {
+                let selected = p.anchor == a;
+                let label = egui::RichText::new(a.label())
+                    .color(if selected { accent } else { theme::FG_MUTED });
+                if ui.selectable_label(selected, label).clicked() {
+                    p.anchor = a;
+                }
+            }
+        });
+        ui.add_space(6.0);
+        placement_slider(ui, "X", &mut p.offset_x, -0.6, 0.6);
+        placement_slider(ui, "Y", &mut p.offset_y, 0.8, 2.0);
+        placement_slider(ui, "Z", &mut p.offset_z, -1.0, 0.0);
+        ui.add_space(4.0);
+        placement_slider(ui, "W", &mut p.size_w, 0.1, 0.8);
+        placement_slider(ui, "H", &mut p.size_h, 0.08, 0.6);
+    });
+}
+
+fn placement_slider(ui: &mut egui::Ui, label: &str, v: &mut f32, lo: f32, hi: f32) {
+    ui.horizontal(|ui| {
+        ui.label(theme::body_muted(label));
+        ui.add(
+            egui::Slider::new(v, lo..=hi)
+                .fixed_decimals(2)
+                .show_value(true),
+        );
     });
 }
 
