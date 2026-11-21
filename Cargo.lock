@@ -2140,6 +2140,7 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "clap",
+ "d3d12",
  "egui",
  "egui-winit",
  "glam",
@@ -2158,6 +2159,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wgpu",
+ "wgpu-hal",
+ "winapi",
  "windows",
  "winit",
 ]

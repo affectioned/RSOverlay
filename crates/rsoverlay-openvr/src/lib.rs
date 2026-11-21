@@ -204,6 +204,36 @@ impl<'a> Overlay<'a> {
         check(r, "SetOverlayTexture")
     }
 
+    /// Submit a Direct3D 12 texture to the overlay.
+    ///
+    /// # Safety
+    /// `resource_ptr` must be a valid `ID3D12Resource*` whose lifetime
+    /// extends past this call. `command_queue_ptr` must be the
+    /// `ID3D12CommandQueue*` the resource was most recently rendered on
+    /// — OpenVR synchronizes with that queue before sampling.
+    pub unsafe fn set_texture_d3d12(
+        &self,
+        handle: VROverlayHandle_t,
+        resource_ptr: *mut std::os::raw::c_void,
+        command_queue_ptr: *mut std::os::raw::c_void,
+    ) -> Result<(), OpenVrError> {
+        // D3D12TextureData_t is what OpenVR actually reads from
+        // `Texture_t.handle` when eType == DirectX12. See sys.rs for the
+        // layout.
+        let data = sys::D3D12TextureData_t {
+            m_pResource: resource_ptr,
+            m_pCommandQueue: command_queue_ptr,
+            m_nNodeMask: 0,
+        };
+        let tex = Texture_t {
+            handle: &data as *const _ as *mut std::os::raw::c_void,
+            eType: sys::ETextureType_DirectX12,
+            eColorSpace: sys::EColorSpace_Auto,
+        };
+        let r = (self.table().SetOverlayTexture)(handle, &tex);
+        check(r, "SetOverlayTexture (D3D12)")
+    }
+
     pub fn clear_texture(&self, handle: VROverlayHandle_t) -> Result<(), OpenVrError> {
         let r = unsafe { (self.table().ClearOverlayTexture)(handle) };
         check(r, "ClearOverlayTexture")

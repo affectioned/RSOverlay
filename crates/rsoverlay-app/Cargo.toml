@@ -34,6 +34,9 @@ png = "0.17"
 
 [target.'cfg(windows)'.dependencies]
 rsoverlay-openvr.workspace = true
+wgpu-hal = { version = "0.19", features = ["dx12"] }
+d3d12 = "0.19"
+winapi = { version = "0.3", features = ["d3d12", "dxgi", "dxgitype", "dxgiformat", "unknwnbase"] }
 windows = { workspace = true, features = [
     "Win32_Graphics_Direct3D",
     "Win32_Graphics_Direct3D11",

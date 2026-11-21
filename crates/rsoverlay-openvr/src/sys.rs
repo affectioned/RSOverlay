@@ -27,7 +27,20 @@ pub type ETextureType = i32;
 pub const ETextureType_DirectX: ETextureType = 0;
 pub const ETextureType_OpenGL: ETextureType = 1;
 pub const ETextureType_Vulkan: ETextureType = 2;
+pub const ETextureType_DirectX12: ETextureType = 4;
 pub const ETextureType_DXGISharedHandle: ETextureType = 5;
+
+/// `D3D12TextureData_t` — the payload OpenVR expects in `Texture_t.handle`
+/// when submitting a Direct3D 12 texture. The compositor needs the raw
+/// resource pointer and the command queue it was last rendered on, so it
+/// can synchronize with that queue before reading.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct D3D12TextureData_t {
+    pub m_pResource: *mut c_void,
+    pub m_pCommandQueue: *mut c_void,
+    pub m_nNodeMask: u32,
+}
 
 pub type EColorSpace = i32;
 pub const EColorSpace_Auto: EColorSpace = 0;

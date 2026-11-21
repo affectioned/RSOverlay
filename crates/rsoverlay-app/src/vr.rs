@@ -1,43 +1,26 @@
-//! SteamVR runtime path.
+//! SteamVR runtime path — renders the egui dashboard into a wgpu DX12
+//! texture and submits it to OpenVR via the DirectX 12 texture type.
 //!
-//! Scope of this milestone: hit the P0 acceptance — "red square appears 2 m
-//! in front of the HMD in SteamVR, Ctrl+C shuts down with no leaked overlay
-//! handles."
-//!
-//! Implementation: stand up a dedicated D3D11 device, create a BGRA8 render
-//! target texture, clear it to red every frame, and submit it to OpenVR via
-//! `SetOverlayTexture` with `eType = DirectX`. A richer wgpu-rendered overlay
-//! (egui, mirror, notifications) follows once we wire the DXGI shared-handle
-//! interop with the preview-mode wgpu render target.
+//! No desktop window exists in this mode: everything the user sees is
+//! submitted to the compositor. For debugging, launch `--vr-preview`
+//! alongside to see the same dashboard in a desktop 3D scene.
 
 #[cfg(windows)]
 mod imp {
     use anyhow::{anyhow, Context, Result};
     use rsoverlay_notify::NotifyChannel;
     use rsoverlay_openvr::{pose_translation, OpenVr};
+    use rsoverlay_render::GpuCtx;
+    use rsoverlay_ui::{views::DevView, EguiPanel};
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::runtime::Handle;
     use tracing::{info, warn};
-    use windows::Win32::Foundation::HMODULE;
-    use windows::Win32::Graphics::Direct3D::{
-        D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_11_0,
-    };
-    use windows::Win32::Graphics::Direct3D11::{
-        D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11RenderTargetView,
-        ID3D11Texture2D, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE,
-        D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
-        D3D11_USAGE_DEFAULT,
-    };
-    use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
 
-    // See preview.rs OVERLAY_TEX_SIZE for the per-HMD sizing math — same
-    // rationale applies here, we're painting the texture the compositor
-    // samples onto the headset display.
-    const TEX_SIZE: u32 = 2048;
-    const CLEAR_RGBA: [f32; 4] = [0.85, 0.07, 0.14, 1.0];
+    const OVERLAY_TEX_W: u32 = 2048;
+    const OVERLAY_TEX_H: u32 = 1280;
 
     pub fn run(_notify: Option<NotifyChannel>, rt: Handle) -> Result<()> {
         let vr = OpenVr::init().context("OpenVR init")?;
@@ -46,24 +29,40 @@ mod imp {
         let handle = overlay
             .create("rsoverlay.main", "RSOverlay")
             .context("CreateOverlay")?;
-        overlay.set_width(handle, 1.0).ok();
-        let pose = pose_translation(0.0, 1.5, -2.0);
-        overlay.set_transform_absolute(handle, &pose).ok();
+        overlay
+            .set_width(handle, 0.6)
+            .context("SetOverlayWidthInMeters")?;
+        // Pose: world-fixed overlay 1.5m in front of the standing-universe
+        // origin at eye level. Wrist / HMD / World anchoring is wired for
+        // preview already; adding controller-tracked poses lands next
+        // milestone (needs IVRInput + pose polling).
+        let pose = pose_translation(0.0, 1.5, -1.5);
+        overlay
+            .set_transform_absolute(handle, &pose)
+            .context("SetOverlayTransformAbsolute")?;
 
-        // Build D3D11 device + overlay texture.
-        let (device, context, texture, rtv) = create_overlay_texture(TEX_SIZE)?;
+        // Set up wgpu DX12 for the overlay texture. Same path the
+        // preview uses so what you see in `--vr-preview` is what the
+        // HMD gets.
+        let gpu = pollster::block_on(GpuCtx::new(rsoverlay_core::RuntimeMode::Vr))
+            .context("building wgpu GpuCtx")?;
 
-        // Fill once — OpenVR holds a reference to the texture via SetOverlayTexture.
-        unsafe { context.ClearRenderTargetView(&rtv, &CLEAR_RGBA) };
+        // Build a D3D12 resource that wgpu owns through its normal API,
+        // *and* capture its raw ID3D12Resource + CommandQueue pointers
+        // so we can hand them to OpenVR each frame.
+        let (overlay_tex, overlay_view, raw_resource, raw_queue) =
+            build_shared_overlay_texture(&gpu, OVERLAY_TEX_W, OVERLAY_TEX_H)?;
+        let overlay_format = overlay_tex.format();
 
-        let tex_ptr: *mut c_void = texture_raw_ptr(&texture);
-        unsafe {
-            overlay
-                .set_texture_d3d11(handle, tex_ptr)
-                .context("SetOverlayTexture")?;
-        }
+        let mut egui_panel =
+            EguiPanel::new(&gpu.device, overlay_format, OVERLAY_TEX_W, OVERLAY_TEX_H);
+        let mut dev_view = DevView::default();
+
         overlay.show(handle).ok();
-        info!("overlay registered at (0, 1.5, -2) with red {TEX_SIZE}x{TEX_SIZE} texture");
+        info!(
+            "OpenVR overlay registered at (0, 1.5, -1.5) — \
+             dashboard streaming via DirectX 12"
+        );
 
         let running = Arc::new(AtomicBool::new(true));
         let r = running.clone();
@@ -73,94 +72,170 @@ mod imp {
             }
         });
 
-        // Keep the texture alive and the main thread responsive while OpenVR
-        // continues compositing. ClearRenderTargetView again periodically so
-        // the compositor sees us as live.
+        let mut frame = 0u64;
         while running.load(Ordering::SeqCst) {
-            unsafe { context.ClearRenderTargetView(&rtv, &CLEAR_RGBA) };
+            // 1. Render the dashboard into the overlay texture. No window
+            // input — we pass an empty RawInput. Interaction via laser
+            // pointer / controller lands in the next milestone.
+            frame = frame.wrapping_add(1);
+            dev_view.frame = frame;
+            let raw_input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(
+                        OVERLAY_TEX_W as f32 / 1.5,
+                        OVERLAY_TEX_H as f32 / 1.5,
+                    ),
+                )),
+                ..Default::default()
+            };
+            egui_panel.render(
+                &gpu.device,
+                &gpu.queue,
+                &overlay_view,
+                raw_input,
+                |ctx| dev_view.ui(ctx),
+            );
+
+            // 2. Hand the raw D3D12 resource + queue to OpenVR. The
+            // compositor waits on the queue before sampling, so the
+            // frame we just submitted is guaranteed-visible.
             unsafe {
-                if let Err(e) = overlay.set_texture_d3d11(handle, tex_ptr) {
-                    warn!("resubmitting overlay texture failed: {e:#}");
+                if let Err(e) = overlay.set_texture_d3d12(handle, raw_resource, raw_queue) {
+                    warn!("SetOverlayTexture (D3D12): {e:#}");
                 }
             }
-            std::thread::sleep(Duration::from_millis(16));
+
+            std::thread::sleep(Duration::from_millis(11));
         }
 
         overlay.hide(handle).ok();
         overlay.clear_texture(handle).ok();
         overlay.destroy(handle).ok();
-
-        // Explicit drops to guarantee the D3D11 objects outlive the final
-        // OpenVR submission (OpenVR takes its own reference, but we keep the
-        // order explicit for the reader).
-        drop(rtv);
-        drop(texture);
-        drop(context);
-        drop(device);
-
         info!("clean shutdown");
         Ok(())
     }
 
-    fn create_overlay_texture(
-        size: u32,
-    ) -> Result<(
-        ID3D11Device,
-        ID3D11DeviceContext,
-        ID3D11Texture2D,
-        ID3D11RenderTargetView,
-    )> {
-        unsafe {
-            let mut device: Option<ID3D11Device> = None;
-            let mut context: Option<ID3D11DeviceContext> = None;
-            let mut feature_level = D3D_FEATURE_LEVEL::default();
-            let fl = [D3D_FEATURE_LEVEL_11_0];
-            D3D11CreateDevice(
-                None,
-                D3D_DRIVER_TYPE_HARDWARE,
-                HMODULE::default(),
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                Some(&fl),
-                D3D11_SDK_VERSION,
-                Some(&mut device),
-                Some(&mut feature_level),
-                Some(&mut context),
+    /// Create a BGRA8 texture that wgpu renders into and OpenVR
+    /// consumes. The resource is built via `wgpu-hal::dx12` so we can
+    /// retain the raw `ID3D12Resource*` + `ID3D12CommandQueue*`
+    /// pointers for OpenVR submission.
+    fn build_shared_overlay_texture(
+        gpu: &GpuCtx,
+        width: u32,
+        height: u32,
+    ) -> Result<(wgpu::Texture, wgpu::TextureView, *mut c_void, *mut c_void)> {
+        use wgpu::{
+            Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+        };
+
+        // Access the raw D3D12 device + queue through wgpu-hal. Both
+        // are needed: the device to create the committed resource, the
+        // queue so OpenVR can sync with us.
+        #[allow(clippy::type_complexity)]
+        let built: Result<(d3d12::Resource, *mut c_void, *mut c_void)> = unsafe {
+            gpu.device
+                .as_hal::<wgpu_hal::api::Dx12, _, _>(|hal_device| -> Result<_> {
+                    let hal_device = hal_device
+                        .ok_or_else(|| anyhow!("wgpu is not on the DX12 backend"))?;
+                    let raw_device = hal_device.raw_device(); // &d3d12::Device
+                    let raw_queue = hal_device.raw_queue(); // &d3d12::CommandQueue
+
+                    // CreateCommittedResource with a DEFAULT heap and
+                    // RENDER_TARGET | SHADER_RESOURCE flags. OpenVR
+                    // transitions state as needed on its own queue
+                    // synchronization.
+                    let mut raw_res: *mut winapi::um::d3d12::ID3D12Resource =
+                        std::ptr::null_mut();
+                    let heap_props = winapi::um::d3d12::D3D12_HEAP_PROPERTIES {
+                        Type: winapi::um::d3d12::D3D12_HEAP_TYPE_DEFAULT,
+                        CPUPageProperty:
+                            winapi::um::d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+                        MemoryPoolPreference:
+                            winapi::um::d3d12::D3D12_MEMORY_POOL_UNKNOWN,
+                        CreationNodeMask: 1,
+                        VisibleNodeMask: 1,
+                    };
+                    let desc = winapi::um::d3d12::D3D12_RESOURCE_DESC {
+                        Dimension:
+                            winapi::um::d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+                        Alignment: 0,
+                        Width: width as u64,
+                        Height: height,
+                        DepthOrArraySize: 1,
+                        MipLevels: 1,
+                        Format: winapi::shared::dxgiformat::DXGI_FORMAT_B8G8R8A8_UNORM,
+                        SampleDesc: winapi::shared::dxgitype::DXGI_SAMPLE_DESC {
+                            Count: 1,
+                            Quality: 0,
+                        },
+                        Layout:
+                            winapi::um::d3d12::D3D12_TEXTURE_LAYOUT_UNKNOWN,
+                        Flags: winapi::um::d3d12::D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET
+                            | winapi::um::d3d12::D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS,
+                    };
+                    let iid = <winapi::um::d3d12::ID3D12Resource as winapi::Interface>::uuidof();
+                    let hr = (*raw_device.as_mut_ptr()).CreateCommittedResource(
+                        &heap_props,
+                        winapi::um::d3d12::D3D12_HEAP_FLAG_NONE,
+                        &desc,
+                        winapi::um::d3d12::D3D12_RESOURCE_STATE_COMMON,
+                        std::ptr::null(),
+                        &iid,
+                        &mut raw_res as *mut _ as *mut *mut c_void,
+                    );
+                    if hr < 0 || raw_res.is_null() {
+                        return Err(anyhow!(
+                            "CreateCommittedResource failed hr={hr:#x}"
+                        ));
+                    }
+                    let res_void = raw_res as *mut c_void;
+                    let queue_void = raw_queue.as_mut_ptr() as *mut c_void;
+                    // `d3d12::Resource` is an alias for ComPtr<ID3D12Resource>.
+                    let d3d12_resource: d3d12::Resource =
+                        d3d12::ComPtr::from_raw(raw_res);
+                    Ok((d3d12_resource, res_void, queue_void))
+                })
+                .ok_or_else(|| anyhow!("wgpu not on the wgpu-core backend"))?
+        };
+        let (d3d12_resource, res_void, queue_void) = built?;
+
+        let hal_tex = unsafe {
+            wgpu_hal::dx12::Device::texture_from_raw(
+                d3d12_resource,
+                TextureFormat::Bgra8Unorm,
+                TextureDimension::D2,
+                Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                1,
+                1,
             )
-            .context("D3D11CreateDevice")?;
-            let device = device.ok_or_else(|| anyhow!("D3D11CreateDevice returned null"))?;
-            let context = context.ok_or_else(|| anyhow!("no immediate context"))?;
+        };
 
-            let desc = D3D11_TEXTURE2D_DESC {
-                Width: size,
-                Height: size,
-                MipLevels: 1,
-                ArraySize: 1,
-                Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
-                Usage: D3D11_USAGE_DEFAULT,
-                BindFlags: (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32,
-                CPUAccessFlags: 0,
-                MiscFlags: 0,
-            };
-            let mut tex: Option<ID3D11Texture2D> = None;
-            device
-                .CreateTexture2D(&desc, None, Some(&mut tex))
-                .context("CreateTexture2D overlay")?;
-            let texture = tex.ok_or_else(|| anyhow!("CreateTexture2D returned null"))?;
+        let desc = TextureDescriptor {
+            label: Some("vr-overlay-target"),
+            size: Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Bgra8Unorm,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        };
+        let wgpu_tex = unsafe {
+            gpu.device
+                .create_texture_from_hal::<wgpu_hal::api::Dx12>(hal_tex, &desc)
+        };
+        let view = wgpu_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
-            let mut rtv: Option<ID3D11RenderTargetView> = None;
-            device
-                .CreateRenderTargetView(&texture, None, Some(&mut rtv))
-                .context("CreateRenderTargetView")?;
-            let rtv = rtv.ok_or_else(|| anyhow!("CreateRenderTargetView returned null"))?;
-
-            Ok((device, context, texture, rtv))
-        }
-    }
-
-    fn texture_raw_ptr(tex: &ID3D11Texture2D) -> *mut c_void {
-        use windows::core::Interface;
-        tex.as_raw()
+        Ok((wgpu_tex, view, res_void, queue_void))
     }
 }
 
