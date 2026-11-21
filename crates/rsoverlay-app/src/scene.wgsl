@@ -65,12 +65,14 @@ fn vs_quad(@builtin(vertex_index) vid: u32) -> VsOut {
 @fragment
 fn fs_quad(in: VsOut) -> @location(0) vec4<f32> {
     let overlay = textureSample(overlay_tex, overlay_samp, in.uv);
-    // A soft inner glow in the chosen accent along the quad edges — the
-    // same cue SteamVR uses to make overlays feel "present" in-space.
+    // Thin accent-colored frame at the very edge so the AMOLED-black
+    // card has a clear silhouette against the void — SteamVR uses the
+    // same cue to make overlays feel "present". Kept narrow (< 2% of
+    // the quad on each side) so the UI interior reads at full contrast.
     let dist = min(min(in.uv.x, 1.0 - in.uv.x), min(in.uv.y, 1.0 - in.uv.y));
-    let edge = pow(1.0 - clamp(dist * 14.0, 0.0, 1.0), 2.0);
-    let glow = cam.accent.rgb * edge * 0.35;
-    return vec4<f32>(overlay.rgb + glow, overlay.a);
+    let frame = 1.0 - smoothstep(0.004, 0.018, dist);
+    let frame_col = cam.accent.rgb * frame * 0.9;
+    return vec4<f32>(overlay.rgb + frame_col, 1.0);
 }
 
 // ─── Chaperone floor grid ────────────────────────────────────────────

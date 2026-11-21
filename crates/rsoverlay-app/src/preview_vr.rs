@@ -11,7 +11,7 @@
 //! preview and VR mode use, so visual parity is maintained.
 
 use anyhow::{Context, Result};
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Quat, Vec3};
 use rsoverlay_core::RuntimeMode;
 use rsoverlay_notify::NotifyChannel;
 use rsoverlay_render::{GpuCtx, OverlayTarget};
@@ -27,7 +27,11 @@ use winit::{
     window::WindowBuilder,
 };
 
-const OVERLAY_TEX_SIZE: u32 = 2048;
+// Dashboard aspect is landscape — mirror on the right, card column on
+// the left. Pick an overlay texture that matches so the egui UI fills
+// the quad instead of leaving a big black band.
+const OVERLAY_TEX_W: u32 = 2048;
+const OVERLAY_TEX_H: u32 = 1280;
 const INITIAL_WIN_W: u32 = 1280;
 const INITIAL_WIN_H: u32 = 800;
 
@@ -70,7 +74,7 @@ pub fn run(_notify: Option<NotifyChannel>, test: crate::preview::TestHooks) -> R
 
     // Overlay texture lives at VR resolution regardless of window — it's
     // what would be submitted to OpenVR for real.
-    let overlay_target = OverlayTarget::new(&gpu, OVERLAY_TEX_SIZE, OVERLAY_TEX_SIZE);
+    let overlay_target = OverlayTarget::new(&gpu, OVERLAY_TEX_W, OVERLAY_TEX_H);
     let mut egui_panel = EguiPanel::new(
         &gpu.device,
         overlay_target.format,
@@ -225,11 +229,14 @@ struct OrbitCamera {
 
 impl Default for OrbitCamera {
     fn default() -> Self {
+        // Natural wrist-glance: yaw slightly toward the left wrist,
+        // pitch tilted ~25° down. With the overlay auto-facing the
+        // viewer, these need less lean than a fixed-tilt panel would.
         Self {
-            yaw: 0.0,
-            pitch: -0.15, // looking slightly down toward the wrist
+            yaw: -0.18,
+            pitch: -0.45,
             head_height: 1.6,
-            dolly: 0.0,
+            dolly: 0.05,
         }
     }
 }
@@ -276,18 +283,26 @@ impl OrbitCamera {
 /// Where the overlay quad lives relative to the viewer. Default: left
 /// wrist area, raised and tilted toward the face. Returns a model
 /// matrix that scales a unit quad into the overlay's physical size.
+const WRIST_POS: Vec3 = Vec3::new(-0.22, 1.30, -0.40);
+const HEAD_DEFAULT: Vec3 = Vec3::new(0.0, 1.6, 0.0);
+
 fn wrist_overlay_model() -> Mat4 {
-    // Physical overlay size: 25cm wide × 25cm tall.
-    let width = 0.25;
-    let height = 0.25;
+    // Physical overlay size: 36cm wide × 22.5cm tall (16:10 landscape,
+    // same aspect as the overlay texture). A bit larger than the default
+    // wrist panel in XSO/OVRT so the dashboard content reads at first
+    // glance without the user bringing their wrist to their face.
+    let width = 0.36;
+    let height = 0.225;
     let scale = Mat4::from_scale(Vec3::new(width, height, 1.0));
-    // Translate: left of center, below eye line, close to the face —
-    // matches a palm-up wrist glance.
-    let translate = Mat4::from_translation(Vec3::new(-0.18, 1.35, -0.42));
-    // Rotate: tilt backward 25° so the overlay faces the user; yaw
-    // 15° so the left wrist naturally rolls the surface forward.
-    let rot = Mat4::from_rotation_x(25f32.to_radians())
-        * Mat4::from_rotation_y(15f32.to_radians());
+    let translate = Mat4::from_translation(WRIST_POS);
+
+    // Orient the quad so its +Z normal points at the viewer's default
+    // head position. This is the "facing you square" pose — same
+    // behaviour as an OVRT wrist panel that auto-tilts to face the HMD.
+    let forward = (HEAD_DEFAULT - WRIST_POS).normalize();
+    let quat = Quat::from_rotation_arc(Vec3::Z, forward);
+    let rot = Mat4::from_quat(quat);
+
     translate * rot * scale
 }
 
