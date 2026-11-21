@@ -26,6 +26,7 @@ pub struct Appearance {
     pub show_media: bool,
     pub show_chat: bool,
     pub show_keyboard: bool,
+    pub show_history: bool,
     pub forward_input: bool,
 }
 
@@ -37,6 +38,7 @@ impl Default for Appearance {
             show_media: true,
             show_chat: true,
             show_keyboard: false,
+            show_history: false,
             forward_input: false,
         }
     }

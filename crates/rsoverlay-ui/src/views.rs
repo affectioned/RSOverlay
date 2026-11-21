@@ -25,6 +25,16 @@ struct Toast {
     expires: Instant,
 }
 
+/// One entry in the scrollable notification history. Tracks the arrival
+/// instant so we can render a relative "5m ago" timestamp rather than
+/// clock time, which is more actionable in VR where you'd otherwise
+/// have to subtract.
+#[derive(Clone)]
+struct HistoryEntry {
+    n: Notification,
+    received: Instant,
+}
+
 /// Mouse interaction reported by the mirror this frame. Coordinates are in
 /// the monitor's pixel space (origin top-left of the monitor).
 #[derive(Copy, Clone, Debug)]
@@ -96,12 +106,14 @@ pub struct DevView {
     pub show_media: bool,
     pub show_chat: bool,
     pub show_keyboard: bool,
+    pub show_history: bool,
     /// Spatial placement of the overlay quad. The VR preview reads
     /// this every frame to position the quad; VR mode will too.
     pub placement: Placement,
     pub keyboard: crate::keyboard::Keyboard,
     pending_hit: Option<MirrorHit>,
     toasts: VecDeque<Toast>,
+    history: VecDeque<HistoryEntry>,
     notifications_received: u64,
     media: Option<MediaInfo>,
     last_media_poll: Instant,
@@ -121,10 +133,12 @@ impl Default for DevView {
             show_media: true,
             show_chat: true,
             show_keyboard: false,
+            show_history: false,
             placement: Placement::default(),
             keyboard: crate::keyboard::Keyboard::default(),
             pending_hit: None,
             toasts: VecDeque::new(),
+            history: VecDeque::new(),
             notifications_received: 0,
             media: None,
             last_media_poll: Instant::now() - Duration::from_secs(10),
@@ -136,13 +150,28 @@ impl Default for DevView {
 
 impl DevView {
     pub fn push_notification(&mut self, n: Notification) {
+        const MAX_HISTORY: usize = 50;
         self.notifications_received += 1;
         let timeout = n.timeout.clamp(0.5, 30.0);
         let expires = Instant::now() + Duration::from_secs_f32(timeout);
+        self.history.push_back(HistoryEntry {
+            n: n.clone(),
+            received: Instant::now(),
+        });
+        while self.history.len() > MAX_HISTORY {
+            self.history.pop_front();
+        }
         self.toasts.push_back(Toast { n, expires });
         while self.toasts.len() > 8 {
             self.toasts.pop_front();
         }
+    }
+
+    /// Clear every live toast + the full history. XSO's #131 cluster:
+    /// one action dismisses everything, including the backlog.
+    pub fn clear_all_notifications(&mut self) {
+        self.toasts.clear();
+        self.history.clear();
     }
 
     pub fn notifications_received(&self) -> u64 {
@@ -225,6 +254,12 @@ impl DevView {
                             }
                             ui.add_space(theme::GUTTER);
                         }
+                        if self.show_history {
+                            if history_card(ui, &self.history, accent) {
+                                self.clear_all_notifications();
+                            }
+                            ui.add_space(theme::GUTTER);
+                        }
                         appearance_card(
                             ui,
                             &mut self.accent,
@@ -232,6 +267,7 @@ impl DevView {
                             &mut self.show_media,
                             &mut self.show_chat,
                             &mut self.show_keyboard,
+                            &mut self.show_history,
                         );
                         ui.add_space(theme::GUTTER);
                         placement_card(ui, &mut self.placement, accent);
@@ -430,6 +466,94 @@ fn placement_slider(ui: &mut egui::Ui, label: &str, v: &mut f32, lo: f32, hi: f3
     });
 }
 
+/// Scrollable history of notifications received this session. Returns
+/// true when the user hit "Clear all" so the caller can wipe history +
+/// any still-visible toasts in one shot.
+fn history_card(
+    ui: &mut egui::Ui,
+    history: &VecDeque<HistoryEntry>,
+    accent: egui::Color32,
+) -> bool {
+    let mut cleared = false;
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            card_header(ui, icons::BELL, "Notifications", accent);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let clear = ui.add_enabled(
+                    !history.is_empty(),
+                    egui::Button::new(
+                        egui::RichText::new("Clear all")
+                            .color(if history.is_empty() {
+                                theme::FG_MUTED
+                            } else {
+                                accent
+                            })
+                            .size(theme::SIZE_CAPTION)
+                            .extra_letter_spacing(1.0),
+                    ),
+                );
+                if clear.clicked() {
+                    cleared = true;
+                }
+            });
+        });
+        ui.add_space(6.0);
+        if history.is_empty() {
+            ui.label(theme::body_muted("no notifications yet"));
+            return;
+        }
+        egui::ScrollArea::vertical()
+            .max_height(220.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                for entry in history.iter().rev() {
+                    history_entry_row(ui, entry);
+                    ui.add_space(4.0);
+                }
+            });
+    });
+    cleared
+}
+
+fn history_entry_row(ui: &mut egui::Ui, entry: &HistoryEntry) {
+    let rel = relative_time(entry.received.elapsed());
+    ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            if !entry.n.title.is_empty() {
+                ui.label(
+                    egui::RichText::new(&entry.n.title)
+                        .strong()
+                        .color(theme::FG_PRIMARY),
+                );
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new(rel)
+                        .size(theme::SIZE_CAPTION)
+                        .color(theme::FG_MUTED),
+                );
+            });
+        });
+        if !entry.n.content.is_empty() {
+            ui.label(theme::body_muted(&entry.n.content));
+        }
+    });
+}
+
+fn relative_time(d: Duration) -> String {
+    let secs = d.as_secs();
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h", secs / 3600)
+    } else {
+        format!("{}d", secs / 86400)
+    }
+}
+
 fn appearance_card(
     ui: &mut egui::Ui,
     accent: &mut egui::Color32,
@@ -437,6 +561,7 @@ fn appearance_card(
     show_media: &mut bool,
     show_chat: &mut bool,
     show_keyboard: &mut bool,
+    show_history: &mut bool,
 ) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -469,6 +594,7 @@ fn appearance_card(
             ui.checkbox(show_media, "Media");
             ui.checkbox(show_chat, "Chat");
             ui.checkbox(show_keyboard, "Keyboard");
+            ui.checkbox(show_history, "History");
         });
     });
 }

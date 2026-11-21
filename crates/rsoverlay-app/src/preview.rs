@@ -51,6 +51,7 @@ pub struct TestHooks {
     pub overlay_size: Option<(f32, f32)>,
     pub overlay_anchor: Option<String>,
     pub show_keyboard: bool,
+    pub show_history: bool,
 }
 
 /// Apply CLI overrides to a default Placement. Any field not overridden
@@ -100,9 +101,13 @@ pub fn seed_dev_view(
     dev.show_media = cfg.appearance.show_media;
     dev.show_chat = cfg.appearance.show_chat;
     dev.show_keyboard = cfg.appearance.show_keyboard;
+    dev.show_history = cfg.appearance.show_history;
     dev.forward_input = cfg.appearance.forward_input;
     if test.show_keyboard {
         dev.show_keyboard = true;
+    }
+    if test.show_history {
+        dev.show_history = true;
     }
 
     // Placement.
@@ -155,6 +160,7 @@ pub fn config_from_dev_view(
     out.appearance.show_media = dev.show_media;
     out.appearance.show_chat = dev.show_chat;
     out.appearance.show_keyboard = dev.show_keyboard;
+    out.appearance.show_history = dev.show_history;
     out.appearance.forward_input = dev.forward_input;
     out.placement.anchor = match dev.placement.anchor {
         UiAnchor::Wrist => PlacementAnchor::Wrist,
@@ -235,6 +241,7 @@ fn configs_equivalent(a: &rsoverlay_core::Config, b: &rsoverlay_core::Config) ->
         && a.appearance.show_media == b.appearance.show_media
         && a.appearance.show_chat == b.appearance.show_chat
         && a.appearance.show_keyboard == b.appearance.show_keyboard
+        && a.appearance.show_history == b.appearance.show_history
         && a.appearance.forward_input == b.appearance.forward_input
         && a.placement.anchor == b.placement.anchor
         && (a.placement.offset_x - b.placement.offset_x).abs() < 0.001

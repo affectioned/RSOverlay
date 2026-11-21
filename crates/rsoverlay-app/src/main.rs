@@ -104,6 +104,10 @@ struct Args {
     /// Show the virtual keyboard card at launch.
     #[arg(long)]
     show_keyboard: bool,
+
+    /// Show the notifications history card at launch.
+    #[arg(long)]
+    show_history: bool,
 }
 
 fn parse_vec3(s: &str) -> Result<(f32, f32, f32), String> {
@@ -207,6 +211,7 @@ fn main() -> Result<()> {
         overlay_size: args.overlay_size,
         overlay_anchor: args.overlay_anchor.clone(),
         show_keyboard: args.show_keyboard,
+        show_history: args.show_history,
     };
 
     let result = match mode {
