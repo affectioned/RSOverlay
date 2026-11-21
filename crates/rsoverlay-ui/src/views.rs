@@ -5,7 +5,7 @@
 
 use crate::icons::{self, icon};
 use crate::locale;
-use crate::media::{self, MediaInfo};
+use crate::media::{self, MediaCommand, MediaInfo};
 use crate::theme;
 use chrono::Local;
 use rsoverlay_notify::Notification;
@@ -320,20 +320,51 @@ fn media_card(ui: &mut egui::Ui, info: Option<&MediaInfo>, accent: egui::Color32
                 if !m.artist.is_empty() {
                     ui.label(theme::body_muted(&m.artist));
                 }
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    ui.add(icon(
-                        if m.playing { icons::PLAY } else { icons::PAUSE },
-                        18.0,
-                        accent,
-                    ));
-                    ui.add_space(6.0);
-                    ui.label(theme::body_muted(if m.playing { "playing" } else { "paused" }));
-                });
+                ui.add_space(8.0);
+                media_controls(ui, m.playing, accent);
             }
             _ => {
                 ui.label(theme::body_muted("nothing playing"));
+                ui.add_space(8.0);
+                // Controls stay visible even when SMTC reports nothing —
+                // some sessions report "stopped" while the key presses
+                // still start playback.
+                media_controls(ui, false, accent);
             }
+        }
+    });
+}
+
+fn media_controls(ui: &mut egui::Ui, playing: bool, accent: egui::Color32) {
+    ui.horizontal(|ui| {
+        let btn = |label: &str| {
+            egui::Button::new(
+                egui::RichText::new(label)
+                    .color(theme::FG_PRIMARY)
+                    .size(16.0),
+            )
+            .min_size(egui::vec2(32.0, 28.0))
+        };
+        if ui.add(btn("⏮")).on_hover_text("Previous track").clicked() {
+            media::send(MediaCommand::Previous);
+        }
+        let play_pause = if playing { "⏸" } else { "▶" };
+        if ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new(play_pause)
+                        .color(accent)
+                        .size(18.0),
+                )
+                .min_size(egui::vec2(40.0, 30.0)),
+            )
+            .on_hover_text(if playing { "Pause" } else { "Play" })
+            .clicked()
+        {
+            media::send(MediaCommand::PlayPause);
+        }
+        if ui.add(btn("⏭")).on_hover_text("Next track").clicked() {
+            media::send(MediaCommand::Next);
         }
     });
 }
