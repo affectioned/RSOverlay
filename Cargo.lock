@@ -2262,6 +2262,7 @@ dependencies = [
  "egui-wgpu",
  "egui_extras",
  "rsoverlay-core",
+ "rsoverlay-input",
  "rsoverlay-notify",
  "rsoverlay-osc",
  "tracing",

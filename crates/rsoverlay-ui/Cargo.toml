@@ -15,6 +15,7 @@ wgpu.workspace = true
 rsoverlay-core.workspace = true
 rsoverlay-notify.workspace = true
 rsoverlay-osc.workspace = true
+rsoverlay-input.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 
 [target.'cfg(windows)'.dependencies]

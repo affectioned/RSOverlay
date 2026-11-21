@@ -50,6 +50,7 @@ pub struct TestHooks {
     pub overlay_pos: Option<(f32, f32, f32)>,
     pub overlay_size: Option<(f32, f32)>,
     pub overlay_anchor: Option<String>,
+    pub show_keyboard: bool,
 }
 
 /// Apply CLI overrides to a default Placement. Any field not overridden
@@ -265,6 +266,7 @@ pub fn run(
     );
     let mut dev_view = DevView::default();
     dev_view.placement = placement_with_overrides(&test);
+    dev_view.show_keyboard = test.show_keyboard;
     let mut fps_counter = FpsCounter::new();
     let mut frame_counter: u64 = 0;
     let screenshot_path = test.screenshot.clone();
@@ -466,7 +468,7 @@ pub fn run(
                             &gpu.queue,
                             &overlay_target.view,
                             raw_input,
-                            |ctx| dev_view.ui(ctx),
+                            |ctx| dev_view.ui_with(ctx, Some(&injector)),
                         );
 
                         // 2. Blit the overlay target into the window.

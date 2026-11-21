@@ -95,9 +95,11 @@ pub struct DevView {
     pub show_mirror: bool,
     pub show_media: bool,
     pub show_chat: bool,
+    pub show_keyboard: bool,
     /// Spatial placement of the overlay quad. The VR preview reads
     /// this every frame to position the quad; VR mode will too.
     pub placement: Placement,
+    pub keyboard: crate::keyboard::Keyboard,
     pending_hit: Option<MirrorHit>,
     toasts: VecDeque<Toast>,
     notifications_received: u64,
@@ -118,7 +120,9 @@ impl Default for DevView {
             show_mirror: true,
             show_media: true,
             show_chat: true,
+            show_keyboard: false,
             placement: Placement::default(),
+            keyboard: crate::keyboard::Keyboard::default(),
             pending_hit: None,
             toasts: VecDeque::new(),
             notifications_received: 0,
@@ -165,6 +169,19 @@ impl DevView {
     }
 
     pub fn ui(&mut self, ctx: &egui::Context) {
+        self.ui_with(ctx, None);
+    }
+
+    /// Full UI with optional input injector. When `Some`, keyboard key
+    /// presses inside the dashboard fire SendInput events against the
+    /// OS. When `None`, the keyboard renders but keys are inert —
+    /// useful for VR mode before laser input is wired, or headless
+    /// rendering.
+    pub fn ui_with(
+        &mut self,
+        ctx: &egui::Context,
+        injector: Option<&rsoverlay_input::InputInjector>,
+    ) {
         let now = Instant::now();
         while matches!(self.toasts.front(), Some(t) if t.expires < now) {
             self.toasts.pop_front();
@@ -214,6 +231,7 @@ impl DevView {
                             &mut self.show_mirror,
                             &mut self.show_media,
                             &mut self.show_chat,
+                            &mut self.show_keyboard,
                         );
                         ui.add_space(theme::GUTTER);
                         placement_card(ui, &mut self.placement, accent);
@@ -230,6 +248,20 @@ impl DevView {
                     }
                 });
             });
+
+        if self.show_keyboard {
+            if let Some(inj) = injector {
+                egui::Area::new(egui::Id::new("virtual-keyboard"))
+                    .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -theme::GUTTER))
+                    .show(ctx, |ui| {
+                        theme::card().show(ui, |ui| {
+                            card_header(ui, icons::CHAT, "Keyboard", accent);
+                            ui.add_space(6.0);
+                            crate::keyboard::show(ui, &mut self.keyboard, inj, accent);
+                        });
+                    });
+            }
+        }
 
         egui::Area::new(egui::Id::new("toasts"))
             .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-theme::GUTTER, theme::GUTTER))
@@ -373,6 +405,7 @@ fn appearance_card(
     show_mirror: &mut bool,
     show_media: &mut bool,
     show_chat: &mut bool,
+    show_keyboard: &mut bool,
 ) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -404,6 +437,7 @@ fn appearance_card(
             ui.checkbox(show_mirror, "Mirror");
             ui.checkbox(show_media, "Media");
             ui.checkbox(show_chat, "Chat");
+            ui.checkbox(show_keyboard, "Keyboard");
         });
     });
 }
