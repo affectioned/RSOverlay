@@ -34,6 +34,9 @@ pub struct Appearance {
     /// Virtual keyboard physical layout — qwerty / qwertz / azerty /
     /// jcuken-ru / abnt2. Parse errors fall back to qwerty.
     pub keyboard_layout: String,
+    /// Mirror the SMTC now-playing track into the VRChat chatbox as
+    /// `♪ Title — Artist`. Off by default — it speaks for the user.
+    pub chat_now_playing: bool,
 }
 
 impl Default for Appearance {
@@ -48,6 +51,7 @@ impl Default for Appearance {
             forward_input: false,
             language: "en-US".into(),
             keyboard_layout: "qwerty".into(),
+            chat_now_playing: false,
         }
     }
 }

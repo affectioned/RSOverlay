@@ -6,6 +6,7 @@
 use crate::icons::{self, icon};
 use crate::locale;
 use crate::media::{self, MediaCommand, MediaInfo};
+use crate::now_playing::NowPlayingBridge;
 use crate::theme;
 use chrono::Local;
 use rsoverlay_notify::Notification;
@@ -121,6 +122,8 @@ pub struct DevView {
     /// this every frame to position the quad; VR mode will too.
     pub placement: Placement,
     pub keyboard: crate::keyboard::Keyboard,
+    /// SMTC → chatbox bridge. `enabled` persists to config.
+    pub now_playing: NowPlayingBridge,
     pending_hit: Option<MirrorHit>,
     toasts: VecDeque<Toast>,
     history: VecDeque<HistoryEntry>,
@@ -148,6 +151,7 @@ impl Default for DevView {
             reset_requested: false,
             placement: Placement::default(),
             keyboard: crate::keyboard::Keyboard::default(),
+            now_playing: NowPlayingBridge::default(),
             pending_hit: None,
             toasts: VecDeque::new(),
             history: VecDeque::new(),
@@ -228,6 +232,18 @@ impl DevView {
             self.toasts.pop_front();
         }
         self.maybe_refresh_media();
+        // Manual messages win the single outbound slot; the bridge only
+        // ticks when it's free, so its pacing state never records a
+        // send that didn't happen.
+        if self.pending_chat.is_none() {
+            if let Some(text) = self.now_playing.tick(self.media.as_ref(), now) {
+                self.pending_chat = Some(rsoverlay_osc::ChatMessage {
+                    text,
+                    send_immediately: true,
+                    play_notification: false,
+                });
+            }
+        }
 
         let accent = self.accent;
         egui::CentralPanel::default()
@@ -260,7 +276,12 @@ impl DevView {
                         ui.add_space(theme::GUTTER);
                         if self.show_chat {
                             if let Some(msg) =
-                                chatbox_card(ui, &mut self.chat_draft, accent)
+                                chatbox_card(
+                                    ui,
+                                    &mut self.chat_draft,
+                                    &mut self.now_playing.enabled,
+                                    accent,
+                                )
                             {
                                 self.pending_chat = Some(msg);
                             }
@@ -663,6 +684,7 @@ fn appearance_card(
 fn chatbox_card(
     ui: &mut egui::Ui,
     draft: &mut String,
+    share_now_playing: &mut bool,
     accent: egui::Color32,
 ) -> Option<rsoverlay_osc::ChatMessage> {
     let mut result = None;
@@ -686,6 +708,9 @@ fn chatbox_card(
             });
             draft.clear();
         }
+        ui.add_space(4.0);
+        ui.checkbox(share_now_playing, "share now playing")
+            .on_hover_text("Post ♪ Title — Artist to the chatbox on track change");
     });
     result
 }

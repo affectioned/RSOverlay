@@ -105,6 +105,7 @@ pub fn seed_dev_view(
     dev.forward_input = cfg.appearance.forward_input;
     dev.language = parse_lang(&cfg.appearance.language);
     dev.keyboard.layout = parse_layout(&cfg.appearance.keyboard_layout);
+    dev.now_playing.enabled = cfg.appearance.chat_now_playing;
     if test.show_keyboard {
         dev.show_keyboard = true;
     }
@@ -167,6 +168,7 @@ pub fn config_from_dev_view(
     out.appearance.forward_input = dev.forward_input;
     out.appearance.language = dev.language.bcp47().to_string();
     out.appearance.keyboard_layout = dev.keyboard.layout.slug().to_string();
+    out.appearance.chat_now_playing = dev.now_playing.enabled;
     out.placement.anchor = match dev.placement.anchor {
         UiAnchor::Wrist => PlacementAnchor::Wrist,
         UiAnchor::Hmd => PlacementAnchor::Hmd,
@@ -313,6 +315,7 @@ fn configs_equivalent(a: &rsoverlay_core::Config, b: &rsoverlay_core::Config) ->
         && a.appearance.forward_input == b.appearance.forward_input
         && a.appearance.language == b.appearance.language
         && a.appearance.keyboard_layout == b.appearance.keyboard_layout
+        && a.appearance.chat_now_playing == b.appearance.chat_now_playing
         && a.placement.anchor == b.placement.anchor
         && (a.placement.offset_x - b.placement.offset_x).abs() < 0.001
         && (a.placement.offset_y - b.placement.offset_y).abs() < 0.001

@@ -80,8 +80,8 @@ Ranked by cross-wishlist demand × implementation cost in a Rust + wgpu stack.
 - **Toolbar whitelist / blacklist**, window frame chrome toggles (OVR #7).
 - **Horizontal scroll forwarding** on captured windows (XSO #115).
 - **Discord / media button bar** (XSO #119/#120 — mute/deafen, next/prev).
-- **Song-title OSC bridge to VRChat chatbox** — SMTC → chat. Existing pieces
-  already in-crate.
+- ~~**Song-title OSC bridge to VRChat chatbox**~~ — **shipped** (M28). SMTC → chat,
+  paced at ≥2 s, 20 s refresh, 144-char cap. Toggle in the chatbox card.
 - **Hand-tracking input** (OVR #5) — unlocks fingertip typing. Needs
   SteamVR hand-tracking consumption via OpenXR skeletal tracking.
 
