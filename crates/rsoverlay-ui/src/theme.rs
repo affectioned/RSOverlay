@@ -19,6 +19,9 @@ pub const FG_PRIMARY: Color32 = Color32::from_rgb(0xF2, 0xF3, 0xF5);
 pub const FG_MUTED: Color32 = Color32::from_rgb(0x8A, 0x8F, 0x99);
 /// Default accent — overridden at runtime by the user via the Appearance card.
 pub const ACCENT: Color32 = Color32::from_rgb(0x7D, 0xD3, 0xC0);
+/// Warning state (low battery). Muted like the accents — reads as
+/// "attention" without neon bleed in the compositor.
+pub const DANGER: Color32 = Color32::from_rgb(0xE8, 0x70, 0x5F);
 
 /// A handful of brand-neutral accent choices offered in the Appearance picker.
 /// These are intentionally muted — no neon, so nothing reads as "gamer-tech"

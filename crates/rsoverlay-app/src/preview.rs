@@ -52,6 +52,7 @@ pub struct TestHooks {
     pub overlay_anchor: Option<String>,
     pub show_keyboard: bool,
     pub show_history: bool,
+    pub demo_batteries: bool,
 }
 
 /// Apply CLI overrides to a default Placement. Any field not overridden
@@ -106,11 +107,28 @@ pub fn seed_dev_view(
     dev.language = parse_lang(&cfg.appearance.language);
     dev.keyboard.layout = parse_layout(&cfg.appearance.keyboard_layout);
     dev.now_playing.enabled = cfg.appearance.chat_now_playing;
+    dev.show_battery = cfg.appearance.show_battery;
+    dev.battery_warn_pct = cfg.appearance.battery_warn_pct.clamp(5, 50);
     if test.show_keyboard {
         dev.show_keyboard = true;
     }
     if test.show_history {
         dev.show_history = true;
+    }
+    if test.demo_batteries {
+        use rsoverlay_ui::battery::BatteryReading;
+        let r = |id, label: &str, fraction, charging| BatteryReading {
+            id,
+            label: label.into(),
+            fraction,
+            charging,
+        };
+        dev.set_batteries(vec![
+            r(0, "HMD", 0.82, false),
+            r(1, "Left hand", 0.14, false),
+            r(2, "Right hand", 0.47, true),
+            r(3, "Tracker · VIVE Tracker 3.0", 0.63, false),
+        ]);
     }
 
     // Placement.
@@ -169,6 +187,8 @@ pub fn config_from_dev_view(
     out.appearance.language = dev.language.bcp47().to_string();
     out.appearance.keyboard_layout = dev.keyboard.layout.slug().to_string();
     out.appearance.chat_now_playing = dev.now_playing.enabled;
+    out.appearance.show_battery = dev.show_battery;
+    out.appearance.battery_warn_pct = dev.battery_warn_pct;
     out.placement.anchor = match dev.placement.anchor {
         UiAnchor::Wrist => PlacementAnchor::Wrist,
         UiAnchor::Hmd => PlacementAnchor::Hmd,
@@ -316,6 +336,8 @@ fn configs_equivalent(a: &rsoverlay_core::Config, b: &rsoverlay_core::Config) ->
         && a.appearance.language == b.appearance.language
         && a.appearance.keyboard_layout == b.appearance.keyboard_layout
         && a.appearance.chat_now_playing == b.appearance.chat_now_playing
+        && a.appearance.show_battery == b.appearance.show_battery
+        && a.appearance.battery_warn_pct == b.appearance.battery_warn_pct
         && a.placement.anchor == b.placement.anchor
         && (a.placement.offset_x - b.placement.offset_x).abs() < 0.001
         && (a.placement.offset_y - b.placement.offset_y).abs() < 0.001

@@ -125,6 +125,26 @@ impl OpenVr {
     }
 }
 
+impl OpenVr {
+    /// Acquire the IVRSystem interface (tracked devices + properties).
+    pub fn system(&self) -> Result<System<'_>, OpenVrError> {
+        let mut err: sys::EVRInitError = 0;
+        let ptr = unsafe {
+            (self.fns.vr_get_generic_interface)(
+                sys::IVRSystem_FnTable_Version.as_ptr() as *const _,
+                &mut err,
+            )
+        };
+        if ptr.is_null() || err != sys::EVRInitError_None {
+            return Err(OpenVrError::InterfaceMissing(err));
+        }
+        Ok(System {
+            table: ptr as *const sys::IVRSystemFnTable,
+            _parent: std::marker::PhantomData,
+        })
+    }
+}
+
 impl Drop for OpenVr {
     fn drop(&mut self) {
         unsafe { (self.fns.vr_shutdown_internal)() };
@@ -237,6 +257,114 @@ impl<'a> Overlay<'a> {
     pub fn clear_texture(&self, handle: VROverlayHandle_t) -> Result<(), OpenVrError> {
         let r = unsafe { (self.table().ClearOverlayTexture)(handle) };
         check(r, "ClearOverlayTexture")
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum DeviceKind {
+    Hmd,
+    LeftHand,
+    RightHand,
+    /// Controller with no hand role assigned (e.g. a gamepad).
+    Controller,
+    Tracker,
+}
+
+/// One battery-reporting tracked device.
+#[derive(Clone, Debug)]
+pub struct DeviceBattery {
+    pub index: u32,
+    pub kind: DeviceKind,
+    pub model: String,
+    /// 0.0..=1.0, as OpenVR reports it.
+    pub fraction: f32,
+    pub charging: bool,
+}
+
+pub struct System<'a> {
+    table: *const sys::IVRSystemFnTable,
+    _parent: std::marker::PhantomData<&'a OpenVr>,
+}
+
+impl<'a> System<'a> {
+    fn table(&self) -> &sys::IVRSystemFnTable {
+        unsafe { &*self.table }
+    }
+
+    /// Every connected device that reports battery status, in OpenVR
+    /// index order (HMD is always index 0 when present). Lighthouse base
+    /// stations are skipped — they're mains-powered.
+    pub fn batteries(&self) -> Vec<DeviceBattery> {
+        let t = self.table();
+        let mut out = Vec::new();
+        for i in 0..sys::k_unMaxTrackedDeviceCount {
+            unsafe {
+                if !(t.IsTrackedDeviceConnected)(i) {
+                    continue;
+                }
+                let kind = match (t.GetTrackedDeviceClass)(i) {
+                    sys::ETrackedDeviceClass_HMD => DeviceKind::Hmd,
+                    sys::ETrackedDeviceClass_Controller => {
+                        match (t.GetControllerRoleForTrackedDeviceIndex)(i) {
+                            sys::ETrackedControllerRole_LeftHand => DeviceKind::LeftHand,
+                            sys::ETrackedControllerRole_RightHand => DeviceKind::RightHand,
+                            _ => DeviceKind::Controller,
+                        }
+                    }
+                    sys::ETrackedDeviceClass_GenericTracker => DeviceKind::Tracker,
+                    _ => continue,
+                };
+                if self.bool_prop(i, sys::Prop_DeviceProvidesBatteryStatus_Bool) != Some(true) {
+                    continue;
+                }
+                let Some(fraction) = self.float_prop(i, sys::Prop_DeviceBatteryPercentage_Float)
+                else {
+                    continue;
+                };
+                out.push(DeviceBattery {
+                    index: i,
+                    kind,
+                    model: self.string_prop(i, sys::Prop_ModelNumber_String).unwrap_or_default(),
+                    fraction: fraction.clamp(0.0, 1.0),
+                    charging: self.bool_prop(i, sys::Prop_DeviceIsCharging_Bool).unwrap_or(false),
+                });
+            }
+        }
+        out
+    }
+
+    fn bool_prop(&self, i: u32, prop: sys::ETrackedDeviceProperty) -> Option<bool> {
+        let mut err = 0;
+        let v = unsafe { (self.table().GetBoolTrackedDeviceProperty)(i, prop, &mut err) };
+        (err == sys::ETrackedPropertyError_Success).then_some(v)
+    }
+
+    fn float_prop(&self, i: u32, prop: sys::ETrackedDeviceProperty) -> Option<f32> {
+        let mut err = 0;
+        let v = unsafe { (self.table().GetFloatTrackedDeviceProperty)(i, prop, &mut err) };
+        (err == sys::ETrackedPropertyError_Success).then_some(v)
+    }
+
+    fn string_prop(&self, i: u32, prop: sys::ETrackedDeviceProperty) -> Option<String> {
+        // k_unMaxPropertyStringSize is 32 KiB, but model numbers are
+        // short; 256 bytes covers every shipping device. Over-long
+        // values report BufferTooSmall and we fall back to empty.
+        let mut buf = [0 as std::os::raw::c_char; 256];
+        let mut err = 0;
+        let n = unsafe {
+            (self.table().GetStringTrackedDeviceProperty)(
+                i,
+                prop,
+                buf.as_mut_ptr(),
+                buf.len() as u32,
+                &mut err,
+            )
+        };
+        if err != sys::ETrackedPropertyError_Success || n == 0 {
+            return None;
+        }
+        let s = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) };
+        Some(s.to_string_lossy().into_owned())
     }
 }
 

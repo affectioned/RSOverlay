@@ -34,6 +34,7 @@ stays — only the interaction model matches.
 | Custom keyboard sounds | planned |
 | **Layout save / load** | **shipped** (M19) — accent + placement + card toggles autosave to `%APPDATA%\RSOverlay\config.toml`, hot-reload picks up external edits (M23) |
 | Optional background-input blocking | planned |
+| **Battery widget + low-battery alerts** | **shipped** (M29) |
 | **Notifications API** (toasts from 3rd-party apps) | **shipped** (M2) |
 | **Notifications history + clear all** | **shipped** (M21) |
 | **Media player integrations** — now-playing + controls | **shipped** (M5 + M20) |
@@ -62,9 +63,10 @@ Ranked by cross-wishlist demand × implementation cost in a Rust + wgpu stack.
 4. **Keyboard layouts.** Save keyboard position/scale per layout +
    favorites + quick-switch. Pure serde work. *XSO #185/#316/#337, all
    `Planned`; OVR #6 physical-keyboard calibration.*
-5. **Battery / HMD stats widget.** Configurable warning thresholds, hide
-   toggles per device, support for Vive-wireless, Index wand, Quest. *XSO
-   #203/#216/#339; OVR #17.*
+5. ~~**Battery / HMD stats widget.**~~ **Shipped** (M29) — IVRSystem_022
+   battery props for HMD / hands / trackers, configurable warn threshold,
+   one-shot low-battery toast with 5 % re-arm hysteresis. Per-device hide
+   toggles still open. *XSO #203/#216/#339; OVR #17.*
 
 ## Mid-term
 

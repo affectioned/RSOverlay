@@ -98,3 +98,57 @@ pub type FnVR_ShutdownInternal = unsafe extern "system" fn();
 pub type FnVR_IsHmdPresent = unsafe extern "system" fn() -> bool;
 pub type FnVR_IsRuntimeInstalled = unsafe extern "system" fn() -> bool;
 pub type FnVR_GetGenericInterface = unsafe extern "system" fn(pchInterfaceVersion: *const c_char, peError: *mut EVRInitError) -> *mut c_void;
+
+// ---------------------------------------------------------------------------
+// IVRSystem — tracked-device enumeration + properties (battery widget).
+//
+// Slot order verified against `openvr_capi.h` at SDK tag v2.5.1
+// (IVRSystem_022). IVRSystem_023 shares the layout; _026 inserts
+// `ComputeDistortionSet` at slot 4 and shifts everything after it, so we
+// pin the request string to 022 — every SteamVR since 2019 serves it.
+// ---------------------------------------------------------------------------
+
+pub const IVRSystem_FnTable_Version: &[u8] = b"FnTable:IVRSystem_022\0";
+
+pub const k_unMaxTrackedDeviceCount: u32 = 64;
+
+pub type ETrackedDeviceClass = i32;
+pub const ETrackedDeviceClass_Invalid: ETrackedDeviceClass = 0;
+pub const ETrackedDeviceClass_HMD: ETrackedDeviceClass = 1;
+pub const ETrackedDeviceClass_Controller: ETrackedDeviceClass = 2;
+pub const ETrackedDeviceClass_GenericTracker: ETrackedDeviceClass = 3;
+pub const ETrackedDeviceClass_TrackingReference: ETrackedDeviceClass = 4;
+
+pub type ETrackedControllerRole = i32;
+pub const ETrackedControllerRole_LeftHand: ETrackedControllerRole = 1;
+pub const ETrackedControllerRole_RightHand: ETrackedControllerRole = 2;
+
+pub type ETrackedDeviceProperty = i32;
+pub const Prop_ModelNumber_String: ETrackedDeviceProperty = 1001;
+pub const Prop_DeviceIsCharging_Bool: ETrackedDeviceProperty = 1011;
+pub const Prop_DeviceBatteryPercentage_Float: ETrackedDeviceProperty = 1012;
+pub const Prop_DeviceProvidesBatteryStatus_Bool: ETrackedDeviceProperty = 1026;
+
+pub type ETrackedPropertyError = i32;
+pub const ETrackedPropertyError_Success: ETrackedPropertyError = 0;
+
+#[repr(C)]
+pub struct IVRSystemFnTable {
+    /// Slots 0..=17: render targets, projection, distortion, vsync,
+    /// adapter, poses, sorted indices, activity, ApplyTransform,
+    /// GetTrackedDeviceIndexForControllerRole. Unused here.
+    pub _pad_00: [*const c_void; 18],
+    pub GetControllerRoleForTrackedDeviceIndex: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t) -> ETrackedControllerRole, // 18
+    pub GetTrackedDeviceClass: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t) -> ETrackedDeviceClass, // 19
+    pub IsTrackedDeviceConnected: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t) -> bool, // 20
+    pub GetBoolTrackedDeviceProperty: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t, prop: ETrackedDeviceProperty, pError: *mut ETrackedPropertyError) -> bool, // 21
+    pub GetFloatTrackedDeviceProperty: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t, prop: ETrackedDeviceProperty, pError: *mut ETrackedPropertyError) -> f32, // 22
+    pub _pad_01: [*const c_void; 4], // 23..=26: Int32 / Uint64 / Matrix34 / Array
+    pub GetStringTrackedDeviceProperty: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t, prop: ETrackedDeviceProperty, pchValue: *mut c_char, unBufferSize: u32, pError: *mut ETrackedPropertyError) -> u32, // 27
+}
+
+// Compile-time guard: slot 27 must sit at byte offset 27 * ptr_size.
+const _: () = assert!(
+    std::mem::offset_of!(IVRSystemFnTable, GetStringTrackedDeviceProperty)
+        == 27 * std::mem::size_of::<*const c_void>()
+);

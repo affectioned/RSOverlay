@@ -37,6 +37,9 @@ pub struct Appearance {
     /// Mirror the SMTC now-playing track into the VRChat chatbox as
     /// `♪ Title — Artist`. Off by default — it speaks for the user.
     pub chat_now_playing: bool,
+    pub show_battery: bool,
+    /// Low-battery toast threshold, percent. Clamped to 5..=50 in UI.
+    pub battery_warn_pct: u8,
 }
 
 impl Default for Appearance {
@@ -52,6 +55,8 @@ impl Default for Appearance {
             language: "en-US".into(),
             keyboard_layout: "qwerty".into(),
             chat_now_playing: false,
+            show_battery: true,
+            battery_warn_pct: 20,
         }
     }
 }

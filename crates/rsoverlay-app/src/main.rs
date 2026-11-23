@@ -118,6 +118,11 @@ struct Args {
     /// Show the notifications history card at launch.
     #[arg(long)]
     show_history: bool,
+
+    /// Fill the battery card with sample devices (one low, one
+    /// charging) so the widget can be screenshot-tested without an HMD.
+    #[arg(long)]
+    demo_batteries: bool,
 }
 
 fn parse_vec3(s: &str) -> Result<(f32, f32, f32), String> {
@@ -240,6 +245,7 @@ fn main() -> Result<()> {
         overlay_anchor: args.overlay_anchor.clone(),
         show_keyboard: args.show_keyboard,
         show_history: args.show_history,
+        demo_batteries: args.demo_batteries,
     };
 
     let result = match mode {

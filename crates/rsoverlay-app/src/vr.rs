@@ -9,18 +9,21 @@
 mod imp {
     use anyhow::{anyhow, Context, Result};
     use rsoverlay_notify::NotifyChannel;
-    use rsoverlay_openvr::{pose_translation, OpenVr};
+    use rsoverlay_openvr::{pose_translation, DeviceBattery, DeviceKind, OpenVr};
     use rsoverlay_render::GpuCtx;
-    use rsoverlay_ui::{views::DevView, EguiPanel};
+    use rsoverlay_ui::{battery::BatteryReading, views::DevView, EguiPanel};
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
     use tokio::runtime::Handle;
     use tracing::{info, warn};
 
     const OVERLAY_TEX_W: u32 = 2048;
     const OVERLAY_TEX_H: u32 = 1280;
+    /// Battery props change slowly; polling 64 device slots every
+    /// frame would be wasted IPC to vrserver.
+    const BATTERY_POLL: Duration = Duration::from_secs(5);
 
     pub fn run(
         _notify: Option<NotifyChannel>,
@@ -29,6 +32,12 @@ mod imp {
     ) -> Result<()> {
         let vr = OpenVr::init().context("OpenVR init")?;
         let overlay = vr.overlay().context("acquiring IVROverlay")?;
+        // Optional: a runtime that can't serve IVRSystem_022 just loses
+        // the battery card, not the whole overlay.
+        let system = vr
+            .system()
+            .map_err(|e| warn!("IVRSystem unavailable, battery widget disabled: {e}"))
+            .ok();
 
         let handle = overlay
             .create("rsoverlay.main", "RSOverlay")
@@ -63,6 +72,12 @@ mod imp {
         let mut egui_panel =
             EguiPanel::new(&gpu.device, overlay_format, OVERLAY_TEX_W, OVERLAY_TEX_H);
         let mut dev_view = DevView::default();
+        crate::preview::seed_dev_view(
+            &mut dev_view,
+            &config,
+            &crate::preview::TestHooks::default(),
+        );
+        let mut last_battery_poll: Option<Instant> = None;
 
         overlay.show(handle).ok();
         info!(
@@ -85,6 +100,12 @@ mod imp {
             // pointer / controller lands in the next milestone.
             frame = frame.wrapping_add(1);
             dev_view.frame = frame;
+            if let Some(sys) = &system {
+                if last_battery_poll.is_none_or(|t| t.elapsed() >= BATTERY_POLL) {
+                    last_battery_poll = Some(Instant::now());
+                    dev_view.set_batteries(sys.batteries().iter().map(reading).collect());
+                }
+            }
             let raw_input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -120,6 +141,24 @@ mod imp {
         overlay.destroy(handle).ok();
         info!("clean shutdown");
         Ok(())
+    }
+
+    fn reading(d: &DeviceBattery) -> BatteryReading {
+        let label = match (d.kind, d.model.is_empty()) {
+            (DeviceKind::Hmd, _) => "HMD".to_string(),
+            (DeviceKind::LeftHand, _) => "Left hand".to_string(),
+            (DeviceKind::RightHand, _) => "Right hand".to_string(),
+            (DeviceKind::Controller, true) => "Controller".to_string(),
+            (DeviceKind::Controller, false) => d.model.clone(),
+            (DeviceKind::Tracker, true) => "Tracker".to_string(),
+            (DeviceKind::Tracker, false) => format!("Tracker · {}", d.model),
+        };
+        BatteryReading {
+            id: d.index,
+            label,
+            fraction: d.fraction,
+            charging: d.charging,
+        }
     }
 
     /// Create a BGRA8 texture that wgpu renders into and OpenVR

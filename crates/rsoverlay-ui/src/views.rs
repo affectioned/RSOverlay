@@ -3,6 +3,7 @@
 //! Visual language: Terminal Brutalist chassis + Spatial Glass-Lite cards.
 //! Tokens live in `theme::*`; no hardcoded colors in this module.
 
+use crate::battery::{BatteryReading, LowBatteryWatch};
 use crate::icons::{self, icon};
 use crate::locale;
 use crate::media::{self, MediaCommand, MediaInfo};
@@ -113,6 +114,8 @@ pub struct DevView {
     pub show_chat: bool,
     pub show_keyboard: bool,
     pub show_history: bool,
+    pub show_battery: bool,
+    pub battery_warn_pct: u8,
     /// Active UI language + keyboard layout. Both persist to config.
     pub language: crate::i18n::Lang,
     /// Set to true when the user clicks "Reset defaults" in the
@@ -125,6 +128,8 @@ pub struct DevView {
     /// SMTC → chatbox bridge. `enabled` persists to config.
     pub now_playing: NowPlayingBridge,
     pending_hit: Option<MirrorHit>,
+    batteries: Vec<BatteryReading>,
+    low_battery: LowBatteryWatch,
     toasts: VecDeque<Toast>,
     history: VecDeque<HistoryEntry>,
     notifications_received: u64,
@@ -147,12 +152,16 @@ impl Default for DevView {
             show_chat: true,
             show_keyboard: false,
             show_history: false,
+            show_battery: true,
+            battery_warn_pct: 20,
             language: crate::i18n::Lang::default(),
             reset_requested: false,
             placement: Placement::default(),
             keyboard: crate::keyboard::Keyboard::default(),
             now_playing: NowPlayingBridge::default(),
             pending_hit: None,
+            batteries: Vec::new(),
+            low_battery: LowBatteryWatch::default(),
             toasts: VecDeque::new(),
             history: VecDeque::new(),
             notifications_received: 0,
@@ -188,6 +197,16 @@ impl DevView {
     pub fn clear_all_notifications(&mut self) {
         self.toasts.clear();
         self.history.clear();
+    }
+
+    /// Replace the battery readings (the app polls OpenVR every few
+    /// seconds) and raise a toast for any device that just went low.
+    /// Alerts fire even with the card hidden — that's the point of them.
+    pub fn set_batteries(&mut self, readings: Vec<BatteryReading>) {
+        for n in self.low_battery.update(&readings, self.battery_warn_pct) {
+            self.push_notification(n);
+        }
+        self.batteries = readings;
     }
 
     pub fn notifications_received(&self) -> u64 {
@@ -272,6 +291,15 @@ impl DevView {
                             accent,
                         );
                         ui.add_space(theme::GUTTER);
+                        if self.show_battery {
+                            crate::battery::card(
+                                ui,
+                                &self.batteries,
+                                &mut self.battery_warn_pct,
+                                accent,
+                            );
+                            ui.add_space(theme::GUTTER);
+                        }
                         forward_toggle(ui, &mut self.forward_input, accent);
                         ui.add_space(theme::GUTTER);
                         if self.show_chat {
@@ -301,6 +329,7 @@ impl DevView {
                             &mut self.show_chat,
                             &mut self.show_keyboard,
                             &mut self.show_history,
+                            &mut self.show_battery,
                             &mut self.language,
                             &mut self.keyboard.layout,
                         ) {
@@ -604,6 +633,7 @@ fn appearance_card(
     show_chat: &mut bool,
     show_keyboard: &mut bool,
     show_history: &mut bool,
+    show_battery: &mut bool,
     language: &mut crate::i18n::Lang,
     keyboard_layout: &mut crate::keyboard_layout::LayoutId,
 ) -> bool {
@@ -659,6 +689,7 @@ fn appearance_card(
             ui.checkbox(show_chat, "Chat");
             ui.checkbox(show_keyboard, "Keyboard");
             ui.checkbox(show_history, "History");
+            ui.checkbox(show_battery, "Battery");
         });
         ui.add_space(8.0);
         // Language picker — shows the native-script name so a Russian
