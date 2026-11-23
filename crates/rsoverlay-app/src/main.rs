@@ -76,6 +76,16 @@ struct Args {
     #[arg(long)]
     no_osc: bool,
 
+    /// Disable Discord Rich Presence. (It auto-silences if Discord isn't
+    /// running, but this skips the connect attempt entirely.)
+    #[arg(long)]
+    no_discord: bool,
+
+    /// Discord application ID to use for Rich Presence. Defaults to
+    /// the project's placeholder app ID.
+    #[arg(long, default_value_t = rsoverlay_discord::DEFAULT_APP_ID.to_string())]
+    discord_app_id: String,
+
     /// Save a PNG screenshot of the preview window N frames after
     /// launch. Combined with --exit-after this gives a headless
     /// render-to-PNG flow so automated runs can verify the UI without
@@ -202,6 +212,24 @@ fn main() -> Result<()> {
         None
     } else {
         Some(spawn_osc(&rt_handle, args.osc_addr))
+    };
+
+    // Discord Rich Presence: spawn once, carry the handle through the
+    // chosen mode so it lives for the process lifetime. The handle's
+    // Drop sends a tidy shutdown to the worker.
+    let discord_mode = match mode {
+        RuntimeMode::Preview => rsoverlay_discord::RuntimeMode::Preview,
+        RuntimeMode::VrPreview => rsoverlay_discord::RuntimeMode::VrPreview,
+        RuntimeMode::Vr => rsoverlay_discord::RuntimeMode::Vr,
+    };
+    let _discord_handle = if args.no_discord {
+        None
+    } else {
+        Some(rsoverlay_discord::spawn(
+            &rt_handle,
+            &args.discord_app_id,
+            discord_mode,
+        ))
     };
 
     let test_cfg = preview::TestHooks {

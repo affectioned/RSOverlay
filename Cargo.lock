@@ -636,6 +636,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "discord-rich-presence"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a75db747ecd252c01bfecaf709b07fcb4c634adf0edb5fed47bc9c3052e7076b"
+dependencies = [
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "serde_repr",
+ "uuid",
+]
+
+[[package]]
 name = "dispatch"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2149,6 +2162,7 @@ dependencies = [
  "raw-window-handle 0.6.2",
  "rsoverlay-capture",
  "rsoverlay-core",
+ "rsoverlay-discord",
  "rsoverlay-input",
  "rsoverlay-notify",
  "rsoverlay-openvr",
@@ -2185,6 +2199,17 @@ dependencies = [
  "serde",
  "thiserror 1.0.69",
  "toml",
+ "tracing",
+]
+
+[[package]]
+name = "rsoverlay-discord"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "discord-rich-presence",
+ "thiserror 1.0.69",
+ "tokio",
  "tracing",
 ]
 
@@ -2389,6 +2414,17 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "serde_repr"
+version = "0.1.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d3b1629de253c70a0508c3899572da79ca359fdab27c7920ff00406df418906"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3062,6 +3098,15 @@ name = "utf_types"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a3b425286980a367278453f3b6d28cdcb134b574e5a35824a6ff5eebad50bb6"
+
+[[package]]
+name = "uuid"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
+dependencies = [
+ "getrandom 0.2.17",
+]
 
 [[package]]
 name = "valuable"
