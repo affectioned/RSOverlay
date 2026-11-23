@@ -27,16 +27,19 @@ stays — only the interaction model matches.
 | SteamVR Input 2.0 bindings | planned |
 | Left / Middle / Right click + long-press / drag via laser | planned |
 | Window re-centering + grid view | planned |
-| Window move/scale/management at any range | **Placement card + CLI shipped**, grab/drag planned |
-| Curved overlays | planned (shader warp) |
+| Window move/scale/management at any range | **Placement card + CLI + persistence shipped**, grab/drag planned |
+| **Curved overlays** | **shipped** (M24) — `Placement.curvature` slider |
 | User-editable localization | planned |
-| Auto keyboard layout from system | planned |
+| Auto keyboard layout from system | **shipped** — `KEYEVENTF_UNICODE` lets the host layout handle mapping |
 | Custom keyboard sounds | planned |
-| Layout save / load | planned (serde to config.toml) |
+| **Layout save / load** | **shipped** (M19) — accent + placement + card toggles autosave to `%APPDATA%\RSOverlay\config.toml`, hot-reload picks up external edits (M23) |
 | Optional background-input blocking | planned |
 | **Notifications API** (toasts from 3rd-party apps) | **shipped** (M2) |
-| **Media player integrations** (now-playing, controls planned) | **shipped** (M5) — controls pending |
-| Discord Rich Presence | planned |
+| **Notifications history + clear all** | **shipped** (M21) |
+| **Media player integrations** — now-playing + controls | **shipped** (M5 + M20) |
+| **Discord Rich Presence** | **shipped** (M25) |
+| **Virtual keyboard** + chords (Ctrl+C / Alt+Tab / Win+D) | **shipped** (M18 + M26) |
+| **Reset defaults** button (XSO #160, 8 comments) | **shipped** (M22) |
 
 ## Near-term (next 5 milestones, chosen by signal)
 
