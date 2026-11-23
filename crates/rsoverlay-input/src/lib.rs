@@ -56,6 +56,16 @@ impl InputInjector {
     pub fn send_key(&self, vk: VirtualKey) -> Result<()> {
         send_key_impl(vk)
     }
+
+    /// Send a modifier chord: holds all `modifiers` down, taps `ch`,
+    /// then releases the modifiers in reverse order. The classic
+    /// Ctrl+C / Ctrl+V / Alt+Tab / Win+D path. `ch` is interpreted as
+    /// a virtual-key code when the chord includes Ctrl/Alt/Super so
+    /// the OS fires the real shortcut (e.g. Ctrl+'c' → copy) instead
+    /// of typing a literal character.
+    pub fn send_chord(&self, modifiers: &[VirtualKey], ch: char) -> Result<()> {
+        send_chord_impl(modifiers, ch)
+    }
 }
 
 /// A small subset of virtual-key codes the keyboard overlay actually
@@ -108,6 +118,11 @@ fn send_key_impl(vk: VirtualKey) -> Result<()> {
     win::send_vk(vk)
 }
 
+#[cfg(windows)]
+fn send_chord_impl(modifiers: &[VirtualKey], ch: char) -> Result<()> {
+    win::send_chord(modifiers, ch)
+}
+
 #[cfg(not(windows))]
 fn move_to_impl(_mon: &MonitorGeom, _px: i32, _py: i32) -> Result<()> {
     anyhow::bail!("input injection only implemented on Windows")
@@ -125,6 +140,11 @@ fn type_char_impl(_ch: char) -> Result<()> {
 
 #[cfg(not(windows))]
 fn send_key_impl(_vk: VirtualKey) -> Result<()> {
+    anyhow::bail!("input injection only implemented on Windows")
+}
+
+#[cfg(not(windows))]
+fn send_chord_impl(_mods: &[VirtualKey], _ch: char) -> Result<()> {
     anyhow::bail!("input injection only implemented on Windows")
 }
 
@@ -165,6 +185,33 @@ mod win {
             kb_input(0, code.0, KEYBD_EVENT_FLAGS(0)),
             kb_input(0, code.0, KEYEVENTF_KEYUP),
         ];
+        send_many(&events)
+    }
+
+    pub fn send_chord(modifiers: &[VirtualKey], ch: char) -> Result<()> {
+        // Translate the character to a virtual-key code so Ctrl+C
+        // actually fires the Copy shortcut instead of typing 'c'. VK
+        // codes for printable ASCII map to uppercase of the same char
+        // (per Microsoft's virtual-key table).
+        let main_vk: u16 = match ch {
+            'a'..='z' => (ch as u16).wrapping_sub(b'a' as u16) + 0x41,
+            'A'..='Z' => (ch as u16).wrapping_sub(b'A' as u16) + 0x41,
+            '0'..='9' => (ch as u16).wrapping_sub(b'0' as u16) + 0x30,
+            _ => return Err(anyhow!("send_chord: no VK mapping for {ch:?}")),
+        };
+        let mut events: Vec<INPUT> = Vec::with_capacity(modifiers.len() * 2 + 2);
+        // Press all modifiers in order.
+        for m in modifiers {
+            events.push(kb_input(0, virtual_key_code(*m).0, KEYBD_EVENT_FLAGS(0)));
+        }
+        // Tap the main key.
+        events.push(kb_input(0, main_vk, KEYBD_EVENT_FLAGS(0)));
+        events.push(kb_input(0, main_vk, KEYEVENTF_KEYUP));
+        // Release modifiers in reverse order (so Ctrl-release comes
+        // last if there was also Shift, etc).
+        for m in modifiers.iter().rev() {
+            events.push(kb_input(0, virtual_key_code(*m).0, KEYEVENTF_KEYUP));
+        }
         send_many(&events)
     }
 

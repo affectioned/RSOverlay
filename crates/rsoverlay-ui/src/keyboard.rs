@@ -19,6 +19,7 @@ pub struct ModifierState {
     pub caps: bool,
     pub ctrl: bool,
     pub alt: bool,
+    pub win: bool,
 }
 
 impl ModifierState {
@@ -26,10 +27,27 @@ impl ModifierState {
         self.shift ^ self.caps
     }
 
-    /// After typing a character, release any transient modifiers
-    /// (shift). Caps lock stays sticky.
+    /// After typing a character / firing a chord, release any transient
+    /// modifiers. Shift + Ctrl + Alt + Win all release. Caps stays
+    /// sticky (that's what Caps Lock is for).
     fn consume_transient(&mut self) {
         self.shift = false;
+        self.ctrl = false;
+        self.alt = false;
+        self.win = false;
+    }
+
+    fn chord_mods(&self) -> Vec<VirtualKey> {
+        let mut v = Vec::new();
+        if self.ctrl { v.push(VirtualKey::Ctrl); }
+        if self.alt { v.push(VirtualKey::Alt); }
+        if self.win { v.push(VirtualKey::Super); }
+        if self.shift { v.push(VirtualKey::Shift); }
+        v
+    }
+
+    fn any_chord_mod(&self) -> bool {
+        self.ctrl || self.alt || self.win
     }
 }
 
@@ -76,6 +94,7 @@ pub fn show(
             modifier_toggle(ui, &mut state.modifiers.caps, "Caps", accent);
             modifier_toggle(ui, &mut state.modifiers.ctrl, "Ctrl", accent);
             modifier_toggle(ui, &mut state.modifiers.alt, "Alt", accent);
+            modifier_toggle(ui, &mut state.modifiers.win, "Win", accent);
             if ui
                 .add(egui::Button::new("space").min_size(egui::vec2(140.0, 24.0)))
                 .clicked()
@@ -110,11 +129,15 @@ fn key_row(
             )
             .min_size(egui::vec2(28.0, 28.0));
             if ui.add(btn).clicked() {
-                // For now Ctrl / Alt simply pass the character through
-                // — those modifier chords land in a follow-up milestone
-                // (needs KEYDOWN modifier + char + KEYUP modifier
-                // ordering to produce Ctrl+C etc).
-                let _ = injector.type_char(ch);
+                // Ctrl / Alt / Win latched → send a real chord (Ctrl+C
+                // fires Copy, Alt+Tab switches window, etc). Otherwise
+                // the OS maps the character through the host layout.
+                if state.modifiers.any_chord_mod() {
+                    let mods = state.modifiers.chord_mods();
+                    let _ = injector.send_chord(&mods, ch);
+                } else {
+                    let _ = injector.type_char(ch);
+                }
                 state.modifiers.consume_transient();
             }
             let _ = accent;
