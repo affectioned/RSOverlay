@@ -69,29 +69,31 @@ pub struct IVROverlayFnTable {
     pub FindOverlay: unsafe extern "system" fn(pchOverlayKey: *const c_char, pOverlayHandle: *mut VROverlayHandle_t) -> EVROverlayError,
     pub CreateOverlay: unsafe extern "system" fn(pchOverlayKey: *const c_char, pchOverlayName: *const c_char, pOverlayHandle: *mut VROverlayHandle_t) -> EVROverlayError,
     pub DestroyOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
-    pub _pad_01: [*const c_void; 24],
+    pub _pad_01: [*const c_void; 18], // 3..=20
     pub SetOverlayWidthInMeters: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fWidthInMeters: f32) -> EVROverlayError,
-    pub _pad_02: [*const c_void; 32],
+    pub _pad_02: [*const c_void; 8], // 22..=29
     pub SetOverlayTransformAbsolute: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, eTrackingOrigin: ETrackingUniverseOrigin, pMatTrackingOriginToOverlayTransform: *const HmdMatrix34_t) -> EVROverlayError,
-    pub _pad_03: [*const c_void; 20],
+    pub _pad_03: [*const c_void; 9], // 31..=39
     pub ShowOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
     pub HideOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
-    pub _pad_04: [*const c_void; 8],
+    pub _pad_04: [*const c_void; 14], // 42..=55
     pub SetOverlayTexture: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, pTexture: *const Texture_t) -> EVROverlayError,
     pub ClearOverlayTexture: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
 }
 
-// Note: real vtable layout is version-specific. The padding above is a placeholder
-// until we lock the OpenVR SDK version we target. In the real FFI we use the
-// `FnTable:IVROverlay_NNN` interface accessor from `VR_GetGenericInterface`,
-// which returns a stable function-pointer table defined per-version.
-//
-// For this scaffold we deliberately use the stable FnTable path, which OpenVR
-// guarantees per interface-version string. The accessor pattern:
-//   let p = VR_GetGenericInterface(b"FnTable:IVROverlay_024\0", &mut err);
-// returns a *const IVROverlay_FnTable where every field is a function pointer
-// in the exact order declared in openvr_capi.h. The full vtable is wired in
-// src/overlay.rs once we pin the SDK version in the build script.
+// Slot indices verified against `openvr_capi.h` at SDK tag v1.12.5,
+// the release that defines IVROverlay_024. The asserts pin each bound
+// function to its slot so a padding edit can't silently shift the table.
+const _: () = {
+    const P: usize = std::mem::size_of::<*const c_void>();
+    assert!(std::mem::offset_of!(IVROverlayFnTable, DestroyOverlay) == 2 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayWidthInMeters) == 21 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayTransformAbsolute) == 30 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, ShowOverlay) == 40 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, HideOverlay) == 41 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayTexture) == 56 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, ClearOverlayTexture) == 57 * P);
+};
 
 pub type FnVR_InitInternal = unsafe extern "system" fn(peError: *mut EVRInitError, eType: EVRApplicationType) -> isize;
 pub type FnVR_ShutdownInternal = unsafe extern "system" fn();
