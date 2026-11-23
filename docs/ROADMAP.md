@@ -29,7 +29,7 @@ stays — only the interaction model matches.
 | Window re-centering + grid view | planned |
 | Window move/scale/management at any range | **Placement card + CLI + persistence shipped**, grab/drag planned |
 | **Curved overlays** | **shipped** (M24) — `Placement.curvature` slider |
-| User-editable localization | planned |
+| User-editable localization (9 UI languages + 5 physical keyboards) | **shipped** (M27) |
 | Auto keyboard layout from system | **shipped** — `KEYEVENTF_UNICODE` lets the host layout handle mapping |
 | Custom keyboard sounds | planned |
 | **Layout save / load** | **shipped** (M19) — accent + placement + card toggles autosave to `%APPDATA%\RSOverlay\config.toml`, hot-reload picks up external edits (M23) |

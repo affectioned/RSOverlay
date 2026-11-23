@@ -112,6 +112,8 @@ pub struct DevView {
     pub show_chat: bool,
     pub show_keyboard: bool,
     pub show_history: bool,
+    /// Active UI language + keyboard layout. Both persist to config.
+    pub language: crate::i18n::Lang,
     /// Set to true when the user clicks "Reset defaults" in the
     /// Appearance card. The main loop consumes it on the next tick.
     pub reset_requested: bool,
@@ -142,6 +144,7 @@ impl Default for DevView {
             show_chat: true,
             show_keyboard: false,
             show_history: false,
+            language: crate::i18n::Lang::default(),
             reset_requested: false,
             placement: Placement::default(),
             keyboard: crate::keyboard::Keyboard::default(),
@@ -277,6 +280,8 @@ impl DevView {
                             &mut self.show_chat,
                             &mut self.show_keyboard,
                             &mut self.show_history,
+                            &mut self.language,
+                            &mut self.keyboard.layout,
                         ) {
                             self.reset_requested = true;
                         }
@@ -569,6 +574,7 @@ fn relative_time(d: Duration) -> String {
 
 /// Returns `true` when the user clicked the "Reset defaults" button —
 /// the caller resets its DevView to defaults + re-saves config.
+#[allow(clippy::too_many_arguments)]
 fn appearance_card(
     ui: &mut egui::Ui,
     accent: &mut egui::Color32,
@@ -577,6 +583,8 @@ fn appearance_card(
     show_chat: &mut bool,
     show_keyboard: &mut bool,
     show_history: &mut bool,
+    language: &mut crate::i18n::Lang,
+    keyboard_layout: &mut crate::keyboard_layout::LayoutId,
 ) -> bool {
     let mut reset_clicked = false;
     theme::card().show(ui, |ui| {
@@ -631,6 +639,23 @@ fn appearance_card(
             ui.checkbox(show_keyboard, "Keyboard");
             ui.checkbox(show_history, "History");
         });
+        ui.add_space(8.0);
+        // Language picker — shows the native-script name so a Russian
+        // user sees Русский.
+        egui::ComboBox::from_label("Language")
+            .selected_text(language.native_name())
+            .show_ui(ui, |ui| {
+                for l in crate::i18n::Lang::all() {
+                    ui.selectable_value(language, *l, l.native_name());
+                }
+            });
+        egui::ComboBox::from_label("Layout")
+            .selected_text(keyboard_layout.label())
+            .show_ui(ui, |ui| {
+                for l in crate::keyboard_layout::LayoutId::all() {
+                    ui.selectable_value(keyboard_layout, *l, l.label());
+                }
+            });
     });
     reset_clicked
 }

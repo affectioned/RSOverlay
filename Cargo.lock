@@ -2290,6 +2290,7 @@ dependencies = [
  "rsoverlay-input",
  "rsoverlay-notify",
  "rsoverlay-osc",
+ "serde",
  "tracing",
  "wgpu",
  "windows",

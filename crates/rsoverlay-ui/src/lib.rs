@@ -6,8 +6,10 @@
 use egui_wgpu::{Renderer, ScreenDescriptor};
 use std::sync::Arc;
 
+pub mod i18n;
 pub mod icons;
 pub mod keyboard;
+pub mod keyboard_layout;
 pub mod locale;
 pub mod media;
 pub mod theme;

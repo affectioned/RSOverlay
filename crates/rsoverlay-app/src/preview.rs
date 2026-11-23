@@ -103,6 +103,8 @@ pub fn seed_dev_view(
     dev.show_keyboard = cfg.appearance.show_keyboard;
     dev.show_history = cfg.appearance.show_history;
     dev.forward_input = cfg.appearance.forward_input;
+    dev.language = parse_lang(&cfg.appearance.language);
+    dev.keyboard.layout = parse_layout(&cfg.appearance.keyboard_layout);
     if test.show_keyboard {
         dev.show_keyboard = true;
     }
@@ -163,6 +165,8 @@ pub fn config_from_dev_view(
     out.appearance.show_keyboard = dev.show_keyboard;
     out.appearance.show_history = dev.show_history;
     out.appearance.forward_input = dev.forward_input;
+    out.appearance.language = dev.language.bcp47().to_string();
+    out.appearance.keyboard_layout = dev.keyboard.layout.slug().to_string();
     out.placement.anchor = match dev.placement.anchor {
         UiAnchor::Wrist => PlacementAnchor::Wrist,
         UiAnchor::Hmd => PlacementAnchor::Hmd,
@@ -175,6 +179,14 @@ pub fn config_from_dev_view(
     out.placement.size_h = dev.placement.size_h;
     out.placement.curvature = dev.placement.curvature;
     out
+}
+
+fn parse_lang(tag: &str) -> rsoverlay_ui::i18n::Lang {
+    rsoverlay_ui::i18n::Lang::from_bcp47(tag).unwrap_or_default()
+}
+
+fn parse_layout(slug: &str) -> rsoverlay_ui::keyboard_layout::LayoutId {
+    rsoverlay_ui::keyboard_layout::LayoutId::from_slug(slug).unwrap_or_default()
 }
 
 fn parse_hex_color(hex: &str) -> Option<egui::Color32> {
@@ -299,6 +311,8 @@ fn configs_equivalent(a: &rsoverlay_core::Config, b: &rsoverlay_core::Config) ->
         && a.appearance.show_keyboard == b.appearance.show_keyboard
         && a.appearance.show_history == b.appearance.show_history
         && a.appearance.forward_input == b.appearance.forward_input
+        && a.appearance.language == b.appearance.language
+        && a.appearance.keyboard_layout == b.appearance.keyboard_layout
         && a.placement.anchor == b.placement.anchor
         && (a.placement.offset_x - b.placement.offset_x).abs() < 0.001
         && (a.placement.offset_y - b.placement.offset_y).abs() < 0.001

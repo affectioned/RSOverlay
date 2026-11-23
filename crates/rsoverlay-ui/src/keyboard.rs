@@ -56,24 +56,8 @@ impl ModifierState {
 #[derive(Default)]
 pub struct Keyboard {
     pub modifiers: ModifierState,
+    pub layout: crate::keyboard_layout::LayoutId,
 }
-
-const ROW_NUMBERS: &[(char, char)] = &[
-    ('1', '!'), ('2', '@'), ('3', '#'), ('4', '$'), ('5', '%'),
-    ('6', '^'), ('7', '&'), ('8', '*'), ('9', '('), ('0', ')'),
-];
-const ROW_TOP: &[(char, char)] = &[
-    ('q', 'Q'), ('w', 'W'), ('e', 'E'), ('r', 'R'), ('t', 'T'),
-    ('y', 'Y'), ('u', 'U'), ('i', 'I'), ('o', 'O'), ('p', 'P'),
-];
-const ROW_HOME: &[(char, char)] = &[
-    ('a', 'A'), ('s', 'S'), ('d', 'D'), ('f', 'F'), ('g', 'G'),
-    ('h', 'H'), ('j', 'J'), ('k', 'K'), ('l', 'L'),
-];
-const ROW_BOTTOM: &[(char, char)] = &[
-    ('z', 'Z'), ('x', 'X'), ('c', 'C'), ('v', 'V'), ('b', 'B'),
-    ('n', 'N'), ('m', 'M'), (',', '<'), ('.', '>'), ('/', '?'),
-];
 
 /// Render the keyboard. On any key press, fire the appropriate input
 /// event via the injector. The host-focused window receives it.
@@ -83,11 +67,13 @@ pub fn show(
     injector: &InputInjector,
     accent: egui::Color32,
 ) {
+    let layout = crate::keyboard_layout::layout(state.layout);
+    let (numbers, top, home, bottom) = (layout.numbers, layout.top, layout.home, layout.bottom);
     ui.vertical(|ui| {
-        key_row(ui, state, injector, accent, ROW_NUMBERS);
-        key_row(ui, state, injector, accent, ROW_TOP);
-        key_row(ui, state, injector, accent, ROW_HOME);
-        key_row(ui, state, injector, accent, ROW_BOTTOM);
+        key_row(ui, state, injector, accent, numbers);
+        key_row(ui, state, injector, accent, top);
+        key_row(ui, state, injector, accent, home);
+        key_row(ui, state, injector, accent, bottom);
         // Bottom bar: modifiers + space + enter + backspace.
         ui.horizontal(|ui| {
             modifier_toggle(ui, &mut state.modifiers.shift, "Shift", accent);

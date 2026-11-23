@@ -28,6 +28,12 @@ pub struct Appearance {
     pub show_keyboard: bool,
     pub show_history: bool,
     pub forward_input: bool,
+    /// BCP-47 UI language tag — en-US, de-DE, ja-JP, zh-CN, etc.
+    /// Defaults to en-US; parse errors fall back to that too.
+    pub language: String,
+    /// Virtual keyboard physical layout — qwerty / qwertz / azerty /
+    /// jcuken-ru / abnt2. Parse errors fall back to qwerty.
+    pub keyboard_layout: String,
 }
 
 impl Default for Appearance {
@@ -40,6 +46,8 @@ impl Default for Appearance {
             show_keyboard: false,
             show_history: false,
             forward_input: false,
+            language: "en-US".into(),
+            keyboard_layout: "qwerty".into(),
         }
     }
 }

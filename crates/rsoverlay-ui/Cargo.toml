@@ -17,6 +17,7 @@ rsoverlay-notify.workspace = true
 rsoverlay-osc.workspace = true
 rsoverlay-input.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+serde.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
