@@ -137,6 +137,8 @@ pub struct Placement {
     /// width. Bends the panel toward the viewer so edges are closer
     /// than the center — XSO's "curved overlay" option.
     pub curvature: f32,
+    /// Compositor opacity, 0.2..=1.0.
+    pub opacity: f32,
 }
 
 impl Default for Placement {
@@ -151,6 +153,7 @@ impl Default for Placement {
             size_w: 0.36,
             size_h: 0.225,
             curvature: 0.0,
+            opacity: 1.0,
         }
     }
 }
@@ -200,6 +203,11 @@ pub struct DevView {
     page_since: f64,
     /// Accessibility: make every transition instant. Persists.
     pub reduce_motion: bool,
+    pub night_light: crate::nightlight::NightLight,
+    /// Overlay colour multiplier (rgb) + opacity (a) for this frame;
+    /// the app hands it to the compositor / preview shaders.
+    tint: [f32; 4],
+    last_frame_time: Option<f64>,
     history: VecDeque<HistoryEntry>,
     notifications_received: u64,
     media: Option<MediaInfo>,
@@ -243,6 +251,9 @@ impl Default for DevView {
             last_page: crate::shell::Page::default(),
             page_since: f64::NEG_INFINITY,
             reduce_motion: false,
+            night_light: crate::nightlight::NightLight::default(),
+            tint: [1.0; 4],
+            last_frame_time: None,
             history: VecDeque::new(),
             notifications_received: 0,
             media: None,
@@ -290,6 +301,11 @@ impl DevView {
             self.push_notification(n);
         }
         self.batteries = readings;
+    }
+
+    /// RGB multiplier + opacity to apply to the whole overlay.
+    pub fn overlay_tint(&self) -> [f32; 4] {
+        self.tint
     }
 
     pub fn notifications_received(&self) -> u64 {
@@ -365,6 +381,18 @@ impl DevView {
             self.page_since = ctx.input(|i| i.time);
         }
         let enter = crate::motion::progress(ctx, self.page_since, crate::motion::MEDIUM);
+        {
+            let t = ctx.input(|i| i.time);
+            let dt = self.last_frame_time.map_or(0.0, |p| (t - p) as f32);
+            self.last_frame_time = Some(t);
+            let [r, g, b] = self.night_light.tick(minute_of_day(), dt);
+            self.tint = [r, g, b, self.placement.opacity.clamp(0.2, 1.0)];
+            if (self.tint[2] - crate::nightlight::multiplier(self.night_light.strength)[2]).abs() > 1e-3
+                && self.night_light.active_at(minute_of_day())
+            {
+                ctx.request_repaint();
+            }
+        }
 
         let root = egui::Frame::none().fill(theme::BG_ROOT);
         egui::TopBottomPanel::top("header")
@@ -535,6 +563,8 @@ impl DevView {
                     ) {
                         self.reset_requested = true;
                     }
+                    l.add_space(theme::GUTTER);
+                    self.night_light.card(l, minute_of_day(), accent);
                     placement_card(r, &mut self.placement, accent);
                     r.add_space(theme::GUTTER);
                     stats_card(r, self.frame, self.last_fps, self.notifications_received, accent);
@@ -542,6 +572,12 @@ impl DevView {
             }
         }
     }
+}
+
+fn minute_of_day() -> u16 {
+    use chrono::Timelike;
+    let now = chrono::Local::now();
+    (now.hour() * 60 + now.minute()) as u16
 }
 
 fn media_card(ui: &mut egui::Ui, info: Option<&MediaInfo>, accent: egui::Color32) {
@@ -653,6 +689,7 @@ fn placement_card(ui: &mut egui::Ui, p: &mut Placement, accent: egui::Color32) {
         placement_slider(ui, "H", &mut p.size_h, 0.08, 0.6);
         ui.add_space(4.0);
         placement_slider(ui, "Curve", &mut p.curvature, 0.0, 1.0);
+        placement_slider(ui, "Opacity", &mut p.opacity, 0.2, 1.0);
     });
 }
 

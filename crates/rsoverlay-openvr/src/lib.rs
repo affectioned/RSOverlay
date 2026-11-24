@@ -185,6 +185,18 @@ impl<'a> Overlay<'a> {
         check(r, "HideOverlay")
     }
 
+    /// Multiply the overlay's colour in the compositor (0..=1 per
+    /// channel). Used for night light — zero render cost on our side.
+    pub fn set_color(&self, handle: VROverlayHandle_t, rgb: [f32; 3]) -> Result<(), OpenVrError> {
+        let r = unsafe { (self.table().SetOverlayColor)(handle, rgb[0], rgb[1], rgb[2]) };
+        check(r, "SetOverlayColor")
+    }
+
+    pub fn set_alpha(&self, handle: VROverlayHandle_t, alpha: f32) -> Result<(), OpenVrError> {
+        let r = unsafe { (self.table().SetOverlayAlpha)(handle, alpha) };
+        check(r, "SetOverlayAlpha")
+    }
+
     pub fn set_width(&self, handle: VROverlayHandle_t, meters: f32) -> Result<(), OpenVrError> {
         let r = unsafe { (self.table().SetOverlayWidthInMeters)(handle, meters) };
         check(r, "SetOverlayWidthInMeters")

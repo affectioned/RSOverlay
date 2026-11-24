@@ -12,8 +12,28 @@ pub struct Config {
     pub preview: Preview,
     pub appearance: Appearance,
     pub placement: Placement,
+    pub night_light: NightLightCfg,
     /// Virtual StreamDeck buttons. Serialized as `[[macros]]` tables.
+    /// Must stay the last field: TOML arrays of tables have to follow
+    /// every plain table in the document.
     pub macros: Macros,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NightLightCfg {
+    /// off / on / scheduled
+    pub mode: String,
+    /// 0.0 neutral ..= 1.0 warmest.
+    pub strength: f32,
+    pub start_hour: u8,
+    pub end_hour: u8,
+}
+
+impl Default for NightLightCfg {
+    fn default() -> Self {
+        Self { mode: "off".into(), strength: 0.5, start_hour: 21, end_hour: 7 }
+    }
 }
 
 /// One macro button: a label and a shortcut string such as
@@ -123,6 +143,8 @@ pub struct Placement {
     /// overlay toward the viewer for immersive feel at wider sizes.
     /// Matches XSO's curved overlay option.
     pub curvature: f32,
+    /// Overlay opacity in the compositor, 0.2..=1.0.
+    pub opacity: f32,
 }
 
 impl Default for Placement {
@@ -135,6 +157,7 @@ impl Default for Placement {
             size_w: 0.36,
             size_h: 0.225,
             curvature: 0.0,
+            opacity: 1.0,
         }
     }
 }

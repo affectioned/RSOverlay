@@ -81,6 +81,9 @@ mod imp {
         // Macros + keyboard fire global hotkeys; the overlay never takes
         // desktop focus, so they reach whatever app the user is in.
         let injector = rsoverlay_input::InputInjector::new().ok();
+        // Last tint pushed to the compositor; only re-send on change
+        // (each call is an IPC round-trip to vrcompositor).
+        let mut applied_tint = [f32::NAN; 4];
 
         overlay.show(handle).ok();
         info!(
@@ -126,6 +129,18 @@ mod imp {
                 raw_input,
                 |ctx| dev_view.ui_with(ctx, injector.as_ref()),
             );
+
+            // 1b. Night light + opacity, applied by the compositor.
+            let tint = dev_view.overlay_tint();
+            if tint.iter().zip(applied_tint).any(|(a, b)| (a - b).abs() > 1e-3 || b.is_nan()) {
+                if let Err(e) = overlay.set_color(handle, [tint[0], tint[1], tint[2]]) {
+                    warn!("SetOverlayColor: {e:#}");
+                }
+                if let Err(e) = overlay.set_alpha(handle, tint[3]) {
+                    warn!("SetOverlayAlpha: {e:#}");
+                }
+                applied_tint = tint;
+            }
 
             // 2. Hand the raw D3D12 resource + queue to OpenVR. The
             // compositor waits on the queue before sampling, so the

@@ -185,6 +185,7 @@ pub fn run(
                         &camera,
                         &dev_view.placement,
                         dev_view.accent,
+                        dev_view.overlay_tint(),
                         aspect,
                         &view,
                     );
@@ -412,6 +413,7 @@ impl SceneRenderer {
                 contents: bytemuck::bytes_of(&QuadGpu {
                     model: Mat4::IDENTITY.to_cols_array_2d(),
                     params: [0.0, 0.36, 0.225, 0.0],
+                    tint: [1.0; 4],
                 }),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
@@ -429,7 +431,7 @@ impl SceneRenderer {
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
@@ -555,12 +557,14 @@ impl SceneRenderer {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render(
         &mut self,
         gpu: &GpuCtx,
         camera: &OrbitCamera,
         placement: &Placement,
         accent: egui::Color32,
+        tint: [f32; 4],
         aspect: f32,
         view: &wgpu::TextureView,
     ) {
@@ -590,7 +594,7 @@ impl SceneRenderer {
             0.0,
         ];
         gpu.queue
-            .write_buffer(&self.quad_buf, 0, bytemuck::bytes_of(&QuadGpu { model, params }));
+            .write_buffer(&self.quad_buf, 0, bytemuck::bytes_of(&QuadGpu { model, params, tint }));
 
         let mut enc = gpu
             .device
@@ -642,4 +646,6 @@ struct QuadGpu {
     // x = curvature in [0,1], y = width in metres, z = height in
     // metres, w reserved.
     params: [f32; 4],
+    // rgb = night-light multiplier, a = opacity.
+    tint: [f32; 4],
 }

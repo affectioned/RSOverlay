@@ -3,6 +3,9 @@
 
 @group(0) @binding(0) var src_tex: texture_2d<f32>;
 @group(0) @binding(1) var src_samp: sampler;
+// rgb = night-light colour multiplier. (a = opacity; a desktop window
+// can't be translucent, so the blit ignores it.)
+@group(0) @binding(2) var<uniform> tint: vec4<f32>;
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -22,5 +25,6 @@ fn vs_main(@builtin(vertex_index) vid: u32) -> VsOut {
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    return textureSample(src_tex, src_samp, in.uv);
+    let c = textureSample(src_tex, src_samp, in.uv);
+    return vec4<f32>(c.rgb * tint.rgb, c.a);
 }

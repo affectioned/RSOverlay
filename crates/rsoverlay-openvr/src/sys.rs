@@ -69,7 +69,11 @@ pub struct IVROverlayFnTable {
     pub FindOverlay: unsafe extern "system" fn(pchOverlayKey: *const c_char, pOverlayHandle: *mut VROverlayHandle_t) -> EVROverlayError,
     pub CreateOverlay: unsafe extern "system" fn(pchOverlayKey: *const c_char, pchOverlayName: *const c_char, pOverlayHandle: *mut VROverlayHandle_t) -> EVROverlayError,
     pub DestroyOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
-    pub _pad_01: [*const c_void; 18], // 3..=20
+    pub _pad_01: [*const c_void; 10], // 3..=12
+    pub SetOverlayColor: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fRed: f32, fGreen: f32, fBlue: f32) -> EVROverlayError, // 13
+    pub _pad_01b: [*const c_void; 1], // 14 GetOverlayColor
+    pub SetOverlayAlpha: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fAlpha: f32) -> EVROverlayError, // 15
+    pub _pad_01c: [*const c_void; 5], // 16..=20
     pub SetOverlayWidthInMeters: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fWidthInMeters: f32) -> EVROverlayError,
     pub _pad_02: [*const c_void; 8], // 22..=29
     pub SetOverlayTransformAbsolute: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, eTrackingOrigin: ETrackingUniverseOrigin, pMatTrackingOriginToOverlayTransform: *const HmdMatrix34_t) -> EVROverlayError,
@@ -87,6 +91,8 @@ pub struct IVROverlayFnTable {
 const _: () = {
     const P: usize = std::mem::size_of::<*const c_void>();
     assert!(std::mem::offset_of!(IVROverlayFnTable, DestroyOverlay) == 2 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayColor) == 13 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayAlpha) == 15 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayWidthInMeters) == 21 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayTransformAbsolute) == 30 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, ShowOverlay) == 40 * P);

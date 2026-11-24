@@ -22,6 +22,9 @@ struct QuadUniforms {
     /// x = curvature in [0,1], y = width in metres, z = height in
     /// metres, w reserved.
     params: vec4<f32>,
+    /// rgb = night-light multiplier, a = opacity (blends to the void —
+    /// visually identical to compositor alpha over a black scene).
+    tint: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> cam: CameraUniforms;
@@ -96,7 +99,7 @@ fn fs_quad(in: VsOut) -> @location(0) vec4<f32> {
     let dist = min(min(in.uv.x, 1.0 - in.uv.x), min(in.uv.y, 1.0 - in.uv.y));
     let frame = 1.0 - smoothstep(0.004, 0.018, dist);
     let frame_col = cam.accent.rgb * frame * 0.9;
-    return vec4<f32>(overlay.rgb + frame_col, 1.0);
+    return vec4<f32>((overlay.rgb * q.tint.rgb + frame_col) * q.tint.a, 1.0);
 }
 
 // ─── Chaperone floor grid ────────────────────────────────────────────

@@ -160,6 +160,15 @@ pub fn seed_dev_view(
     dev.placement.size_w = cfg.placement.size_w;
     dev.placement.size_h = cfg.placement.size_h;
     dev.placement.curvature = cfg.placement.curvature;
+    dev.placement.opacity = cfg.placement.opacity.clamp(0.2, 1.0);
+    {
+        use rsoverlay_ui::nightlight::NightMode;
+        let n = &cfg.night_light;
+        dev.night_light.mode = NightMode::from_slug(&n.mode);
+        dev.night_light.strength = n.strength.clamp(0.0, 1.0);
+        dev.night_light.start_hour = n.start_hour.min(23);
+        dev.night_light.end_hour = n.end_hour.min(23);
+    }
     if let Some((x, y, z)) = test.overlay_pos {
         dev.placement.offset_x = x;
         dev.placement.offset_y = y;
@@ -230,6 +239,13 @@ pub fn config_from_dev_view(
     out.placement.size_w = dev.placement.size_w;
     out.placement.size_h = dev.placement.size_h;
     out.placement.curvature = dev.placement.curvature;
+    out.placement.opacity = dev.placement.opacity;
+    out.night_light = rsoverlay_core::config::NightLightCfg {
+        mode: dev.night_light.mode.slug().to_string(),
+        strength: dev.night_light.strength,
+        start_hour: dev.night_light.start_hour,
+        end_hour: dev.night_light.end_hour,
+    };
     out
 }
 
@@ -379,6 +395,8 @@ fn configs_equivalent(a: &rsoverlay_core::Config, b: &rsoverlay_core::Config) ->
         && (a.placement.size_w - b.placement.size_w).abs() < 0.001
         && (a.placement.size_h - b.placement.size_h).abs() < 0.001
         && (a.placement.curvature - b.placement.curvature).abs() < 0.001
+        && (a.placement.opacity - b.placement.opacity).abs() < 0.001
+        && a.night_light == b.night_light
 }
 
 /// Save the given surface frame to a PNG. BGRA → RGBA swizzle, then
@@ -831,6 +849,7 @@ pub fn run(
                         let mut enc = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("preview-blit-encoder"),
                         });
+                        blit.set_tint(&gpu.queue, dev_view.overlay_tint());
                         blit.record(&mut enc, &view);
                         gpu.queue.submit(Some(enc.finish()));
 
@@ -954,6 +973,8 @@ impl FpsCounter {
 struct BlitPipeline {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
+    /// vec4 colour multiplier (night light). Written every frame.
+    tint_buf: wgpu::Buffer,
 }
 
 impl BlitPipeline {
@@ -988,7 +1009,23 @@ impl BlitPipeline {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
+        });
+        let tint_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("blit-tint"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("blit-bg"),
@@ -996,6 +1033,7 @@ impl BlitPipeline {
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&source.view) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
+                wgpu::BindGroupEntry { binding: 2, resource: tint_buf.as_entire_binding() },
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1025,7 +1063,11 @@ impl BlitPipeline {
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
-        Self { pipeline, bind_group }
+        Self { pipeline, bind_group, tint_buf }
+    }
+
+    fn set_tint(&self, queue: &wgpu::Queue, tint: [f32; 4]) {
+        queue.write_buffer(&self.tint_buf, 0, bytemuck::cast_slice(&tint));
     }
 
     fn record(&self, enc: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
