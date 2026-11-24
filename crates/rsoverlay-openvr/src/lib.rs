@@ -24,7 +24,7 @@ pub enum OpenVrError {
     RuntimeMissing,
     #[error("No HMD present")]
     NoHmd,
-    #[error("VR_InitInternal failed with code {0}")]
+    #[error("VR_InitInternal failed with code {0}: {}", init_error_hint(*.0))]
     InitFailed(i32),
     #[error("IVROverlay interface not available (code {0})")]
     InterfaceMissing(i32),
@@ -32,6 +32,22 @@ pub enum OpenVrError {
     OverlayOp { op: &'static str, code: u32 },
     #[error("Invalid overlay key: contains nul byte")]
     InvalidKey,
+}
+
+/// Plain-language reasons for the EVRInitError codes users actually hit.
+pub fn init_error_hint(code: i32) -> &'static str {
+    match code {
+        108 => "no headset found — is it plugged in and powered on?",
+        110 => "SteamVR isn't running — start SteamVR first",
+        126 => "headset not detected by SteamVR",
+        200 => "headset driver failed to load",
+        205 => "headset is in use by another runtime",
+        206 => "headset needs room setup — run SteamVR room setup",
+        208 | 213 => "headset display not found — check the cable / display port",
+        215 => "wireless headset not connected — wake it / reconnect it, then retry",
+        301 => "SteamVR is still starting up — retry in a moment",
+        _ => "see SteamVR's status window for details",
+    }
 }
 
 struct OpenVrFns {
@@ -609,6 +625,12 @@ pub fn pose_translation(x: f32, y: f32, z: f32) -> HmdMatrix34_t {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn init_errors_read_as_english() {
+        let e = OpenVrError::InitFailed(215).to_string();
+        assert!(e.contains("215") && e.contains("wireless headset not connected"), "{e}");
+    }
 
     #[test]
     fn parses_vrpath_runtime() {
