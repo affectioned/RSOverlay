@@ -73,6 +73,26 @@ Ranked by cross-wishlist demand × implementation cost in a Rust + wgpu stack.
    one-shot low-battery toast with 5 % re-arm hysteresis. Per-device hide
    toggles still open. *XSO #203/#216/#339; OVR #17.*
 
+## Working in VR (productivity track)
+
+RSOverlay should be a daily driver for people who *work* in VR, not
+only play. Foundations already shipped: window overlays with a real
+mouse (press / drag / right-click / wheel), layouts per setup, a
+physical-style keyboard that types in any language, global search,
+macros, DPI-correct input.
+
+1. **Focus mode** — one toggle that silences notifications/toasts and
+   dims or throttles panels you aren't looking at, so the window you're
+   working in owns your attention. Auto-off when you leave it.
+2. **Work layout preset** — one tap builds a large curved main screen
+   plus side windows at reading distance (a built-in layout template
+   users can then tweak and save to a slot).
+3. **Window resize from VR** — set the *real* window's size/DPI from the
+   overlay toolbar so text stays readable at the panel's physical size
+   (e.g. "fit to panel" / 1280×800 / 1920×1080 presets).
+4. **Multi-monitor wall** — every monitor at once, arranged in an arc
+   around you, with per-monitor docking and recenter.
+
 ## Mid-term
 
 - **Reset-settings tray action** (XSO #160, second-highest signal) + full
@@ -107,6 +127,12 @@ Ranked by cross-wishlist demand × implementation cost in a Rust + wgpu stack.
   always-on Chromium dependency XSO/OVRT ship.
 
 ## Explicit non-goals
+
+- **Clipboard history / clipboard capture.** Reading or storing what
+  users copy (passwords, tokens, private messages) breaks the project's
+  privacy & security rule. The keyboard's Copy / Paste buttons only send
+  the normal Ctrl+C / Ctrl+V keystrokes; RSOverlay never reads or keeps
+  clipboard contents.
 
 - **Chromium baked in by default.** Chromium is the architectural choice
   that makes XSOverlay cost 1 GB RAM. `wry` is opt-in only.
