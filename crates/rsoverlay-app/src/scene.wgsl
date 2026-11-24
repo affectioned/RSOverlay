@@ -2,8 +2,8 @@
 //
 // Rendered in two passes using the same vertex_index trick:
 //   1. Floor grid: large horizontal quad at y=0, teal chaperone lines.
-//   2. Overlay quad: rendered where the wrist-mounted overlay lives,
-//      textured from the same OverlayTarget egui draws into.
+//   2. Panel quads (one draw per panel, far to near) + laser beams,
+//      each textured from the OverlayTarget its egui UI draws into.
 //
 // Group 0 holds the camera; group 1 holds per-quad model matrix + the
 // overlay texture + sampler. Grid uses only group 0.
@@ -22,8 +22,7 @@ struct QuadUniforms {
     /// x = curvature in [0,1], y = width in metres, z = height in
     /// metres, w reserved.
     params: vec4<f32>,
-    /// rgb = night-light multiplier, a = opacity (blends to the void —
-    /// visually identical to compositor alpha over a black scene).
+    /// rgb = colour multiplier (beams take the accent), a = opacity.
     tint: vec4<f32>,
 };
 
@@ -91,15 +90,11 @@ fn vs_quad(@builtin(vertex_index) vid: u32) -> VsOut {
 
 @fragment
 fn fs_quad(in: VsOut) -> @location(0) vec4<f32> {
-    let overlay = textureSample(overlay_tex, overlay_samp, in.uv);
-    // Thin accent-colored frame at the very edge so the AMOLED-black
-    // card has a clear silhouette against the void — SteamVR uses the
-    // same cue to make overlays feel "present". Kept narrow (< 2% of
-    // the quad on each side) so the UI interior reads at full contrast.
-    let dist = min(min(in.uv.x, 1.0 - in.uv.x), min(in.uv.y, 1.0 - in.uv.y));
-    let frame = 1.0 - smoothstep(0.004, 0.018, dist);
-    let frame_col = cam.accent.rgb * frame * 0.9;
-    return vec4<f32>((overlay.rgb * q.tint.rgb + frame_col) * q.tint.a, 1.0);
+    // Panel textures are premultiplied with transparent corners, exactly
+    // what the VR compositor receives; tint multiplies colour (beams take
+    // the accent) and `a` is overall opacity.
+    let c = textureSample(overlay_tex, overlay_samp, in.uv);
+    return vec4<f32>(c.rgb * q.tint.rgb, c.a) * q.tint.a;
 }
 
 // ─── Chaperone floor grid ────────────────────────────────────────────
@@ -126,19 +121,18 @@ fn vs_grid(@builtin(vertex_index) vid: u32) -> VsOut {
 
 @fragment
 fn fs_grid(in: VsOut) -> @location(0) vec4<f32> {
-    // Fine lines every 0.25m, bold lines every 1m. Fade with distance
-    // from viewer so the grid dissolves into the void, matching
-    // SteamVR's chaperone falloff.
+    // Quiet chaperone floor: thin neutral lines (a hint of accent),
+    // fine every 0.5 m, bolder every 2 m, dissolving into the void a
+    // few metres out so the panels stay the subject.
     let world_xz = in.uv;
     let d = length(world_xz - cam.eye.xz);
-    let fade = 1.0 - clamp(d / 8.0, 0.0, 1.0);
-
-    let cell_fine = fract(world_xz / 0.25) - vec2<f32>(0.5, 0.5);
-    let cell_bold = fract(world_xz / 1.0) - vec2<f32>(0.5, 0.5);
-    let fine = step(0.48, abs(cell_fine.x)) + step(0.48, abs(cell_fine.y));
-    let bold = step(0.47, abs(cell_bold.x)) + step(0.47, abs(cell_bold.y));
-    let intensity = clamp(0.25 * fine + 0.75 * bold, 0.0, 1.0);
-
-    let col = cam.accent.rgb * intensity * fade * 0.55;
-    return vec4<f32>(col, 1.0);
+    let fade = 1.0 - smoothstep(1.0, 6.0, d);
+    let fw = fwidth(world_xz);
+    let fine_g = abs(fract(world_xz / 0.5 - 0.5) - 0.5) / (fw / 0.5);
+    let bold_g = abs(fract(world_xz / 2.0 - 0.5) - 0.5) / (fw / 2.0);
+    let fine = 1.0 - min(min(fine_g.x, fine_g.y), 1.0);
+    let bold = 1.0 - min(min(bold_g.x, bold_g.y), 1.0);
+    let intensity = max(0.35 * fine, bold);
+    let tone = mix(vec3<f32>(0.55, 0.55, 0.6), cam.accent.rgb, 0.25);
+    return vec4<f32>(tone * intensity * fade * 0.28, 1.0);
 }

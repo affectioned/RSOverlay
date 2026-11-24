@@ -97,16 +97,30 @@ pub fn show(
             }
         }
 
-        // Toolbar.
-        ui.painter().rect_filled(bar, 14.0, theme::BG_ROOT);
-        let mut bar_ui = ui.child_ui(bar.shrink2(egui::vec2(16.0, 8.0)), egui::Layout::left_to_right(egui::Align::Center));
-        if let Some(id) = icon {
-            bar_ui.add(egui::Image::new((id, egui::vec2(24.0, 24.0))));
-        }
-        bar_ui.add(egui::Label::new(egui::RichText::new(title).color(theme::FG_PRIMARY).size(theme::SIZE_BODY)).truncate(true));
-        bar_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            (out.attach, out.close) = dock_controls(ui, attach, accent);
-        });
+        (out.attach, out.close) = toolbar(ui, bar, title, icon, attach, accent);
+    });
+    out
+}
+
+/// A window panel's bottom toolbar: app icon + title, dock + close.
+pub fn toolbar(
+    ui: &mut egui::Ui,
+    bar: egui::Rect,
+    title: &str,
+    icon: Option<egui::TextureId>,
+    attach: Attach,
+    accent: egui::Color32,
+) -> (Option<Attach>, bool) {
+    ui.painter().rect_filled(bar, 14.0, theme::BG_ROOT);
+    ui.painter().rect_stroke(bar, 14.0, egui::Stroke::new(1.0_f32, theme::STROKE_CARD));
+    let mut bar_ui = ui.child_ui(bar.shrink2(egui::vec2(16.0, 8.0)), egui::Layout::left_to_right(egui::Align::Center));
+    if let Some(id) = icon {
+        bar_ui.add(egui::Image::new((id, egui::vec2(24.0, 24.0))));
+    }
+    bar_ui.add(egui::Label::new(egui::RichText::new(title).color(theme::FG_PRIMARY).size(theme::SIZE_BODY)).truncate(true));
+    let mut out = (None, false);
+    bar_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        out = dock_controls(ui, attach, accent);
     });
     out
 }

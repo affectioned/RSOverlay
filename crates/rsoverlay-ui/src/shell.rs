@@ -28,7 +28,7 @@ use crate::theme;
 use chrono::Local;
 
 pub const RAIL_WIDTH: f32 = 200.0;
-pub const NAV_ITEM_H: f32 = 42.0;
+pub const NAV_ITEM_H: f32 = 40.0;
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub enum Page {
@@ -127,15 +127,15 @@ pub fn nav_rail(ui: &mut egui::Ui, page: &mut Page, badge: usize, keyboard_open:
         egui::Stroke::new(1.0_f32, theme::STROKE_CARD),
     );
     ui.horizontal(|ui| {
-        ui.set_height(44.0);
+        ui.set_height(36.0);
         ui.add_space(8.0);
         ui.add(icon(icons::BRAND, 22.0, accent));
         ui.add_space(2.0);
         ui.label(egui::RichText::new("RSOverlay").font(theme::display(19.0)).color(theme::FG_PRIMARY));
     });
-    ui.add_space(10.0);
+    ui.add_space(8.0);
     let quick = quick_actions(ui, keyboard_open, vr, accent);
-    ui.add_space(14.0);
+    ui.add_space(10.0);
     let slot = ui.painter().add(egui::Shape::Noop);
     let mut selected_rect = None;
     for p in Page::ALL {
@@ -147,7 +147,6 @@ pub fn nav_rail(ui: &mut egui::Ui, page: &mut Page, badge: usize, keyboard_open:
         if *page == p {
             selected_rect = Some(rect);
         }
-        ui.add_space(2.0);
     }
     if let Some(target) = selected_rect {
         let ctx = ui.ctx().clone();
@@ -175,7 +174,7 @@ fn quick_actions(ui: &mut egui::Ui, keyboard_open: bool, vr: bool, accent: egui:
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             for (src, label, tip, on, id) in pair.iter().cloned() {
-                let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 62.0), egui::Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 56.0), egui::Sense::click());
                 let resp = resp.on_hover_text(tip);
                 let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
                 let fill = motion::mix(theme::BG_CARD, theme::BG_RAISED, hover);

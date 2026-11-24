@@ -60,6 +60,7 @@ pub struct TestHooks {
     pub widgets: Option<String>,
     pub vr_keyboard: bool,
     pub search: Option<String>,
+    pub scene: Option<String>,
 }
 
 /// Apply CLI overrides to a default Placement. Any field not overridden

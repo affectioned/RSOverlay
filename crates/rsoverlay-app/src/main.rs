@@ -13,6 +13,7 @@
 
 mod mirror_source;
 mod preview;
+mod preview_mock;
 mod preview_vr;
 mod vr;
 
@@ -166,6 +167,11 @@ struct Args {
     /// Pre-fill the global search box (screenshot the results list).
     #[arg(long, value_name = "QUERY")]
     search: Option<String>,
+
+    /// VR preview layout preset: work / gaming / social / dashboard /
+    /// wrist (keys 1-5 switch live).
+    #[arg(long, value_name = "PRESET")]
+    scene: Option<String>,
 }
 
 fn parse_vec3(s: &str) -> Result<(f32, f32, f32), String> {
@@ -326,6 +332,7 @@ fn main() -> Result<()> {
         widgets: args.widgets.clone(),
         vr_keyboard: args.vr_keyboard,
         search: args.search.clone(),
+        scene: args.scene.clone(),
     };
 
     let result = match mode {

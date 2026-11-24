@@ -1,22 +1,39 @@
-//! VR Preview mode — SteamVR Display-VR-View aesthetic.
+//! VR Preview: the headset view, on the desktop.
 //!
-//! What this is for: ironing out how the overlay reads from HMD POV
-//! without putting the headset on for every change. The overlay quad is
-//! rendered in a perspective-correct 3D scene, positioned where a
-//! wrist-mounted overlay would be (default: left-wrist, ~25cm from the
-//! head, tilted up for a glance). Mouse drag looks around, scroll
-//! dollies the head forward/back, a chaperone-style floor grid gives
-//! spatial grounding. The overlay content is rendered through the
-//! exact same `EguiPanel` → `OverlayTarget` pipeline the desktop
-//! preview and VR mode use, so visual parity is maintained.
+//! What this is for: design decisions without putting the headset on.
+//! A perspective-correct 3D scene places every RSOverlay panel the way
+//! the VR shell does (wrist on the off hand, dashboard in front,
+//! keyboard low and tilted, windows and widgets around you), each one
+//! rendered through the same `EguiPanel` pipeline and the same UI code
+//! as VR mode, so what you see here is what the headset shows.
+//!
+//! Layout presets show RSOverlay the way people actually use it (keys
+//! 1-5 switch live, `--scene` picks one at launch):
+//!
+//! 1. work       editor + notes + terminal arc, stats widget, keyboard
+//! 2. gaming     game guide to the side, media / battery widgets, wrist up
+//! 3. social     dashboard on Chat, keyboard, notifications + media
+//! 4. dashboard  the dashboard with the wrist and a popped-out widget
+//! 5. wrist      a close-up wrist glance, expanded
+//!
+//! Window contents are mock apps (`preview_mock`) and media is a demo
+//! track, so screenshots never contain the user's real desktop or
+//! listening history. Mouse drag looks around, scroll dollies, R resets
+//! the view, Esc exits.
 
+use crate::preview_mock::MockApp;
 use anyhow::{Context, Result};
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat4, Vec3};
 use rsoverlay_core::RuntimeMode;
 use rsoverlay_notify::NotifyChannel;
 use rsoverlay_render::{GpuCtx, OverlayTarget};
 use rsoverlay_ui::{
-    views::{Anchor, DevView, Placement},
+    laser::Hand,
+    shell::Page,
+    views::DevView,
+    vrkeyboard::VrKeyboard,
+    widgets::WidgetKind,
+    window_panel::{self, Attach},
     EguiPanel,
 };
 use std::sync::Arc;
@@ -30,44 +47,230 @@ use winit::{
     window::WindowBuilder,
 };
 
-// Dashboard aspect is landscape — mirror on the right, card column on
-// the left. Pick an overlay texture that matches so the egui UI fills
-// the quad instead of leaving a big black band.
-const OVERLAY_TEX_W: u32 = 2048;
-const OVERLAY_TEX_H: u32 = 1280;
-const INITIAL_WIN_W: u32 = 1280;
-const INITIAL_WIN_H: u32 = 800;
+/// Physical pixels, so `--screenshot` is exactly 1920×1080 on any
+/// display scaling (Steam store screenshot size).
+const INITIAL_WIN_W: u32 = 1920;
+const INITIAL_WIN_H: u32 = 1080;
+/// Standing eye height; the viewer faces -Z.
+const HEAD: Vec3 = Vec3::new(0.0, 1.6, 0.0);
+
+// Panel textures, pixels-per-point and widths: the VR shell's values
+// (`vr.rs`), so text and layout match the headset exactly.
+const DASH: PanelSize = PanelSize { tex: (2048, 1280), ppp: 2.0 };
+const WRIST: PanelSize = PanelSize { tex: (1200, 820), ppp: 2.0 };
+const WIN: PanelSize = PanelSize { tex: (1920, 1200), ppp: 1.5 };
+const WID: PanelSize = PanelSize { tex: (1200, 1000), ppp: 2.0 };
+const KB: PanelSize = PanelSize { tex: (2048, 800), ppp: 2.0 };
+const BEAM_TEX: (u32, u32) = (256, 16);
+const BEAM_THICKNESS_M: f32 = 0.0035;
+
+#[derive(Copy, Clone)]
+struct PanelSize {
+    tex: (u32, u32),
+    ppp: f32,
+}
+
+#[derive(Clone)]
+enum Content {
+    Dashboard(Page),
+    Wrist { expanded: bool },
+    Keyboard,
+    Widgets(Vec<WidgetKind>),
+    Window(MockApp),
+}
+
+/// One panel in a preset: what it shows, where it is, and where the
+/// laser points on it (uv), if anywhere.
+struct Spec {
+    content: Content,
+    size: PanelSize,
+    width_m: f32,
+    pose: Mat4,
+    laser: Option<(f32, f32)>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum Preset {
+    Work,
+    Gaming,
+    Social,
+    Dashboard,
+    Wrist,
+}
+
+impl Preset {
+    const ALL: [Preset; 5] = [Preset::Work, Preset::Gaming, Preset::Social, Preset::Dashboard, Preset::Wrist];
+
+    fn from_arg(s: Option<&str>) -> Self {
+        match s.unwrap_or("dashboard") {
+            "work" => Self::Work,
+            "gaming" => Self::Gaming,
+            "social" => Self::Social,
+            "wrist" => Self::Wrist,
+            _ => Self::Dashboard,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Work => "work",
+            Self::Gaming => "gaming",
+            Self::Social => "social",
+            Self::Dashboard => "dashboard",
+            Self::Wrist => "wrist",
+        }
+    }
+
+    /// (yaw, pitch, dolly) the preset is framed from.
+    fn camera(self) -> (f32, f32, f32) {
+        match self {
+            Self::Work => (0.0, -0.20, -0.12),
+            Self::Gaming => (-0.12, -0.30, 0.0),
+            Self::Social => (0.0, -0.30, 0.0),
+            Self::Dashboard => (-0.08, -0.16, 0.0),
+            Self::Wrist => (-0.46, -0.60, 0.20),
+        }
+    }
+
+    fn panels(self) -> Vec<Spec> {
+        let wrist = |expanded: bool, pos: Vec3, laser| Spec {
+            content: Content::Wrist { expanded },
+            size: WRIST,
+            width_m: 0.24,
+            pose: face_head(pos),
+            laser,
+        };
+        let keyboard = |pos: Vec3, laser| Spec { content: Content::Keyboard, size: KB, width_m: 0.75, pose: tilted(pos, -40.0), laser };
+        let window = |app, yaw, dist, h, w, laser| Spec {
+            content: Content::Window(app),
+            size: WIN,
+            width_m: w,
+            pose: face_head(arc(yaw, dist, h)),
+            laser,
+        };
+        let widget = |tabs: Vec<WidgetKind>, yaw, dist, h| Spec {
+            content: Content::Widgets(tabs),
+            size: WID,
+            width_m: 0.34,
+            pose: face_head(arc(yaw, dist, h)),
+            laser: None,
+        };
+        let dash = |page, yaw, dist, h, laser| Spec {
+            content: Content::Dashboard(page),
+            size: DASH,
+            width_m: 0.85,
+            pose: face_head(arc(yaw, dist, h)),
+            laser,
+        };
+        match self {
+            // A workday in VR: code front and centre, notes and a
+            // terminal either side, stats up high, keyboard under hand.
+            Self::Work => vec![
+                window(MockApp::Notes, -44.0, 1.0, 1.58, 0.72, None),
+                window(MockApp::Editor, 0.0, 1.05, 1.60, 1.05, Some((0.46, 0.34))),
+                window(MockApp::Terminal, 44.0, 1.0, 1.50, 0.72, None),
+                widget(vec![WidgetKind::System], 30.0, 0.95, 2.02),
+                keyboard(arc(0.0, 0.48, 1.16), None),
+                wrist(false, Vec3::new(-0.26, 1.08, -0.34), None),
+            ],
+            // Mid-game: a guide pinned off to the side, glanceable
+            // widgets, the wrist up for a quick check.
+            Self::Gaming => vec![
+                window(MockApp::Guide, 34.0, 1.35, 1.60, 0.80, None),
+                widget(vec![WidgetKind::NowPlaying, WidgetKind::Macros], -42.0, 0.75, 1.36),
+                widget(vec![WidgetKind::Battery], -14.0, 1.15, 1.74),
+                wrist(true, Vec3::new(-0.10, 1.30, -0.36), Some((0.70, 0.11))),
+            ],
+            // Social VR: chatting through the dashboard and keyboard,
+            // notifications and music to the sides.
+            Self::Social => vec![
+                dash(Page::Chat, 0.0, 0.78, 1.52, None),
+                widget(vec![WidgetKind::Notifications], -40.0, 0.80, 1.58),
+                widget(vec![WidgetKind::NowPlaying], 40.0, 0.80, 1.55),
+                keyboard(arc(0.0, 0.46, 1.17), Some((0.42, 0.55))),
+                wrist(false, Vec3::new(-0.27, 1.06, -0.32), None),
+            ],
+            Self::Dashboard => vec![
+                widget(vec![WidgetKind::System, WidgetKind::NowPlaying], -46.0, 0.75, 1.52),
+                dash(Page::Home, 0.0, 0.72, 1.48, Some((0.06, 0.29))),
+                wrist(false, Vec3::new(-0.27, 1.07, -0.33), None),
+            ],
+            Self::Wrist => vec![wrist(true, Vec3::new(-0.15, 1.30, -0.30), Some((0.90, 0.07)))],
+        }
+    }
+}
+
+/// A point on a circle around the head: `yaw_deg` right of straight
+/// ahead, `dist` metres out, at `height`.
+fn arc(yaw_deg: f32, dist: f32, height: f32) -> Vec3 {
+    let a = yaw_deg.to_radians();
+    Vec3::new(a.sin() * dist, height, -a.cos() * dist)
+}
+
+/// Upright panel at `pos` facing the head (no roll).
+fn face_head(pos: Vec3) -> Mat4 {
+    let z = (HEAD - pos).normalize();
+    let x = Vec3::Y.cross(z).normalize();
+    let y = z.cross(x);
+    Mat4::from_cols(x.extend(0.0), y.extend(0.0), z.extend(0.0), pos.extend(1.0))
+}
+
+/// Facing the head, then pitched about its own horizontal axis
+/// (keyboard tilted up, wrist turned toward the face).
+fn tilted(pos: Vec3, pitch_deg: f32) -> Mat4 {
+    let flat = (HEAD - pos) * Vec3::new(1.0, 0.0, 1.0);
+    let z = flat.normalize();
+    let x = Vec3::Y.cross(z).normalize();
+    let y = z.cross(x);
+    Mat4::from_cols(x.extend(0.0), y.extend(0.0), z.extend(0.0), pos.extend(1.0)) * Mat4::from_rotation_x(pitch_deg.to_radians())
+}
+
+/// A live panel: its own egui context + texture + GPU quad.
+struct Panel {
+    spec: Spec,
+    egui: EguiPanel,
+    target: OverlayTarget,
+    points: egui::Vec2,
+    quad: Quad,
+}
+
+impl Panel {
+    fn height_m(&self) -> f32 {
+        self.spec.width_m * self.spec.size.tex.1 as f32 / self.spec.size.tex.0 as f32
+    }
+
+    /// World point under panel uv (u right, v down).
+    fn world_at(&self, (u, v): (f32, f32)) -> Vec3 {
+        self.spec.pose.transform_point3(Vec3::new((u - 0.5) * self.spec.width_m, (0.5 - v) * self.height_m(), 0.0))
+    }
+}
+
+struct Quad {
+    buf: wgpu::Buffer,
+    bg: wgpu::BindGroup,
+}
 
 pub fn run(
     _notify: Option<NotifyChannel>,
     test: crate::preview::TestHooks,
     app_config: rsoverlay_core::Config,
-    config_path: std::path::PathBuf,
+    _config_path: std::path::PathBuf,
 ) -> Result<()> {
     let event_loop = EventLoop::new().context("event loop")?;
     let window = Arc::new(
         WindowBuilder::new()
-            .with_title("RSOverlay — VR Preview")
-            .with_inner_size(winit::dpi::LogicalSize::new(INITIAL_WIN_W, INITIAL_WIN_H))
+            .with_title("RSOverlay — VR Preview  (1 work · 2 gaming · 3 social · 4 dashboard · 5 wrist · R reset view)")
+            .with_inner_size(winit::dpi::PhysicalSize::new(INITIAL_WIN_W, INITIAL_WIN_H))
             .with_min_inner_size(winit::dpi::LogicalSize::new(800u32, 600u32))
             .build(&event_loop)
             .context("creating VR preview window")?,
     );
 
     let gpu = pollster::block_on(GpuCtx::new(RuntimeMode::Preview))?;
-
-    let surface = gpu
-        .instance
-        .create_surface(window.clone())
-        .context("creating wgpu surface")?;
+    let surface = gpu.instance.create_surface(window.clone()).context("creating wgpu surface")?;
     let size = window.inner_size();
     let caps = surface.get_capabilities(&gpu.adapter);
-    let surface_format = caps
-        .formats
-        .iter()
-        .copied()
-        .find(|f| f.is_srgb())
-        .unwrap_or(caps.formats[0]);
+    let surface_format = caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(caps.formats[0]);
     let mut config = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         format: surface_format,
@@ -80,173 +283,226 @@ pub fn run(
     };
     surface.configure(&gpu.device, &config);
 
-    // Overlay texture lives at VR resolution regardless of window — it's
-    // what would be submitted to OpenVR for real.
-    let overlay_target = OverlayTarget::new(&gpu, OVERLAY_TEX_W, OVERLAY_TEX_H);
-    let mut egui_panel = EguiPanel::new(
-        &gpu.device,
-        overlay_target.format,
-        overlay_target.width,
-        overlay_target.height,
-    );
-    let mut egui_winit = egui_winit::State::new(
-        egui_panel.ctx.clone(),
-        egui::ViewportId::ROOT,
-        &*window,
-        None,
-        None,
-    );
+    // The preview has no headset to read batteries or a media session
+    // from: demo data stands in (and keeps screenshots private).
+    let mut hooks = test.clone();
+    hooks.demo_batteries = true;
     let mut dev_view = DevView::default();
-    crate::preview::seed_dev_view(&mut dev_view, &app_config, &test);
-    let mut persister =
-        crate::preview::ConfigPersister::new(config_path.clone(), app_config.clone());
-    let config_base = app_config.clone();
+    crate::preview::seed_dev_view(&mut dev_view, &app_config, &hooks);
+    dev_view.dock_layout = true;
+    dev_view.set_demo_media("Northern Lights", "Ambient Works");
+    // The volume mixer lists the PC's real audio apps; keep it out.
+    dev_view.show_volume = false;
+    let mut keyboard = VrKeyboard::default();
 
-    let mut scene = SceneRenderer::new(&gpu, surface_format, &overlay_target)?;
-    let mut camera = OrbitCamera::default();
+    let scene = SceneRenderer::new(&gpu, surface_format)?;
+    let beam_tex = OverlayTarget::new(&gpu, BEAM_TEX.0, BEAM_TEX.1);
+    {
+        let mut e = EguiPanel::new(&gpu.device, beam_tex.format, BEAM_TEX.0, BEAM_TEX.1);
+        e.set_pixels_per_point(1.0);
+        e.set_clear(wgpu::Color::TRANSPARENT);
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(BEAM_TEX.0 as f32, BEAM_TEX.1 as f32))),
+            ..Default::default()
+        };
+        e.render(&gpu.device, &gpu.queue, &beam_tex.view, raw, rsoverlay_ui::shell::paint_beam);
+    }
+    let beam = scene.quad(&gpu, &beam_tex.view);
+
+    let mut preset = Preset::from_arg(test.scene.as_deref());
+    let mut panels = build(&gpu, &scene, preset);
+    let mut camera = OrbitCamera::framing(preset);
     let mut input = InputState::default();
-    let mut last_tick = Instant::now();
+    let started = Instant::now();
+    let mut last = Instant::now();
     let mut frame_counter: u64 = 0;
     let screenshot_path = test.screenshot.clone();
     let exit_after = test.exit_after;
 
-    info!("VR preview window up — drag to look, scroll to dolly, Esc to exit");
+    info!("VR preview: scene '{}' — 1-5 switch presets, drag to look, scroll to dolly, R resets, Esc exits", preset.name());
 
     event_loop.set_control_flow(ControlFlow::Poll);
     event_loop.run(move |event, elwt| match event {
-        Event::WindowEvent { event, window_id } if window_id == window.id() => {
-            // Egui never gets mouse drags while the user is looking
-            // around, but typing etc. still passes through.
-            let egui_response = egui_winit.on_window_event(&window, &event);
-            match event {
-                WindowEvent::CloseRequested => elwt.exit(),
-                WindowEvent::KeyboardInput { event, .. } => {
-                    if event.state == ElementState::Pressed
-                        && event.logical_key == Key::Named(NamedKey::Escape)
-                    {
-                        elwt.exit();
+        Event::WindowEvent { event, window_id } if window_id == window.id() => match event {
+            WindowEvent::CloseRequested => elwt.exit(),
+            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => match event.logical_key {
+                Key::Named(NamedKey::Escape) => elwt.exit(),
+                Key::Character(ref c) => {
+                    let c = c.as_str();
+                    if let Some(p) = c.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).and_then(|i| Preset::ALL.get(i)) {
+                        preset = *p;
+                        panels = build(&gpu, &scene, preset);
+                        camera = OrbitCamera::framing(preset);
+                        info!("VR preview: scene '{}'", preset.name());
+                    } else if c.eq_ignore_ascii_case("r") {
+                        camera = OrbitCamera::framing(preset);
                     }
-                }
-                WindowEvent::Resized(new_size) => {
-                    config.width = new_size.width.max(1);
-                    config.height = new_size.height.max(1);
-                    surface.configure(&gpu.device, &config);
-                }
-                WindowEvent::MouseInput { state, button, .. } => {
-                    if button == MouseButton::Left {
-                        input.dragging = state == ElementState::Pressed;
-                    }
-                }
-                WindowEvent::CursorMoved { position, .. } => {
-                    let new = (position.x as f32, position.y as f32);
-                    if input.dragging && !egui_response.consumed {
-                        let (dx, dy) = (new.0 - input.last.0, new.1 - input.last.1);
-                        camera.orbit(dx, dy);
-                    }
-                    input.last = new;
-                }
-                WindowEvent::MouseWheel { delta, .. } => {
-                    let dy = match delta {
-                        MouseScrollDelta::LineDelta(_, y) => y,
-                        MouseScrollDelta::PixelDelta(p) => (p.y as f32) / 50.0,
-                    };
-                    camera.dolly(dy);
-                }
-                WindowEvent::RedrawRequested => {
-                    // 1. Render egui UI into overlay_target (unchanged
-                    // from the desktop preview path).
-                    let raw_input = egui_winit.take_egui_input(&window);
-                    egui_panel.render(
-                        &gpu.device,
-                        &gpu.queue,
-                        &overlay_target.view,
-                        raw_input,
-                        |ctx| dev_view.ui(ctx),
-                    );
-
-                    // 2. Render the 3D VR preview scene into the window.
-                    let frame = match surface.get_current_texture() {
-                        Ok(f) => f,
-                        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                            surface.configure(&gpu.device, &config);
-                            return;
-                        }
-                        Err(e) => {
-                            warn!("surface error: {e:?}");
-                            return;
-                        }
-                    };
-                    let view = frame
-                        .texture
-                        .create_view(&wgpu::TextureViewDescriptor::default());
-                    let aspect = config.width as f32 / config.height.max(1) as f32;
-                    scene.render(
-                        &gpu,
-                        &camera,
-                        &dev_view.placement,
-                        dev_view.accent,
-                        dev_view.overlay_tint(),
-                        aspect,
-                        &view,
-                    );
-
-                    frame_counter = frame_counter.wrapping_add(1);
-                    if let Some(trigger) = exit_after {
-                        if frame_counter == trigger {
-                            if let Some(path) = &screenshot_path {
-                                match crate::preview::save_surface_as_png(
-                                    &gpu,
-                                    &frame.texture,
-                                    config.width,
-                                    config.height,
-                                    path,
-                                ) {
-                                    Ok(n) => info!(
-                                        "wrote screenshot {} ({} bytes)",
-                                        path.display(),
-                                        n
-                                    ),
-                                    Err(e) => warn!("screenshot failed: {e:#}"),
-                                }
-                            }
-                            info!("--exit-after {trigger} reached; clean exit");
-                            elwt.exit();
-                        }
-                    }
-
-                    frame.present();
-
-                    if dev_view.reset_requested {
-                        let base = rsoverlay_core::Config::default();
-                        crate::preview::seed_dev_view(
-                            &mut dev_view,
-                            &base,
-                            &crate::preview::TestHooks::default(),
-                        );
-                        dev_view.reset_requested = false;
-                    }
-                    if let Some(cfg) = persister.poll_external_change() {
-                        crate::preview::seed_dev_view(
-                            &mut dev_view,
-                            &cfg,
-                            &crate::preview::TestHooks::default(),
-                        );
-                    }
-                    let current = crate::preview::config_from_dev_view(&dev_view, &config_base);
-                    persister.tick(&current);
-
-                    let now = Instant::now();
-                    dev_view.frame = dev_view.frame.wrapping_add(1);
-                    dev_view.last_fps = 1.0 / now.duration_since(last_tick).as_secs_f32().max(1e-5);
-                    last_tick = now;
                 }
                 _ => {}
+            },
+            WindowEvent::Resized(new_size) => {
+                config.width = new_size.width.max(1);
+                config.height = new_size.height.max(1);
+                surface.configure(&gpu.device, &config);
             }
-        }
+            WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
+                input.dragging = state == ElementState::Pressed;
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                let new = (position.x as f32, position.y as f32);
+                if input.dragging {
+                    camera.orbit(new.0 - input.last.0, new.1 - input.last.1);
+                }
+                input.last = new;
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let dy = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => y,
+                    MouseScrollDelta::PixelDelta(p) => (p.y as f32) / 50.0,
+                };
+                camera.dolly(dy);
+            }
+            WindowEvent::RedrawRequested => {
+                let time = started.elapsed().as_secs_f64();
+                let dt = last.elapsed().as_secs_f32();
+                last = Instant::now();
+                dev_view.frame = dev_view.frame.wrapping_add(1);
+                dev_view.last_fps = 1.0 / dt.max(1e-5);
+                dev_view.show_keyboard = panels.iter().any(|p| matches!(p.spec.content, Content::Keyboard));
+                // Pop-up toasts land on top of whatever card is there; the
+                // scenes show notifications in their widget instead.
+                dev_view.dismiss_toasts();
+                let accent = dev_view.effective_accent();
+
+                // 1. Every panel draws its real UI into its texture.
+                for p in panels.iter_mut() {
+                    let cursor = p.spec.laser.map(|(u, v)| egui::pos2(u * p.points.x, v * p.points.y));
+                    let raw = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, p.points)),
+                        time: Some(time),
+                        predicted_dt: dt.clamp(1.0 / 240.0, 0.1),
+                        events: cursor.map(egui::Event::PointerMoved).into_iter().collect(),
+                        ..Default::default()
+                    };
+                    let content = p.spec.content.clone();
+                    p.egui.render(&gpu.device, &gpu.queue, &p.target.view, raw, |ctx| {
+                        match content {
+                            Content::Dashboard(page) => {
+                                dev_view.page = page;
+                                dev_view.ui_with(ctx, None);
+                            }
+                            Content::Wrist { expanded } => {
+                                dev_view.wrist_expanded = expanded;
+                                let _ = dev_view.wrist_ui(ctx);
+                            }
+                            Content::Keyboard => {
+                                let hands = [(Hand::Right, cursor, 0.0)];
+                                let _ = keyboard.frame(ctx, &hands, time, accent, false);
+                            }
+                            Content::Widgets(tabs) => {
+                                let _ = dev_view.widget_ui(ctx, &tabs, 0, Attach::World, None);
+                            }
+                            Content::Window(app) => {
+                                egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
+                                    let full = ui.max_rect();
+                                    let bar = egui::Rect::from_min_max(egui::pos2(full.left(), full.bottom() - window_panel::TOOLBAR_H), full.max);
+                                    let body = egui::Rect::from_min_max(full.min, egui::pos2(full.right(), bar.top() - 6.0));
+                                    app.paint(ui, body);
+                                    let _ = window_panel::toolbar(ui, bar, app.title(), None, Attach::World, accent);
+                                });
+                            }
+                        }
+                        rsoverlay_ui::laser::paint_cursor(ctx, cursor.map(|c| (c, false)), accent);
+                    });
+                }
+
+                // 2. The 3D scene: floor, panels far-to-near, beams.
+                let frame = match surface.get_current_texture() {
+                    Ok(f) => f,
+                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                        surface.configure(&gpu.device, &config);
+                        return;
+                    }
+                    Err(e) => {
+                        warn!("surface error: {e:?}");
+                        return;
+                    }
+                };
+                let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let eye = camera.eye();
+                let mut order: Vec<usize> = (0..panels.len()).collect();
+                let dist = |p: &Panel| p.spec.pose.w_axis.truncate().distance(eye);
+                order.sort_by(|&a, &b| dist(&panels[b]).total_cmp(&dist(&panels[a])));
+                let mut draws: Vec<&Quad> = Vec::new();
+                for &i in &order {
+                    let p = &panels[i];
+                    scene.write_quad(&gpu, &p.quad, p.spec.pose, p.spec.width_m, p.height_m(), [1.0; 4]);
+                    draws.push(&p.quad);
+                }
+                // One beam, from the right hand to whatever it points at.
+                if let Some(p) = panels.iter().find(|p| p.spec.laser.is_some()) {
+                    let to = p.world_at(p.spec.laser.unwrap_or_default());
+                    let from = Vec3::new(0.20, 1.12, -0.22);
+                    let (pose, len) = beam_pose(from, to, eye);
+                    let a = accent;
+                    let tint = [a.r() as f32 / 255.0, a.g() as f32 / 255.0, a.b() as f32 / 255.0, 0.9];
+                    scene.write_quad(&gpu, &beam, pose, len, BEAM_THICKNESS_M, tint);
+                    draws.push(&beam);
+                }
+                let aspect = config.width as f32 / config.height.max(1) as f32;
+                scene.render(&gpu, &camera, accent, aspect, &view, &draws);
+
+                frame_counter = frame_counter.wrapping_add(1);
+                if exit_after == Some(frame_counter) {
+                    if let Some(path) = &screenshot_path {
+                        match crate::preview::save_surface_as_png(&gpu, &frame.texture, config.width, config.height, path) {
+                            Ok(n) => info!("wrote screenshot {} ({} bytes)", path.display(), n),
+                            Err(e) => warn!("screenshot failed: {e:#}"),
+                        }
+                    }
+                    info!("--exit-after {frame_counter} reached; clean exit");
+                    elwt.exit();
+                }
+                frame.present();
+            }
+            _ => {}
+        },
         Event::AboutToWait => window.request_redraw(),
         _ => {}
     })?;
     Ok(())
+}
+
+fn build(gpu: &GpuCtx, scene: &SceneRenderer, preset: Preset) -> Vec<Panel> {
+    preset
+        .panels()
+        .into_iter()
+        .map(|spec| {
+            let (w, h) = spec.size.tex;
+            let target = OverlayTarget::new(gpu, w, h);
+            let mut egui = EguiPanel::new(&gpu.device, target.format, w, h);
+            egui.set_pixels_per_point(spec.size.ppp);
+            // Transparent like the VR panels: rounded corners show the
+            // world behind.
+            egui.set_clear(wgpu::Color::TRANSPARENT);
+            let points = egui::vec2(w as f32, h as f32) / spec.size.ppp;
+            let quad = scene.quad(gpu, &target.view);
+            Panel { spec, egui, target, points, quad }
+        })
+        .collect()
+}
+
+/// A camera-facing strip from `from` to `to`; returns (pose, length).
+fn beam_pose(from: Vec3, to: Vec3, eye: Vec3) -> (Mat4, f32) {
+    let d = to - from;
+    let len = d.length().max(1e-4);
+    let x = d / len;
+    let mid = from + d * 0.5;
+    let to_eye = eye - mid;
+    let z = (to_eye - x * to_eye.dot(x)).normalize_or_zero();
+    let z = if z == Vec3::ZERO { Vec3::Z } else { z };
+    let y = z.cross(x);
+    (Mat4::from_cols(x.extend(0.0), y.extend(0.0), z.extend(0.0), mid.extend(1.0)), len)
 }
 
 #[derive(Default)]
@@ -255,32 +511,19 @@ struct InputState {
     last: (f32, f32),
 }
 
-/// First-person look + dolly camera. Simulates a stationary standing VR
-/// user turning their head. Head height is 1.6m above the floor plane.
+/// First-person look + dolly camera: a standing user turning their head.
 struct OrbitCamera {
     yaw: f32,
     pitch: f32,
-    head_height: f32,
-    // How far back from the overlay the "head" starts. Dolly shifts the
-    // head forward/back along its facing vector.
     dolly: f32,
 }
 
-impl Default for OrbitCamera {
-    fn default() -> Self {
-        // Natural wrist-glance: yaw slightly toward the left wrist,
-        // pitch tilted ~25° down. With the overlay auto-facing the
-        // viewer, these need less lean than a fixed-tilt panel would.
-        Self {
-            yaw: -0.18,
-            pitch: -0.45,
-            head_height: 1.6,
-            dolly: 0.05,
-        }
-    }
-}
-
 impl OrbitCamera {
+    fn framing(preset: Preset) -> Self {
+        let (yaw, pitch, dolly) = preset.camera();
+        Self { yaw, pitch, dolly }
+    }
+
     fn orbit(&mut self, dx: f32, dy: f32) {
         // Typical SteamVR mouse-look sensitivity: ~0.3° per screen pixel.
         self.yaw -= dx.to_radians() * 0.3;
@@ -293,16 +536,11 @@ impl OrbitCamera {
     }
 
     fn eye(&self) -> Vec3 {
-        let forward = self.forward();
-        Vec3::new(0.0, self.head_height, 0.0) + forward * self.dolly
+        HEAD + self.forward() * self.dolly
     }
 
     fn forward(&self) -> Vec3 {
-        Vec3::new(
-            self.pitch.cos() * self.yaw.sin(),
-            self.pitch.sin(),
-            -self.pitch.cos() * self.yaw.cos(),
-        )
+        Vec3::new(self.pitch.cos() * self.yaw.sin(), self.pitch.sin(), -self.pitch.cos() * self.yaw.cos())
     }
 
     fn view(&self) -> Mat4 {
@@ -311,321 +549,156 @@ impl OrbitCamera {
     }
 
     fn proj(&self, aspect: f32) -> Mat4 {
-        // ~100° horizontal is typical of modern HMDs. Convert to the
-        // equivalent vertical fov for glam's perspective_rh.
+        // ~100° horizontal is typical of modern HMDs.
         let hfov_rad = 100f32.to_radians();
         let vfov = 2.0 * ((hfov_rad * 0.5).tan() / aspect).atan();
         Mat4::perspective_rh(vfov, aspect, 0.05, 100.0)
     }
 }
 
-/// Where the overlay quad lives relative to the viewer. Default: left
-/// wrist area, raised and tilted toward the face. Returns a model
-/// matrix that scales a unit quad into the overlay's physical size.
-const HEAD_DEFAULT: Vec3 = Vec3::new(0.0, 1.6, 0.0);
-
-/// Compute the overlay's anchor matrix: rotation + translation only,
-/// no scale. The shader applies width/height in metres so curvature
-/// math can bend the quad in physical units before this transform.
-fn overlay_model(placement: &Placement, camera: &OrbitCamera) -> Mat4 {
-    match placement.anchor {
-        Anchor::Hmd => {
-            let eye = camera.eye();
-            let forward = camera.forward();
-            let right = forward.cross(Vec3::Y).normalize();
-            let up = right.cross(forward).normalize();
-            let pos = eye
-                + forward * (-placement.offset_z)
-                + right * placement.offset_x
-                + up * (placement.offset_y - camera.head_height);
-            let look_dir = (eye - pos).normalize();
-            let quat = Quat::from_rotation_arc(Vec3::Z, look_dir);
-            Mat4::from_translation(pos) * Mat4::from_quat(quat)
-        }
-        Anchor::Wrist | Anchor::World => {
-            let pos = Vec3::new(placement.offset_x, placement.offset_y, placement.offset_z);
-            let forward = (HEAD_DEFAULT - pos).normalize();
-            let quat = Quat::from_rotation_arc(Vec3::Z, forward);
-            Mat4::from_translation(pos) * Mat4::from_quat(quat)
-        }
-    }
-}
-
 struct SceneRenderer {
     camera_buf: wgpu::Buffer,
-    #[allow(dead_code)]
-    camera_bgl: wgpu::BindGroupLayout,
     camera_bg: wgpu::BindGroup,
-
-    quad_buf: wgpu::Buffer,
-    quad_bg: wgpu::BindGroup,
+    quad_bgl: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
     quad_pipeline: wgpu::RenderPipeline,
     grid_pipeline: wgpu::RenderPipeline,
 }
 
 impl SceneRenderer {
-    fn new(
-        gpu: &GpuCtx,
-        surface_format: wgpu::TextureFormat,
-        overlay: &OverlayTarget,
-    ) -> Result<Self> {
-        let shader = gpu
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("vr-scene-shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("scene.wgsl").into()),
-            });
-
-        let camera_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+    fn new(gpu: &GpuCtx, surface_format: wgpu::TextureFormat) -> Result<Self> {
+        let d = &gpu.device;
+        let shader = d.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("vr-scene-shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("scene.wgsl").into()),
+        });
+        let camera_buf = d.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vr-camera"),
             size: std::mem::size_of::<CameraGpu>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let camera_bgl = gpu
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("vr-camera-bgl"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
-        let camera_bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let uniform = |binding, visibility| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility,
+            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+            count: None,
+        };
+        let camera_bgl = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("vr-camera-bgl"),
+            entries: &[uniform(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT)],
+        });
+        let camera_bg = d.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("vr-camera-bg"),
             layout: &camera_bgl,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buf.as_entire_binding(),
-            }],
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: camera_buf.as_entire_binding() }],
         });
-
-        let quad_buf = gpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("vr-quad-model"),
-                contents: bytemuck::bytes_of(&QuadGpu {
-                    model: Mat4::IDENTITY.to_cols_array_2d(),
-                    params: [0.0, 0.36, 0.225, 0.0],
-                    tint: [1.0; 4],
-                }),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
-        let sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {
+        let quad_bgl = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("vr-quad-bgl"),
+            entries: &[
+                uniform(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let sampler = d.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("vr-overlay-sampler"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
-        let quad_bgl = gpu
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("vr-quad-bgl"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            });
-        let quad_bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("vr-quad-bg"),
-            layout: &quad_bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: quad_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&overlay.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
-        });
-
-        let quad_pipeline_layout =
-            gpu.device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("vr-quad-pl"),
-                    bind_group_layouts: &[&camera_bgl, &quad_bgl],
-                    push_constant_ranges: &[],
-                });
-        let grid_pipeline_layout =
-            gpu.device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("vr-grid-pl"),
-                    bind_group_layouts: &[&camera_bgl],
-                    push_constant_ranges: &[],
-                });
-
-        let quad_pipeline =
-            gpu.device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("vr-quad-pipeline"),
-                    layout: Some(&quad_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &shader,
-                        entry_point: "vs_quad",
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &shader,
-                        entry_point: "fs_quad",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: surface_format,
-                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        cull_mode: None,
-                        ..Default::default()
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
-                    multiview: None,
-                });
-        let grid_pipeline =
-            gpu.device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("vr-grid-pipeline"),
-                    layout: Some(&grid_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &shader,
-                        entry_point: "vs_grid",
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &shader,
-                        entry_point: "fs_grid",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: surface_format,
-                            blend: Some(wgpu::BlendState::REPLACE),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        cull_mode: None,
-                        ..Default::default()
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
-                    multiview: None,
-                });
-
-        Ok(Self {
-            camera_buf,
-            camera_bgl,
-            camera_bg,
-            quad_buf,
-            quad_bg,
-            quad_pipeline,
-            grid_pipeline,
-        })
+        let pipeline = |label, layouts: &[&wgpu::BindGroupLayout], vs, fs, blend| {
+            let layout = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some(label), bind_group_layouts: layouts, push_constant_ranges: &[] });
+            d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState { module: &shader, entry_point: vs, buffers: &[] },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: fs,
+                    targets: &[Some(wgpu::ColorTargetState { format: surface_format, blend: Some(blend), write_mask: wgpu::ColorWrites::ALL })],
+                }),
+                primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+            })
+        };
+        // Panel textures are premultiplied (egui output over a
+        // transparent clear), so blend them as such.
+        let quad_pipeline = pipeline("vr-quad", &[&camera_bgl, &quad_bgl], "vs_quad", "fs_quad", wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING);
+        let grid_pipeline = pipeline("vr-grid", &[&camera_bgl], "vs_grid", "fs_grid", wgpu::BlendState::REPLACE);
+        Ok(Self { camera_buf, camera_bg, quad_bgl, sampler, quad_pipeline, grid_pipeline })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn render(
-        &mut self,
-        gpu: &GpuCtx,
-        camera: &OrbitCamera,
-        placement: &Placement,
-        accent: egui::Color32,
-        tint: [f32; 4],
-        aspect: f32,
-        view: &wgpu::TextureView,
-    ) {
+    fn quad(&self, gpu: &GpuCtx, texture: &wgpu::TextureView) -> Quad {
+        let buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vr-quad"),
+            contents: bytemuck::bytes_of(&QuadGpu { model: Mat4::IDENTITY.to_cols_array_2d(), params: [0.0; 4], tint: [1.0; 4] }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vr-quad-bg"),
+            layout: &self.quad_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(texture) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+            ],
+        });
+        Quad { buf, bg }
+    }
+
+    fn write_quad(&self, gpu: &GpuCtx, q: &Quad, pose: Mat4, w: f32, h: f32, tint: [f32; 4]) {
+        let data = QuadGpu { model: pose.to_cols_array_2d(), params: [0.0, w, h, 0.0], tint };
+        gpu.queue.write_buffer(&q.buf, 0, bytemuck::bytes_of(&data));
+    }
+
+    fn render(&self, gpu: &GpuCtx, camera: &OrbitCamera, accent: egui::Color32, aspect: f32, view: &wgpu::TextureView, quads: &[&Quad]) {
         let vp = camera.proj(aspect) * camera.view();
         let eye = camera.eye();
-        let accent_v = [
-            accent.r() as f32 / 255.0,
-            accent.g() as f32 / 255.0,
-            accent.b() as f32 / 255.0,
-            1.0,
-        ];
-        let cam_gpu = CameraGpu {
+        let cam = CameraGpu {
             view_proj: vp.to_cols_array_2d(),
             eye: [eye.x, eye.y, eye.z, 0.0],
-            accent: accent_v,
+            accent: [accent.r() as f32 / 255.0, accent.g() as f32 / 255.0, accent.b() as f32 / 255.0, 1.0],
         };
-        gpu.queue
-            .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cam_gpu));
-
-        // Push the up-to-date overlay model matrix + size + curvature
-        // so sliders take effect next frame.
-        let model = overlay_model(placement, camera).to_cols_array_2d();
-        let params = [
-            placement.curvature,
-            placement.size_w,
-            placement.size_h,
-            0.0,
-        ];
-        gpu.queue
-            .write_buffer(&self.quad_buf, 0, bytemuck::bytes_of(&QuadGpu { model, params, tint }));
-
-        let mut enc = gpu
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("vr-scene-enc"),
-            });
+        gpu.queue.write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cam));
+        let mut enc = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vr-scene-enc") });
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("vr-scene-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        // Deep void black — SteamVR chaperone backdrop.
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            // Floor grid first.
             pass.set_pipeline(&self.grid_pipeline);
             pass.set_bind_group(0, &self.camera_bg, &[]);
             pass.draw(0..6, 0..1);
-            // Then the overlay quad on top.
             pass.set_pipeline(&self.quad_pipeline);
-            pass.set_bind_group(0, &self.camera_bg, &[]);
-            pass.set_bind_group(1, &self.quad_bg, &[]);
-            pass.draw(0..6, 0..1);
+            for q in quads {
+                pass.set_bind_group(1, &q.bg, &[]);
+                pass.draw(0..6, 0..1);
+            }
         }
         gpu.queue.submit(Some(enc.finish()));
     }
@@ -646,6 +719,30 @@ struct QuadGpu {
     // x = curvature in [0,1], y = width in metres, z = height in
     // metres, w reserved.
     params: [f32; 4],
-    // rgb = night-light multiplier, a = opacity.
+    // rgb = colour multiplier (beam tint), a = opacity.
     tint: [f32; 4],
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panels_face_the_viewer() {
+        for preset in Preset::ALL {
+            for s in preset.panels() {
+                let pos = s.pose.w_axis.truncate();
+                let normal = s.pose.z_axis.truncate();
+                assert!(normal.dot((HEAD - pos).normalize()) > 0.5, "{preset:?}: a panel faces away");
+            }
+        }
+    }
+
+    #[test]
+    fn beam_spans_its_endpoints() {
+        let (from, to) = (Vec3::new(0.2, 1.1, -0.2), Vec3::new(0.0, 1.5, -1.0));
+        let (pose, len) = beam_pose(from, to, HEAD);
+        assert!((pose.transform_point3(Vec3::new(-len / 2.0, 0.0, 0.0)) - from).length() < 1e-4);
+        assert!((pose.transform_point3(Vec3::new(len / 2.0, 0.0, 0.0)) - to).length() < 1e-4);
+    }
 }

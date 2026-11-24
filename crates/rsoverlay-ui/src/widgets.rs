@@ -185,6 +185,9 @@ pub fn frame(
         theme::surface(ui.painter(), full.shrink(8.0), 22.0);
         let inner = full.shrink2(egui::vec2(14.0, 10.0));
         let tab_r = egui::Rect::from_min_size(inner.min, egui::vec2(inner.width(), TAB_H));
+        // How to merge, for whoever wonders where the hint went.
+        ui.interact(tab_r, ui.id().with("tabs-hint"), egui::Sense::hover())
+            .on_hover_text("Grab this panel and drop it onto another widget to merge them into tabs");
         let bar_r = egui::Rect::from_min_max(egui::pos2(inner.left(), inner.bottom() - BAR_H), inner.max);
         let body_r = egui::Rect::from_min_max(egui::pos2(inner.left(), tab_r.bottom() + 6.0), egui::pos2(inner.right(), bar_r.top() - 6.0));
 
@@ -223,9 +226,6 @@ pub fn frame(
         // Dock bar.
         let mut dui = ui.child_ui(bar_r, egui::Layout::right_to_left(egui::Align::Center));
         (out.attach, out.close) = crate::window_panel::dock_controls(&mut dui, attach, accent);
-        dui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            ui.label(egui::RichText::new("drop onto another widget to merge").size(theme::SIZE_CAPTION).color(theme::FG_MUTED));
-        });
     });
     out
 }

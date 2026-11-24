@@ -302,6 +302,7 @@ pub struct DevView {
     history: VecDeque<HistoryEntry>,
     notifications_received: u64,
     media: Option<MediaInfo>,
+    demo_media: bool,
     last_media_poll: Instant,
     chat_draft: String,
     pending_chat: Option<rsoverlay_osc::ChatMessage>,
@@ -384,6 +385,7 @@ impl Default for DevView {
             history: VecDeque::new(),
             notifications_received: 0,
             media: None,
+            demo_media: false,
             last_media_poll: Instant::now() - Duration::from_secs(10),
             chat_draft: String::new(),
             pending_chat: None,
@@ -578,7 +580,22 @@ impl DevView {
         self.pending_chat.take()
     }
 
+    /// Drop on-screen toasts (history keeps them).
+    pub fn dismiss_toasts(&mut self) {
+        self.toasts.clear();
+    }
+
+    /// Pin a fixed track instead of reading the system's media session
+    /// (VR preview / screenshots: nobody's real listening history).
+    pub fn set_demo_media(&mut self, title: &str, artist: &str) {
+        self.media = Some(MediaInfo { title: title.into(), artist: artist.into(), source: String::new(), playing: true });
+        self.demo_media = true;
+    }
+
     fn maybe_refresh_media(&mut self) {
+        if self.demo_media {
+            return;
+        }
         if self.last_media_poll.elapsed() < Duration::from_millis(500) {
             return;
         }
