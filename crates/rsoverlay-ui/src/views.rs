@@ -610,7 +610,6 @@ impl DevView {
                             &mut self.show_macros,
                             &mut self.show_volume,
                             &mut self.show_system,
-                            &mut self.reduce_motion,
                             &mut self.language,
                             &mut self.keyboard.layout,
                         );
@@ -1007,7 +1006,6 @@ impl DevView {
                         &mut self.show_macros,
                         &mut self.show_volume,
                         &mut self.show_system,
-                        &mut self.reduce_motion,
                         &mut self.language,
                         &mut self.keyboard.layout,
                     ) {
@@ -1117,7 +1115,7 @@ fn accessibility_card(ui: &mut egui::Ui, scale: &mut f32, lasers: &mut bool, las
         .response
         .on_hover_text("Tilt the laser up/down to match how you hold your controller");
         ui.checkbox(reduce_motion, "Reduce motion").on_hover_text("Make page, toast and highlight transitions instant");
-        ui.label(egui::RichText::new("Moving/resizing a panel always shows a glowing outline + size readout, with a haptic tick on grab and release.")
+        ui.label(egui::RichText::new("Moving/resizing a panel always shows an accent outline + size readout, with a haptic tick on grab and release.")
             .size(theme::SIZE_CAPTION + 1.0).color(theme::FG_MUTED));
     });
 }
@@ -1501,7 +1499,6 @@ fn appearance_card(
     show_macros: &mut bool,
     show_volume: &mut bool,
     show_system: &mut bool,
-    reduce_motion: &mut bool,
     language: &mut crate::i18n::Lang,
     keyboard_layout: &mut crate::keyboard_layout::LayoutId,
 ) -> bool {
@@ -1562,9 +1559,6 @@ fn appearance_card(
             ui.checkbox(show_volume, "Volume");
             ui.checkbox(show_system, "System");
         });
-        ui.add_space(4.0);
-        ui.checkbox(reduce_motion, "Reduce motion")
-            .on_hover_text("Make page, toast and highlight transitions instant");
         ui.add_space(8.0);
         // Language picker — shows the native-script name so a Russian
         // user sees Русский.
