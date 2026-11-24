@@ -57,9 +57,11 @@ Ranked by cross-wishlist demand × implementation cost in a Rust + wgpu stack.
    single biggest UX win available.
 2. **Notifications overhaul.** Clear-all, multi-stack (done — polish next),
    scrollable history pane. *XSO #127/#128/#131 cluster, 3 `Planned` tags.*
-3. **Window capture (Windows Graphics Capture API).** Per-window mirrors
-   alongside the whole-monitor path. Unlocks every "Discord window in VR"
-   request. *OVR top complaint cluster + XSO #30/#117/#139.*
+3. ~~**Window capture (Windows Graphics Capture API).**~~ **Shipped** (M31) —
+   GPU-to-GPU WGC per-window mirror, live source picker in the Desktop
+   card, `--window` / `--list-windows`, clicks raise the window first.
+   Next: multiple simultaneous window panels. *OVR top complaint cluster +
+   XSO #30/#117/#139.*
 4. **Keyboard layouts.** Save keyboard position/scale per layout +
    favorites + quick-switch. Pure serde work. *XSO #185/#316/#337, all
    `Planned`; OVR #6 physical-keyboard calibration.*

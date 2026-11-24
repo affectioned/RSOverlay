@@ -18,8 +18,51 @@ use std::time::{Duration, Instant};
 #[derive(Copy, Clone, Debug)]
 pub struct MirrorHandle {
     pub id: egui::TextureId,
+    /// Live content size in source pixels (window or monitor). Hit
+    /// coordinates are reported in this space.
     pub width: u32,
     pub height: u32,
+    /// Sub-rect of the texture holding the content. Window capture
+    /// writes into the top-left of an oversized shared texture.
+    pub uv: egui::Rect,
+}
+
+impl MirrorHandle {
+    pub fn full(id: egui::TextureId, width: u32, height: u32) -> Self {
+        Self { id, width, height, uv: egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)) }
+    }
+}
+
+/// What the Desktop card mirrors.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CaptureSource {
+    Monitor(u32),
+    /// `hwnd` is the raw Win32 handle; `title` is for display only.
+    Window { hwnd: isize, title: String },
+}
+
+impl CaptureSource {
+    pub fn label(&self) -> String {
+        match self {
+            Self::Monitor(i) => format!("Monitor {i}"),
+            Self::Window { title, .. } => title.clone(),
+        }
+    }
+}
+
+/// Picker state shared between the Desktop card and the app's capture
+/// pipeline. The UI only *requests*; the app owns the pipeline swap.
+#[derive(Default)]
+pub struct SourcePicker {
+    /// Currently mirrored source (set by the app).
+    pub current: Option<CaptureSource>,
+    /// Choices shown in the dropdown (refreshed by the app on request).
+    pub choices: Vec<CaptureSource>,
+    /// Set by the UI while the dropdown is open; the app refreshes
+    /// `choices` (EnumWindows) and clears it.
+    pub wants_refresh: bool,
+    /// Set by the UI when the user picks a different source.
+    pub request: Option<CaptureSource>,
 }
 
 struct Toast {
@@ -107,6 +150,7 @@ pub struct DevView {
     pub frame: u64,
     pub last_fps: f32,
     pub mirror: Option<MirrorHandle>,
+    pub sources: SourcePicker,
     pub forward_input: bool,
     pub accent: egui::Color32,
     pub show_mirror: bool,
@@ -147,6 +191,7 @@ impl Default for DevView {
             frame: 0,
             last_fps: 0.0,
             mirror: None,
+            sources: SourcePicker::default(),
             forward_input: false,
             accent: theme::ACCENT,
             show_mirror: true,
@@ -351,7 +396,7 @@ impl DevView {
                     if self.show_mirror {
                         ui.vertical(|ui| {
                             if let Some(hit) =
-                                mirror_card(ui, self.mirror, self.forward_input, accent)
+                                mirror_card(ui, self.mirror, &mut self.sources, self.forward_input, accent)
                             {
                                 self.pending_hit = Some(hit);
                             }
@@ -785,13 +830,19 @@ fn kv(ui: &mut egui::Ui, k: &str, v: &str) {
 fn mirror_card(
     ui: &mut egui::Ui,
     mirror: Option<MirrorHandle>,
+    sources: &mut SourcePicker,
     forward_input: bool,
     accent: egui::Color32,
 ) -> Option<MirrorHit> {
     let mut hit = None;
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        card_header(ui, icons::MONITOR, "Desktop", accent);
+        ui.horizontal(|ui| {
+            card_header(ui, icons::MONITOR, "Desktop", accent);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                source_combo(ui, sources);
+            });
+        });
         ui.add_space(6.0);
         match mirror {
             Some(m) => {
@@ -806,7 +857,7 @@ fn mirror_card(
                     egui::Sense::hover()
                 };
                 let response = ui.add(
-                    egui::Image::new((m.id, egui::vec2(w, h))).sense(sense),
+                    egui::Image::new((m.id, egui::vec2(w, h))).uv(m.uv).sense(sense),
                 );
                 if forward_input {
                     if let Some(pos) = response.hover_pos().or_else(|| response.interact_pointer_pos()) {
@@ -826,6 +877,33 @@ fn mirror_card(
         }
     });
     hit
+}
+
+fn source_combo(ui: &mut egui::Ui, sources: &mut SourcePicker) {
+    let selected = sources.current.as_ref().map_or_else(|| "none".to_string(), |s| s.label());
+    let open = egui::ComboBox::from_id_source("capture-source")
+        .width(240.0)
+        .selected_text(truncate_label(&selected, 34))
+        .show_ui(ui, |ui| {
+            for choice in &sources.choices {
+                let is_current = sources.current.as_ref() == Some(choice);
+                if ui.selectable_label(is_current, truncate_label(&choice.label(), 48)).clicked() && !is_current {
+                    sources.request = Some(choice.clone());
+                }
+            }
+        })
+        .inner
+        .is_some();
+    if open {
+        sources.wants_refresh = true;
+    }
+}
+
+fn truncate_label(s: &str, max: usize) -> String {
+    match s.char_indices().nth(max) {
+        None => s.to_string(),
+        Some((i, _)) => format!("{}…", &s[..i]),
+    }
 }
 
 fn fit(aspect: f32, max_w: f32, max_h: f32) -> (f32, f32) {

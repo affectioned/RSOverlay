@@ -24,11 +24,11 @@ pub struct MonitorGeom {
     pub height: u32,
 }
 
-/// Opaque handle to the platform input backend.
 pub mod shortcut;
 
 pub use shortcut::Shortcut;
 
+/// Opaque handle to the platform input backend.
 pub struct InputInjector;
 
 impl InputInjector {

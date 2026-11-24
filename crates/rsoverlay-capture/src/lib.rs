@@ -40,6 +40,11 @@ pub mod shared;
 #[cfg(windows)]
 pub use shared::SharedCapture;
 
+#[cfg(windows)]
+pub mod window;
+#[cfg(windows)]
+pub use window::{enumerate_windows, find_window, WindowCapture, WindowInfo};
+
 #[cfg(not(windows))]
 pub fn enumerate_monitors() -> Result<Vec<MonitorInfo>> {
     Ok(Vec::new())

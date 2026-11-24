@@ -11,6 +11,7 @@
 //! process. It hosts the notification websocket server (and any other async
 //! work later), independent of the UI mode.
 
+mod mirror_source;
 mod preview;
 mod preview_vr;
 mod vr;
@@ -68,6 +69,17 @@ struct Args {
     #[arg(long)]
     list_monitors: bool,
 
+    /// Mirror a single window instead of a monitor — first window whose
+    /// title contains this text (case-insensitive). Uses Windows
+    /// Graphics Capture, so occluded windows still mirror. Switchable
+    /// at runtime from the Desktop card's source picker.
+    #[arg(long, value_name = "TITLE")]
+    window: Option<String>,
+
+    /// Print capturable windows and exit.
+    #[arg(long)]
+    list_windows: bool,
+
     /// VRChat OSC input address (UDP). Default matches VRChat's listener.
     #[arg(long, default_value = "127.0.0.1:9000")]
     osc_addr: SocketAddr,
@@ -123,6 +135,12 @@ struct Args {
     /// charging) so the widget can be screenshot-tested without an HMD.
     #[arg(long)]
     demo_batteries: bool,
+
+    /// Test hook: request a live switch to the window matching TITLE
+    /// at frame 30, exercising the pipeline teardown/rebuild path the
+    /// Desktop card's source picker uses.
+    #[arg(long, value_name = "TITLE")]
+    switch_to_window: Option<String>,
 }
 
 fn parse_vec3(s: &str) -> Result<(f32, f32, f32), String> {
@@ -187,6 +205,14 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    #[cfg(windows)]
+    if args.list_windows {
+        for w in rsoverlay_capture::enumerate_windows()? {
+            println!("[{:#x}] {}", w.hwnd, w.title);
+        }
+        return Ok(());
+    }
+
     let mode = args.mode();
     info!("starting RSOverlay in {:?} mode", mode);
 
@@ -210,6 +236,7 @@ fn main() -> Result<()> {
     let capture_cfg = preview::CaptureCfg {
         enabled: !args.no_mirror,
         monitor_index: args.monitor,
+        window: args.window.clone(),
         force_cpu: args.no_gpu_mirror,
     };
 
@@ -246,6 +273,7 @@ fn main() -> Result<()> {
         show_keyboard: args.show_keyboard,
         show_history: args.show_history,
         demo_batteries: args.demo_batteries,
+        switch_to_window: args.switch_to_window.clone(),
     };
 
     let result = match mode {
