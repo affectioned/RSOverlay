@@ -20,7 +20,7 @@ mod imp {
     use rsoverlay_openvr::{pose_offset_pitch, DeviceBattery, DeviceKind, Hand, HmdMatrix34_t, OpenVr};
     use rsoverlay_ui::laser::{self, HandSample, LaserInput};
     use rsoverlay_render::GpuCtx;
-    use crate::mirror_source::{list_sources, GpuMirror};
+    use crate::mirror_source::{fetch_icons, list_sources, GpuMirror};
     use rsoverlay_ui::widgets::WidgetKind;
     use rsoverlay_ui::window_panel::{self, Attach};
     use rsoverlay_ui::{battery::BatteryReading, views::DevView, EguiPanel};
@@ -282,6 +282,8 @@ mod imp {
         /// UIPI: target elevated and we aren't (re-checked every second).
         input_blocked: bool,
         blocked_checked: Option<Instant>,
+        /// App icon, uploaded into this panel's own egui context.
+        icon: Option<egui::TextureHandle>,
     }
 
     /// An in-progress grab (XSO model): the panel rides the laser at
@@ -354,6 +356,7 @@ mod imp {
             last_hit: None,
             input_blocked: false,
             blocked_checked: None,
+            icon: None,
         })
     }
 
@@ -845,6 +848,7 @@ mod imp {
             // ── Desktop page: list refresh + open requests.
             if std::mem::take(&mut dev_view.sources.wants_refresh) {
                 dev_view.sources.choices = list_sources();
+                fetch_icons(&dev_view.sources.choices, &mut dev_view.sources.icons);
             }
             if let Some(src) = dev_view.sources.request.take() {
                 if wins.iter().filter(|w| w.mirror.is_some()).count() >= MAX_WINDOWS || wins.len() >= MAX_FLOATING {
@@ -855,6 +859,14 @@ mod imp {
                     match VrPanel::new(&overlay, &gpu, &key, &src.label(), WIN_TEX, WIN_PPP, WIN_WIDTH_M, 0.0) {
                         Ok(mut panel) => match GpuMirror::start(&gpu, &mut panel.egui, src.clone()) {
                             Ok(mirror) => {
+                                let icon_tex = match &src {
+                                    rsoverlay_ui::views::CaptureSource::Window { hwnd, .. } => {
+                                        dev_view.sources.icons.get(hwnd).map(|img| {
+                                            panel.egui.ctx.load_texture("window-icon", img.clone(), egui::TextureOptions::LINEAR)
+                                        })
+                                    }
+                                    _ => None,
+                                };
                                 // Behind the dashboard, fanned to the right
                                 // per already-open window.
                                 let base = summon_pose(h);
@@ -874,6 +886,7 @@ mod imp {
                                     last_hit: None,
                                     input_blocked: false,
                                     blocked_checked: None,
+                                    icon: icon_tex,
                                 });
                             }
                             Err(e) => {
@@ -919,8 +932,9 @@ mod imp {
                     }
                     let (title, handle_m, attach, cursor, blocked) =
                         (mirror.source.label(), mirror.handle(), w.attach, lf.cursor, w.input_blocked);
+                    let icon = w.icon.as_ref().map(|t| t.id());
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
-                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, accent);
+                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, accent);
                         laser::paint_cursor(ctx, cursor, accent);
                     });
                     // Laser over the content drives the real window.

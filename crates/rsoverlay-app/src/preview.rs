@@ -11,7 +11,7 @@
 //! eventually drive it.
 
 use anyhow::{Context, Result};
-use crate::mirror_source::{list_sources, GpuMirror};
+use crate::mirror_source::{fetch_icons, list_sources, GpuMirror};
 use rsoverlay_capture::{enumerate_monitors, DxgiDuplication, Frame};
 use rsoverlay_input::{InputInjector, MonitorGeom, MouseButton};
 use rsoverlay_core::RuntimeMode;
@@ -749,6 +749,7 @@ pub fn run(
                         // dropdown is open, swap pipelines on request.
                         if std::mem::take(&mut dev_view.sources.wants_refresh) {
                             dev_view.sources.choices = list_sources();
+                            fetch_icons(&dev_view.sources.choices, &mut dev_view.sources.icons);
                         }
                         if let Some(req) = dev_view.sources.request.take() {
                             // Tear down first: DXGI allows one duplication

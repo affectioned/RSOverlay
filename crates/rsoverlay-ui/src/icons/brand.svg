@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <!-- Outer ring, thicker so it survives rasterization at small sizes -->
-  <circle cx="32" cy="32" r="28" stroke="#FFFFFF" stroke-width="4"/>
-  <!-- 'R' glyph: stem, bowl, leg — hand-tuned, stroke-thick enough to read at 16px -->
-  <path d="M20 46V18h12a8 8 0 0 1 4.8 14.4L44 46"
-        stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- Center dot, kept as a filled circle for sharp low-res rendering -->
-  <circle cx="32" cy="32" r="4.5" fill="#FFFFFF"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- RSOverlay mark: two stacked panels, the front one floating
+       forward — literally an overlay. Drawn white; tinted at runtime. -->
+  <rect x="5" y="9" width="26" height="22" rx="6"
+        stroke="#FFFFFF" stroke-width="3" opacity="0.45"/>
+  <rect x="15" y="17" width="28" height="22" rx="6"
+        stroke="#FFFFFF" stroke-width="3" fill="#FFFFFF" fill-opacity="0.14"/>
+  <circle cx="35.5" cy="24.5" r="2.6" fill="#FFFFFF"/>
 </svg>

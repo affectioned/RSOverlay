@@ -87,7 +87,16 @@ impl GpuMirror {
 
     pub fn handle(&self) -> MirrorHandle {
         match &self.content {
-            None => MirrorHandle::full(self.tex_id, self.mirror.width, self.mirror.height),
+            None => {
+                let mut h = MirrorHandle::full(self.tex_id, self.mirror.width, self.mirror.height);
+                // Desktop duplication omits the cursor: report where it is.
+                h.cursor = self.monitor_geom.and_then(|g| {
+                    let (x, y) = rsoverlay_capture::window::cursor_pos()?;
+                    let (u, v) = ((x - g.origin_x) as f32 / g.width as f32, (y - g.origin_y) as f32 / g.height as f32);
+                    ((0.0..1.0).contains(&u) && (0.0..1.0).contains(&v)).then_some(egui::vec2(u, v))
+                });
+                h
+            }
             Some(c) => {
                 let (w, h) = c.get();
                 let (w, h) = (w.max(1), h.max(1));
@@ -95,7 +104,8 @@ impl GpuMirror {
                     egui::Pos2::ZERO,
                     egui::pos2(w as f32 / self.mirror.width as f32, h as f32 / self.mirror.height as f32),
                 );
-                MirrorHandle { id: self.tex_id, width: w, height: h, uv }
+                // WGC captures the cursor itself (SetIsCursorCaptureEnabled).
+                MirrorHandle { id: self.tex_id, width: w, height: h, uv, cursor: None }
             }
         }
     }
@@ -149,6 +159,20 @@ impl Drop for GpuMirror {
 
 fn spawn(name: &str, f: impl FnOnce() + Send + 'static) -> Result<JoinHandle<()>> {
     std::thread::Builder::new().name(name.into()).spawn(f).context("spawning capture thread")
+}
+
+/// App icons for windows not already in `have`, as egui images.
+pub fn fetch_icons(sources: &[CaptureSource], have: &mut std::collections::HashMap<isize, egui::ColorImage>) {
+    for s in sources {
+        if let CaptureSource::Window { hwnd, .. } = s {
+            if have.contains_key(hwnd) {
+                continue;
+            }
+            if let Some((w, h, px)) = rsoverlay_capture::window::window_icon(*hwnd) {
+                have.insert(*hwnd, egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &px));
+            }
+        }
+    }
 }
 
 /// Every monitor plus every capturable window, for the source picker.

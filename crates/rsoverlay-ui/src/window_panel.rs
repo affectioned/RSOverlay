@@ -53,6 +53,7 @@ pub fn show(
     mirror: Option<MirrorHandle>,
     attach: Attach,
     input_blocked: bool,
+    icon: Option<egui::TextureId>,
     accent: egui::Color32,
 ) -> WindowPanelAction {
     let mut out = WindowPanelAction::default();
@@ -72,6 +73,7 @@ pub fn show(
                     rect,
                     egui::Image::new((m.id, rect.size())).uv(m.uv).rounding(8.0).sense(egui::Sense::click()),
                 );
+                crate::views::paint_mirror_cursor(ui, rect, m.cursor);
                 if input_blocked {
                     uac_banner(ui, rect);
                 } else if let Some(pos) = resp.hover_pos().or_else(|| resp.interact_pointer_pos()) {
@@ -94,6 +96,9 @@ pub fn show(
         // Toolbar.
         ui.painter().rect_filled(bar, 14.0, theme::BG_ROOT);
         let mut bar_ui = ui.child_ui(bar.shrink2(egui::vec2(16.0, 8.0)), egui::Layout::left_to_right(egui::Align::Center));
+        if let Some(id) = icon {
+            bar_ui.add(egui::Image::new((id, egui::vec2(24.0, 24.0))));
+        }
         bar_ui.add(egui::Label::new(egui::RichText::new(title).color(theme::FG_PRIMARY).size(theme::SIZE_BODY)).truncate(true));
         bar_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if pill(ui, "✕", false, theme::DANGER).on_hover_text("Close").clicked() {
@@ -168,7 +173,8 @@ pub fn source_grid(ui: &mut egui::Ui, sources: &mut SourcePicker, open: &[Captur
     let cols = 3usize;
     let gap = theme::GUTTER;
     let w = (ui.available_width() - gap * (cols as f32 - 1.0)) / cols as f32;
-    for row in sources.choices.chunks(cols) {
+    let choices = sources.choices.clone();
+    for row in choices.chunks(cols) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             for src in row {
@@ -180,15 +186,28 @@ pub fn source_grid(ui: &mut egui::Ui, sources: &mut SourcePicker, open: &[Captur
                 if is_open {
                     ui.painter().rect_stroke(rect, 14.0, egui::Stroke::new(1.5_f32, accent));
                 }
-                let (glyph, label) = match src {
-                    CaptureSource::Monitor(i) => ("🖵", format!("Monitor {i}")),
-                    CaptureSource::Window { title, .. } => ("▣", title.clone()),
+                let icon_r = egui::Rect::from_center_size(rect.left_center() + egui::vec2(30.0, 0.0), egui::vec2(32.0, 32.0));
+                let label = match src {
+                    CaptureSource::Monitor(i) => {
+                        crate::icons::icon(crate::icons::MONITOR, 28.0, if is_open { accent } else { theme::FG_MUTED })
+                            .paint_at(ui, icon_r.shrink(2.0));
+                        format!("Monitor {i}")
+                    }
+                    CaptureSource::Window { hwnd, title } => {
+                        match sources.icon_texture(ui.ctx(), *hwnd) {
+                            Some(id) => egui::Image::new((id, icon_r.size())).paint_at(ui, icon_r),
+                            None => crate::icons::icon(crate::icons::MONITOR, 28.0, theme::FG_MUTED).paint_at(ui, icon_r.shrink(2.0)),
+                        }
+                        title.clone()
+                    }
                 };
                 let painter = ui.painter_at(rect.shrink(12.0));
-                painter.text(rect.left_center() + egui::vec2(18.0, 0.0), egui::Align2::LEFT_CENTER, glyph,
-                    egui::FontId::proportional(20.0), if is_open { accent } else { theme::FG_MUTED });
-                painter.text(rect.left_center() + egui::vec2(46.0, 0.0), egui::Align2::LEFT_CENTER,
-                    shell_truncate(&label, 30), egui::FontId::proportional(theme::SIZE_BODY), theme::FG_PRIMARY);
+                // Titles carry symbols the font lacks (terminal spinners
+                // like ◑ ✳) — drop those rather than draw empty boxes.
+                let font = egui::FontId::proportional(theme::SIZE_BODY);
+                let label: String = ui.fonts(|f| label.chars().filter(|c| f.has_glyph(&font, *c)).collect());
+                painter.text(rect.left_center() + egui::vec2(56.0, 0.0), egui::Align2::LEFT_CENTER,
+                    shell_truncate(label.trim(), 28), font, theme::FG_PRIMARY);
                 if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !is_open {
                     sources.request = Some(src.clone());
                 }

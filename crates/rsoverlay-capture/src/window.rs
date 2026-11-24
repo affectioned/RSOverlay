@@ -381,3 +381,105 @@ unsafe fn create_shared_texture(device: &ID3D11Device, width: u32, height: u32) 
 pub fn is_minimized(hwnd: isize) -> bool {
     unsafe { IsIconic(HWND(hwnd)).as_bool() }
 }
+
+/// Where the OS cursor is right now, in virtual-desktop pixels —
+/// `None` while hidden (games, video players). DXGI desktop duplication
+/// leaves the cursor out of captured frames, so monitor mirrors draw it
+/// themselves from this.
+pub fn cursor_pos() -> Option<(i32, i32)> {
+    use windows::Win32::UI::WindowsAndMessaging::{GetCursorInfo, CURSORINFO, CURSOR_SHOWING};
+    let mut ci = CURSORINFO { cbSize: std::mem::size_of::<CURSORINFO>() as u32, ..Default::default() };
+    unsafe { GetCursorInfo(&mut ci) }.ok()?;
+    (ci.flags.0 & CURSOR_SHOWING.0 != 0).then_some((ci.ptScreenPos.x, ci.ptScreenPos.y))
+}
+
+/// RGBA pixels of a window's app icon: (width, height, rgba). Asks the
+/// window (WM_GETICON big → small) with a short timeout so a hung app
+/// can't stall us, then falls back to its window-class icon.
+pub fn window_icon(hwnd: isize) -> Option<(u32, u32, Vec<u8>)> {
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::Graphics::Gdi::{
+        DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+        DIB_RGB_COLORS,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClassLongPtrW, GetIconInfo, SendMessageTimeoutW, GCLP_HICON, GCLP_HICONSM, HICON, ICONINFO,
+        SMTO_ABORTIFHUNG, WM_GETICON,
+    };
+    const ICON_BIG: usize = 1;
+    const ICON_SMALL2: usize = 2;
+    unsafe {
+        let h = HWND(hwnd);
+        let ask = |kind: usize| {
+            let mut out = 0usize;
+            SendMessageTimeoutW(h, WM_GETICON, WPARAM(kind), LPARAM(0), SMTO_ABORTIFHUNG, 50, Some(&mut out));
+            out
+        };
+        let raw = [ask(ICON_BIG), ask(ICON_SMALL2), GetClassLongPtrW(h, GCLP_HICON), GetClassLongPtrW(h, GCLP_HICONSM)]
+            .into_iter()
+            .find(|&v| v != 0)?;
+        let mut info = ICONINFO::default();
+        GetIconInfo(HICON(raw as isize), &mut info).ok()?;
+        let mut bm = BITMAP::default();
+        let color = info.hbmColor;
+        let ok = !color.is_invalid()
+            && GetObjectW(color, std::mem::size_of::<BITMAP>() as i32, Some(&mut bm as *mut _ as *mut c_void)) != 0;
+        let result = ok.then(|| {
+            let (w, hgt) = (bm.bmWidth.max(1) as u32, bm.bmHeight.max(1) as u32);
+            let mut bmi = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: w as i32,
+                    biHeight: -(hgt as i32), // top-down
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut px = vec![0u8; (w * hgt * 4) as usize];
+            let dc = GetDC(HWND(0));
+            let lines = GetDIBits(dc, color, 0, hgt, Some(px.as_mut_ptr() as *mut c_void), &mut bmi, DIB_RGB_COLORS);
+            ReleaseDC(HWND(0), dc);
+            (lines > 0).then(|| {
+                // BGRA → RGBA. Legacy icons carry no alpha (all zero):
+                // treat them as opaque rather than invisible.
+                let has_alpha = px.as_chunks::<4>().0.iter().any(|p| p[3] != 0);
+                for p in px.as_chunks_mut::<4>().0 {
+                    p.swap(0, 2);
+                    if !has_alpha {
+                        p[3] = 255;
+                    }
+                }
+                (w, hgt, px)
+            })
+        });
+        if !info.hbmColor.is_invalid() {
+            let _ = DeleteObject(info.hbmColor);
+        }
+        if !info.hbmMask.is_invalid() {
+            let _ = DeleteObject(info.hbmMask);
+        }
+        result.flatten()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Read-only: `cargo test -p rsoverlay-capture -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_icons_and_cursor() {
+        let wins = enumerate_windows().unwrap();
+        let with_icon = wins.iter().filter(|w| window_icon(w.hwnd).is_some()).count();
+        println!("{} windows, {} with icons; cursor {:?}", wins.len(), with_icon, cursor_pos());
+        if let Some((w, h, px)) = wins.iter().find_map(|w| window_icon(w.hwnd)) {
+            assert_eq!(px.len() as u32, w * h * 4);
+            assert!(px.as_chunks::<4>().0.iter().any(|p| p[3] > 0), "icon fully transparent");
+        }
+        assert!(with_icon > 0);
+    }
+}

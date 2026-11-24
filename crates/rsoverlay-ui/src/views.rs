@@ -23,11 +23,22 @@ pub struct MirrorHandle {
     /// Sub-rect of the texture holding the content. Window capture
     /// writes into the top-left of an oversized shared texture.
     pub uv: egui::Rect,
+    /// OS cursor position within the content (0..1 each axis), for
+    /// sources whose capture leaves the cursor out (monitor duplication).
+    pub cursor: Option<egui::Vec2>,
 }
 
 impl MirrorHandle {
     pub fn full(id: egui::TextureId, width: u32, height: u32) -> Self {
-        Self { id, width, height, uv: egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)) }
+        Self { id, width, height, uv: egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), cursor: None }
+    }
+}
+
+/// Draw the OS cursor over a mirrored image occupying `rect`.
+pub fn paint_mirror_cursor(ui: &egui::Ui, rect: egui::Rect, cursor: Option<egui::Vec2>) {
+    if let Some(c) = cursor {
+        let tip = rect.min + egui::vec2(c.x * rect.width(), c.y * rect.height());
+        crate::glyphs::draw_pointer(&ui.painter_at(rect), tip, 20.0);
     }
 }
 
@@ -61,6 +72,24 @@ pub struct SourcePicker {
     pub wants_refresh: bool,
     /// Set by the UI when the user picks a different source.
     pub request: Option<CaptureSource>,
+    /// App icons per window (raw pixels from the app; textures are made
+    /// lazily per egui context).
+    pub icons: std::collections::HashMap<isize, egui::ColorImage>,
+    icon_tex: std::collections::HashMap<isize, egui::TextureHandle>,
+}
+
+impl SourcePicker {
+    /// Texture for a window's app icon, uploaded on first use.
+    pub fn icon_texture(&mut self, ctx: &egui::Context, hwnd: isize) -> Option<egui::TextureId> {
+        if let Some(t) = self.icon_tex.get(&hwnd) {
+            return Some(t.id());
+        }
+        let img = self.icons.get(&hwnd)?.clone();
+        let t = ctx.load_texture(format!("winicon-{hwnd}"), img, egui::TextureOptions::LINEAR);
+        let id = t.id();
+        self.icon_tex.insert(hwnd, t);
+        Some(id)
+    }
 }
 
 struct Toast {
@@ -494,7 +523,18 @@ impl DevView {
         }
         let enter = crate::motion::progress(ctx, self.page_since, crate::motion::MEDIUM);
 
-        let root = egui::Frame::none().fill(theme::BG_ROOT);
+        // VR: the dashboard is a rounded, softly bordered, slightly
+        // translucent glass slab (panels draw transparent on top of it);
+        // desktop keeps the edge-to-edge AMOLED black.
+        let root = if self.dock_layout {
+            let slab = ctx.screen_rect().shrink(4.0);
+            let bg = ctx.layer_painter(egui::LayerId::background());
+            bg.rect_filled(slab, 30.0, egui::Color32::from_black_alpha(236));
+            bg.rect_stroke(slab, 30.0, egui::Stroke::new(1.5_f32, accent.gamma_multiply(0.28)));
+            egui::Frame::none()
+        } else {
+            egui::Frame::none().fill(theme::BG_ROOT)
+        };
         egui::TopBottomPanel::top("header")
             .frame(root.inner_margin(egui::Margin { left: 20.0, right: 20.0, top: 14.0, bottom: 10.0 }))
             .show_separator_line(false)
@@ -1222,6 +1262,7 @@ fn mirror_card(
                 let response = ui.add(
                     egui::Image::new((m.id, egui::vec2(w, h))).uv(m.uv).sense(sense),
                 );
+                paint_mirror_cursor(ui, response.rect, m.cursor);
                 if forward_input {
                     if let Some(pos) = response.hover_pos().or_else(|| response.interact_pointer_pos()) {
                         let rect = response.rect;

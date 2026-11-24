@@ -29,6 +29,21 @@ impl Glyph {
     }
 }
 
+/// Classic arrow mouse pointer with its hotspot at `tip`: white fill,
+/// black outline — readable over any content.
+pub fn draw_pointer(p: &egui::Painter, tip: egui::Pos2, size: f32) {
+    let s = size / 16.0;
+    let pts: Vec<egui::Pos2> = [(0.0, 0.0), (0.0, 13.0), (3.4, 10.0), (5.6, 15.0), (7.8, 14.0), (5.6, 9.2), (10.0, 9.2)]
+        .iter()
+        .map(|(x, y)| tip + egui::vec2(x * s, y * s))
+        .collect();
+    // Fill the non-convex silhouette as convex pieces, then outline.
+    for tri in [[0, 1, 2], [0, 2, 6], [2, 3, 5], [3, 4, 5]] {
+        p.add(egui::Shape::convex_polygon(tri.iter().map(|&i| pts[i]).collect(), egui::Color32::WHITE, egui::Stroke::NONE));
+    }
+    p.add(egui::Shape::closed_line(pts, egui::Stroke::new(1.2_f32, egui::Color32::BLACK)));
+}
+
 /// Draw `g` centred at `c`, roughly `size` points across.
 pub fn draw(p: &egui::Painter, g: Glyph, c: egui::Pos2, size: f32, color: egui::Color32) {
     let s = egui::Stroke::new((size * 0.12).max(1.6), color);
