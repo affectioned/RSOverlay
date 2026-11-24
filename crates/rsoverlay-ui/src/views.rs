@@ -66,7 +66,18 @@ pub struct SourcePicker {
 struct Toast {
     n: Notification,
     expires: Instant,
+    /// Stable id for per-toast animation state.
+    seq: u64,
+    /// egui time the toast arrived (slide-in start).
+    born: Option<f64>,
+    /// Last measured height, for stacking the next toast below it.
+    height: f32,
 }
+
+/// Slide distance for toast enter/exit, px.
+const TOAST_SLIDE: f32 = 320.0;
+/// Toasts start sliding out this long before they expire.
+const TOAST_EXIT: Duration = Duration::from_millis(220);
 
 /// One entry in the scrollable notification history. Tracks the arrival
 /// instant so we can render a relative "5m ago" timestamp rather than
@@ -182,6 +193,13 @@ pub struct DevView {
     batteries: Vec<BatteryReading>,
     low_battery: LowBatteryWatch,
     toasts: VecDeque<Toast>,
+    toast_seq: u64,
+    /// Page shown last frame + when the current one appeared, for the
+    /// page-enter transition.
+    last_page: crate::shell::Page,
+    page_since: f64,
+    /// Accessibility: make every transition instant. Persists.
+    pub reduce_motion: bool,
     history: VecDeque<HistoryEntry>,
     notifications_received: u64,
     media: Option<MediaInfo>,
@@ -221,6 +239,10 @@ impl Default for DevView {
             batteries: Vec::new(),
             low_battery: LowBatteryWatch::default(),
             toasts: VecDeque::new(),
+            toast_seq: 0,
+            last_page: crate::shell::Page::default(),
+            page_since: f64::NEG_INFINITY,
+            reduce_motion: false,
             history: VecDeque::new(),
             notifications_received: 0,
             media: None,
@@ -245,7 +267,8 @@ impl DevView {
         while self.history.len() > MAX_HISTORY {
             self.history.pop_front();
         }
-        self.toasts.push_back(Toast { n, expires });
+        self.toast_seq += 1;
+        self.toasts.push_back(Toast { n, expires, seq: self.toast_seq, born: None, height: 88.0 });
         while self.toasts.len() > 8 {
             self.toasts.pop_front();
         }
@@ -336,6 +359,12 @@ impl DevView {
         if self.page == crate::shell::Page::Notifications {
             self.unread = 0;
         }
+        crate::motion::set_reduce_motion(self.reduce_motion);
+        if self.page != self.last_page {
+            self.last_page = self.page;
+            self.page_since = ctx.input(|i| i.time);
+        }
+        let enter = crate::motion::progress(ctx, self.page_since, crate::motion::MEDIUM);
 
         let root = egui::Frame::none().fill(theme::BG_ROOT);
         egui::TopBottomPanel::top("header")
@@ -364,7 +393,18 @@ impl DevView {
                 egui::ScrollArea::vertical()
                     .id_source(("page", self.page.slug()))
                     .auto_shrink([false, false])
-                    .show(ui, |ui| self.page_body(ui, injector, accent));
+                    .show(ui, |ui| {
+                        // Page enter: content rises 12 px…
+                        ui.add_space((1.0 - enter) * 12.0);
+                        self.page_body(ui, injector, accent);
+                    });
+                // …and fades up from black. On a true-black UI a black
+                // veil with falling alpha *is* a fade — one quad, no
+                // offscreen layer.
+                if enter < 1.0 {
+                    let a = ((1.0 - enter) * 255.0) as u8;
+                    ui.painter().rect_filled(ui.max_rect().expand(4.0), 0.0, egui::Color32::from_black_alpha(a));
+                }
             });
 
         if self.show_keyboard {
@@ -381,16 +421,33 @@ impl DevView {
             }
         }
 
-        egui::Area::new(egui::Id::new("toasts"))
-            // Below the header strip so toasts never cover the clock or
-            // battery chips.
-            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-theme::GUTTER, 84.0))
-            .show(ctx, |ui| {
-                for t in self.toasts.iter() {
-                    toast_card(ui, &t.n, accent);
-                    ui.add_space(8.0);
-                }
-            });
+        // Toasts: each in its own Area so it can slide independently.
+        // Enter from the right, exit to the right in the last 220 ms,
+        // and survivors glide up into the gap a departing toast leaves.
+        // Stacked below the header so they never cover the clock.
+        let t_now = ctx.input(|i| i.time);
+        let mut y = 84.0;
+        for t in self.toasts.iter_mut() {
+            let born = *t.born.get_or_insert(t_now);
+            let enter = crate::motion::progress(ctx, born, crate::motion::MEDIUM);
+            let left = t.expires.saturating_duration_since(now);
+            let exit = if left < TOAST_EXIT {
+                ctx.request_repaint();
+                crate::motion::ease_out(1.0 - left.as_secs_f32() / TOAST_EXIT.as_secs_f32())
+            } else {
+                0.0
+            };
+            let exit = if crate::motion::reduced() { 0.0 } else { exit };
+            let slide = (1.0 - enter + exit) * TOAST_SLIDE;
+            let id = egui::Id::new(("toast", t.seq));
+            let ty = crate::motion::value(ctx, id.with("y"), y, crate::motion::MEDIUM);
+            let resp = egui::Area::new(id)
+                .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-theme::GUTTER + slide, ty))
+                .interactable(false)
+                .show(ctx, |ui| toast_card(ui, &t.n, accent));
+            t.height = resp.response.rect.height();
+            y += t.height + 8.0;
+        }
 
         ctx.request_repaint_after(Duration::from_millis(250));
     }
@@ -472,6 +529,7 @@ impl DevView {
                         &mut self.show_battery,
                         &mut self.show_macros,
                         &mut self.show_volume,
+                        &mut self.reduce_motion,
                         &mut self.language,
                         &mut self.keyboard.layout,
                     ) {
@@ -712,6 +770,7 @@ fn appearance_card(
     show_battery: &mut bool,
     show_macros: &mut bool,
     show_volume: &mut bool,
+    reduce_motion: &mut bool,
     language: &mut crate::i18n::Lang,
     keyboard_layout: &mut crate::keyboard_layout::LayoutId,
 ) -> bool {
@@ -771,6 +830,9 @@ fn appearance_card(
             ui.checkbox(show_macros, "Macros");
             ui.checkbox(show_volume, "Volume");
         });
+        ui.add_space(4.0);
+        ui.checkbox(reduce_motion, "Reduce motion")
+            .on_hover_text("Make page, toast and highlight transitions instant");
         ui.add_space(8.0);
         // Language picker — shows the native-script name so a Russian
         // user sees Русский.

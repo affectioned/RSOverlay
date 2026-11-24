@@ -14,6 +14,7 @@ pub mod keyboard_layout;
 pub mod locale;
 pub mod macros;
 pub mod media;
+pub mod motion;
 pub mod now_playing;
 pub mod shell;
 pub mod theme;

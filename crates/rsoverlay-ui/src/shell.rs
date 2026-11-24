@@ -19,6 +19,7 @@
 use crate::battery::BatteryReading;
 use crate::icons::{self, icon};
 use crate::locale;
+use crate::motion;
 use crate::theme;
 use chrono::Local;
 
@@ -90,36 +91,57 @@ impl Page {
 }
 
 /// Left navigation rail. `badge` puts a count pill on Notifications.
+///
+/// The selection highlight is one shape that *slides* to the active
+/// row: a placeholder is reserved in the paint list before the rows are
+/// drawn, then filled once every row rect is known, so it sits beneath
+/// icons and labels without a second layer.
 pub fn nav_rail(ui: &mut egui::Ui, page: &mut Page, badge: usize, accent: egui::Color32) {
+    let slot = ui.painter().add(egui::Shape::Noop);
+    let mut selected_rect = None;
     for p in Page::ALL {
         let count = if p == Page::Notifications { badge } else { 0 };
-        if nav_item(ui, p, *page == p, count, accent) {
+        let (rect, clicked) = nav_item(ui, p, *page == p, count, accent);
+        if clicked {
             *page = p;
+        }
+        if *page == p {
+            selected_rect = Some(rect);
         }
         ui.add_space(4.0);
     }
+    let Some(target) = selected_rect else { return };
+    let ctx = ui.ctx().clone();
+    let y = motion::value(&ctx, egui::Id::new("nav-highlight-y"), target.top(), motion::MEDIUM);
+    let rect = egui::Rect::from_min_size(egui::pos2(target.left(), y), target.size());
+    let bar = egui::Rect::from_min_size(rect.left_top() + egui::vec2(0.0, 10.0), egui::vec2(3.0, rect.height() - 20.0));
+    ui.painter().set(
+        slot,
+        egui::Shape::Vec(vec![
+            egui::Shape::rect_filled(rect, theme::RADIUS_CARD, accent.gamma_multiply(0.14)),
+            egui::Shape::rect_filled(bar, 1.5, accent),
+        ]),
+    );
 }
 
-fn nav_item(ui: &mut egui::Ui, p: Page, selected: bool, badge: usize, accent: egui::Color32) -> bool {
+fn nav_item(ui: &mut egui::Ui, p: Page, selected: bool, badge: usize, accent: egui::Color32) -> (egui::Rect, bool) {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), NAV_ITEM_H), egui::Sense::click());
-    let painter = ui.painter();
-    if selected {
-        painter.rect_filled(rect, theme::RADIUS_CARD, accent.gamma_multiply(0.14));
-        // Left accent bar — the "you are here" mark.
-        let bar = egui::Rect::from_min_size(rect.left_top() + egui::vec2(0.0, 10.0), egui::vec2(3.0, rect.height() - 20.0));
-        painter.rect_filled(bar, 1.5, accent);
-    } else if resp.hovered() {
-        painter.rect_filled(rect, theme::RADIUS_CARD, egui::Color32::from_white_alpha(0x0A));
+    let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered() && !selected, motion::FAST);
+    if hover > 0.0 {
+        ui.painter().rect_filled(rect, theme::RADIUS_CARD, egui::Color32::from_white_alpha((hover * 10.0) as u8));
     }
-    let tint = if selected { accent } else { theme::FG_MUTED };
+    // Icon + label tint cross-fade into the accent as the row activates.
+    let on = motion::toggle(ui.ctx(), resp.id.with("sel"), selected, motion::MEDIUM);
+    let tint = motion::mix(theme::FG_MUTED, accent, on);
     let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + 26.0, rect.center().y), egui::vec2(20.0, 20.0));
     icon(p.icon(), 20.0, tint).paint_at(ui, icon_rect);
+    let painter = ui.painter();
     painter.text(
         egui::pos2(rect.left() + 48.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         p.label(),
         egui::FontId::proportional(theme::SIZE_BODY),
-        if selected { theme::FG_PRIMARY } else { theme::FG_MUTED },
+        motion::mix(theme::FG_MUTED, theme::FG_PRIMARY, on.max(hover)),
     );
     if badge > 0 {
         let text = if badge > 99 { "99+".to_string() } else { badge.to_string() };
@@ -129,7 +151,7 @@ fn nav_item(ui: &mut egui::Ui, p: Page, selected: bool, badge: usize, accent: eg
         painter.rect_filled(pill, 9.0, accent);
         painter.galley(pill.center() - galley.size() / 2.0, galley, theme::BG_ROOT);
     }
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+    (rect, resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked())
 }
 
 /// What the header asked for this frame.
@@ -183,15 +205,11 @@ pub fn header(
 
 fn icon_button(ui: &mut egui::Ui, src: egui::ImageSource<'static>, active: bool, accent: egui::Color32) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(40.0, 40.0), egui::Sense::click());
-    let fill = if active {
-        accent.gamma_multiply(0.18)
-    } else if resp.hovered() {
-        egui::Color32::from_white_alpha(0x0E)
-    } else {
-        theme::BG_CARD
-    };
-    ui.painter().rect_filled(rect, theme::RADIUS_CARD, fill);
-    let tint = if active { accent } else { theme::FG_MUTED };
+    let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
+    let on = motion::toggle(ui.ctx(), resp.id.with("on"), active, motion::MEDIUM);
+    let idle = motion::mix(theme::BG_CARD, egui::Color32::from_rgb(0x1C, 0x20, 0x26), hover);
+    ui.painter().rect_filled(rect, theme::RADIUS_CARD, motion::mix(idle, accent.gamma_multiply(0.18), on));
+    let tint = motion::mix(theme::FG_MUTED, accent, on);
     icon(src, 20.0, tint).paint_at(ui, egui::Rect::from_center_size(rect.center(), egui::vec2(20.0, 20.0)));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

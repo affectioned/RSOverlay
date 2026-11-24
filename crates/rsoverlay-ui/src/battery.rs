@@ -109,8 +109,10 @@ fn row(ui: &mut egui::Ui, r: &BatteryReading, warn_pct: u8, accent: egui::Color3
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 3.0), egui::Sense::hover());
     let p = ui.painter();
     p.rect_filled(rect, 1.5, egui::Color32::from_white_alpha(0x18));
+    // Bar glides to new readings instead of jumping every 5 s poll.
+    let shown = crate::motion::value(ui.ctx(), egui::Id::new(("battery-bar", r.id)), r.fraction.clamp(0.0, 1.0), crate::motion::SLOW);
     let mut filled = rect;
-    filled.set_width(rect.width() * r.fraction.clamp(0.0, 1.0));
+    filled.set_width(rect.width() * shown);
     p.rect_filled(filled, 1.5, fill);
     ui.add_space(4.0);
 }
