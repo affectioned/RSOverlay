@@ -169,7 +169,7 @@ struct Args {
     search: Option<String>,
 
     /// VR preview layout preset: work / gaming / social / dashboard /
-    /// wrist (keys 1-5 switch live).
+    /// wrist-compact / wrist-expanded (keys 1-6 switch live).
     #[arg(long, value_name = "PRESET")]
     scene: Option<String>,
 }

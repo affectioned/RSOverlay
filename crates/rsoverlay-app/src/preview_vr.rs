@@ -8,13 +8,14 @@
 //! as VR mode, so what you see here is what the headset shows.
 //!
 //! Layout presets show RSOverlay the way people actually use it (keys
-//! 1-5 switch live, `--scene` picks one at launch):
+//! 1-6 switch live, `--scene` picks one at launch):
 //!
 //! 1. work       editor + notes + terminal arc, stats widget, keyboard
 //! 2. gaming     game guide to the side, media / battery widgets, wrist up
 //! 3. social     dashboard on Chat, keyboard, notifications + media
 //! 4. dashboard  the dashboard with the wrist and a popped-out widget
-//! 5. wrist      a close-up wrist glance, expanded
+//! 5. wrist-compact   wrist close-up, compact set (laser on More)
+//! 6. wrist-expanded  wrist close-up, everything shown (laser on Less)
 //!
 //! Window contents are mock apps (`preview_mock`) and media is a demo
 //! track, so screenshots never contain the user's real desktop or
@@ -95,18 +96,20 @@ enum Preset {
     Gaming,
     Social,
     Dashboard,
-    Wrist,
+    WristCompact,
+    WristExpanded,
 }
 
 impl Preset {
-    const ALL: [Preset; 5] = [Preset::Work, Preset::Gaming, Preset::Social, Preset::Dashboard, Preset::Wrist];
+    const ALL: [Preset; 6] = [Preset::Work, Preset::Gaming, Preset::Social, Preset::Dashboard, Preset::WristCompact, Preset::WristExpanded];
 
     fn from_arg(s: Option<&str>) -> Self {
         match s.unwrap_or("dashboard") {
             "work" => Self::Work,
             "gaming" => Self::Gaming,
             "social" => Self::Social,
-            "wrist" => Self::Wrist,
+            "wrist" | "wrist-compact" => Self::WristCompact,
+            "wrist-expanded" => Self::WristExpanded,
             _ => Self::Dashboard,
         }
     }
@@ -117,7 +120,8 @@ impl Preset {
             Self::Gaming => "gaming",
             Self::Social => "social",
             Self::Dashboard => "dashboard",
-            Self::Wrist => "wrist",
+            Self::WristCompact => "wrist-compact",
+            Self::WristExpanded => "wrist-expanded",
         }
     }
 
@@ -128,7 +132,7 @@ impl Preset {
             Self::Gaming => (-0.12, -0.30, 0.0),
             Self::Social => (0.0, -0.30, 0.0),
             Self::Dashboard => (-0.08, -0.16, 0.0),
-            Self::Wrist => (-0.46, -0.60, 0.20),
+            Self::WristCompact | Self::WristExpanded => (-0.46, -0.60, 0.20),
         }
     }
 
@@ -195,7 +199,8 @@ impl Preset {
                 dash(Page::Home, 0.0, 0.72, 1.48, Some((0.06, 0.29))),
                 wrist(false, Vec3::new(-0.27, 1.07, -0.33), None),
             ],
-            Self::Wrist => vec![wrist(true, Vec3::new(-0.15, 1.30, -0.30), Some((0.90, 0.07)))],
+            Self::WristCompact => vec![wrist(false, Vec3::new(-0.15, 1.30, -0.30), Some((0.90, 0.07)))],
+            Self::WristExpanded => vec![wrist(true, Vec3::new(-0.15, 1.30, -0.30), Some((0.90, 0.07)))],
         }
     }
 }
@@ -259,7 +264,7 @@ pub fn run(
     let event_loop = EventLoop::new().context("event loop")?;
     let window = Arc::new(
         WindowBuilder::new()
-            .with_title("RSOverlay — VR Preview  (1 work · 2 gaming · 3 social · 4 dashboard · 5 wrist · R reset view)")
+            .with_title("RSOverlay — VR Preview  (1 work · 2 gaming · 3 social · 4 dashboard · 5 wrist · 6 wrist expanded · R reset view)")
             .with_inner_size(winit::dpi::PhysicalSize::new(INITIAL_WIN_W, INITIAL_WIN_H))
             .with_min_inner_size(winit::dpi::LogicalSize::new(800u32, 600u32))
             .build(&event_loop)
@@ -319,7 +324,7 @@ pub fn run(
     let screenshot_path = test.screenshot.clone();
     let exit_after = test.exit_after;
 
-    info!("VR preview: scene '{}' — 1-5 switch presets, drag to look, scroll to dolly, R resets, Esc exits", preset.name());
+    info!("VR preview: scene '{}' — 1-6 switch presets, drag to look, scroll to dolly, R resets, Esc exits", preset.name());
 
     event_loop.set_control_flow(ControlFlow::Poll);
     event_loop.run(move |event, elwt| match event {
