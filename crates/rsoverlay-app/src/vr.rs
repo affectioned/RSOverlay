@@ -514,6 +514,12 @@ mod imp {
         let mut beam_tint = [[f32::NAN; 4]; 2];
         let mut keyboard = rsoverlay_ui::vrkeyboard::VrKeyboard::default();
         let mut kb_pose: Option<Affine3A> = None;
+        // VR keyboard → RSOverlay's own text fields: events typed this
+        // frame go to the panel whose field has focus (1 = dashboard,
+        // WIN0.. = widget groups), delivered on its next render.
+        let mut typed: Vec<egui::Event> = Vec::new();
+        let mut typed_target: Option<usize> = None;
+        let mut prev_text_target: Option<usize> = None;
         let mut win_seq = 0u32;
         let mut prev_menu = false;
         let mut prev_grip = [false; 2];
@@ -945,7 +951,10 @@ mod imp {
             }
 
             // ── Dashboard frame (only while visible — hidden costs nothing).
-            let df = dash.laser.update(&dash_samples, dt);
+            let mut df = dash.laser.update(&dash_samples, dt);
+            if typed_target == Some(1) {
+                df.events.append(&mut typed);
+            }
             if dash.visible {
                 let accent = dev_view.accent;
                 let cursor = df.cursor;
@@ -1005,6 +1014,18 @@ mod imp {
                 }
                 kb.set_visible(&overlay, dev_view.show_keyboard);
             }
+            // Which RSOverlay panel has a focused text field (if any)?
+            let text_target = if dash.visible && dash.egui.ctx.wants_keyboard_input() {
+                Some(1)
+            } else {
+                wins.iter().position(|w| w.panel.egui.ctx.wants_keyboard_input()).map(|k| k + WIN0)
+            };
+            // Focusing a field opens the keyboard (once — closing it stays closed).
+            if text_target.is_some() && text_target != prev_text_target && !dev_view.show_keyboard {
+                dev_view.show_keyboard = true;
+            }
+            prev_text_target = text_target;
+            let internal = text_target.is_some();
             let mut kb_haptics = Vec::new();
             if kb.visible {
                 let hands: Vec<(laser::Hand, Option<egui::Pos2>, f32)> =
@@ -1012,12 +1033,16 @@ mod imp {
                 let accent = dev_view.accent;
                 let mut kf = rsoverlay_ui::vrkeyboard::KbFrame::default();
                 kb.render(&gpu, &overlay, time, dt, Vec::new(), |ctx| {
-                    kf = keyboard.frame(ctx, &hands, time, accent);
+                    kf = keyboard.frame(ctx, &hands, time, accent, internal);
                     if let Some((2, h)) = hud {
                         rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                     }
                 });
                 kb_haptics = kf.haptic;
+                if !kf.text.is_empty() {
+                    typed.extend(kf.text);
+                    typed_target = text_target;
+                }
                 if kf.close {
                     dev_view.show_keyboard = false;
                 }
@@ -1084,7 +1109,10 @@ mod imp {
             let mut splits: Vec<(usize, WidgetKind)> = Vec::new();
             let mut win_haptics = Vec::new();
             for (k, w) in wins.iter_mut().enumerate() {
-                let lf = w.panel.laser.update(win_samples.get(k).map_or(&[][..], |v| v.as_slice()), dt);
+                let mut lf = w.panel.laser.update(win_samples.get(k).map_or(&[][..], |v| v.as_slice()), dt);
+                if typed_target == Some(k + WIN0) {
+                    lf.events.append(&mut typed);
+                }
                 win_haptics.extend(lf.haptic);
                 let accent = dev_view.accent;
                 let mut act = window_panel::WindowPanelAction::default();

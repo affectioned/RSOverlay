@@ -198,6 +198,79 @@ pub fn dock(ui: &mut egui::Ui, page: &mut Page, badge: usize, accent: egui::Colo
 pub struct HeaderActions {
     pub toggle_keyboard: bool,
     pub open_notifications: bool,
+    /// A global-search result was chosen.
+    pub search_pick: Option<crate::search::Target>,
+}
+
+/// Global search box state (query + highlighted result).
+#[derive(Default)]
+pub struct SearchState {
+    pub query: String,
+    pub selected: usize,
+}
+
+/// Header search field + floating results list. Enter picks the
+/// highlighted result; ↑/↓ move the highlight; Esc clears.
+fn search_box(ui: &mut egui::Ui, st: &mut SearchState, entries: &[crate::search::Entry], accent: egui::Color32) -> Option<crate::search::Target> {
+    let edit = ui.add(
+        egui::TextEdit::singleline(&mut st.query)
+            .hint_text("Search settings, pages, windows…")
+            .desired_width(260.0),
+    );
+    if edit.changed() {
+        st.selected = 0;
+    }
+    let results = crate::search::search(entries, &st.query, 8);
+    if results.is_empty() {
+        return None;
+    }
+    st.selected = st.selected.min(results.len() - 1);
+    let (up, down, enter, esc) = ui.input(|i| {
+        (i.key_pressed(egui::Key::ArrowUp), i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape))
+    });
+    if down {
+        st.selected = (st.selected + 1).min(results.len() - 1);
+    }
+    if up {
+        st.selected = st.selected.saturating_sub(1);
+    }
+    if esc {
+        st.query.clear();
+        return None;
+    }
+    let mut pick = (enter && (edit.has_focus() || edit.lost_focus())).then(|| results[st.selected].target.clone());
+    egui::Area::new(egui::Id::new("search-results"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(edit.rect.left_bottom() + egui::vec2(0.0, 6.0))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::none()
+                .fill(theme::BG_CARD)
+                .stroke(egui::Stroke::new(1.0_f32, accent.gamma_multiply(0.35)))
+                .rounding(12.0)
+                .inner_margin(egui::Margin::same(6.0))
+                .show(ui, |ui| {
+                    ui.set_width(380.0);
+                    for (i, e) in results.iter().enumerate() {
+                        let sel = i == st.selected;
+                        let (r, resp) = ui.allocate_exact_size(egui::vec2(380.0, 40.0), egui::Sense::click());
+                        if sel || resp.hovered() {
+                            ui.painter().rect_filled(r, 8.0, accent.gamma_multiply(if sel { 0.22 } else { 0.12 }));
+                        }
+                        ui.painter().text(r.left_center() + egui::vec2(12.0, 0.0), egui::Align2::LEFT_CENTER, &e.title,
+                            egui::FontId::proportional(theme::SIZE_BODY), theme::FG_PRIMARY);
+                        ui.painter().text(r.right_center() - egui::vec2(12.0, 0.0), egui::Align2::RIGHT_CENTER, e.hint,
+                            egui::FontId::proportional(theme::SIZE_CAPTION + 1.0), theme::FG_MUTED);
+                        if resp.clicked() {
+                            pick = Some(e.target.clone());
+                        }
+                    }
+                });
+        });
+    if pick.is_some() {
+        st.query.clear();
+        st.selected = 0;
+    }
+    pick
 }
 
 pub fn header(
@@ -205,6 +278,8 @@ pub fn header(
     batteries: &[BatteryReading],
     keyboard_open: bool,
     unread: usize,
+    search: &mut SearchState,
+    entries: &[crate::search::Entry],
     accent: egui::Color32,
 ) -> HeaderActions {
     let mut out = HeaderActions::default();
@@ -222,6 +297,8 @@ pub fn header(
         ui.label(egui::RichText::new(time).size(34.0).strong().color(theme::FG_PRIMARY));
         ui.add_space(6.0);
         ui.label(theme::body_muted(&date));
+        ui.add_space(16.0);
+        out.search_pick = search_box(ui, search, entries, accent);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if icon_button(ui, icons::BELL, unread > 0, accent).on_hover_text("Notifications").clicked() {
                 out.open_notifications = true;

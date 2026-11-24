@@ -87,8 +87,47 @@ pub fn take_popout_request(ctx: &egui::Context) -> Option<WidgetKind> {
     ctx.data_mut(|d| d.remove_temp::<WidgetKind>(egui::Id::new(POPOUT_REQ)))
 }
 
+const HIGHLIGHT: &str = "rso-highlight";
+const HIGHLIGHT_SECS: f64 = 2.4;
+
+/// Ask the card with `caption` to scroll into view and flash (search).
+pub fn highlight_card(ctx: &egui::Context, caption: &str) {
+    let t = ctx.input(|i| i.time);
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(HIGHLIGHT), (caption.to_string(), t, false)));
+}
+
+/// Card-header hook: scroll to + pulse the card a search result picked.
+fn highlight_hook(ui: &mut egui::Ui, caption: &str, accent: egui::Color32) {
+    let id = egui::Id::new(HIGHLIGHT);
+    let Some((cap, start, scrolled)) = ui.ctx().data(|d| d.get_temp::<(String, f64, bool)>(id)) else { return };
+    if cap != caption {
+        return;
+    }
+    let age = ui.input(|i| i.time) - start;
+    if age > HIGHLIGHT_SECS {
+        ui.ctx().data_mut(|d| d.remove::<(String, f64, bool)>(id));
+        return;
+    }
+    if !scrolled {
+        ui.scroll_to_cursor(Some(egui::Align::Center));
+        ui.ctx().data_mut(|d| d.insert_temp(id, (cap, start, true)));
+    }
+    // Three soft pulses, fading out.
+    let pulse = (0.5 + 0.5 * (age as f32 * std::f32::consts::TAU * 1.25).cos()) * (1.0 - (age / HIGHLIGHT_SECS) as f32);
+    let r = ui.min_rect().expand2(egui::vec2(10.0, 6.0));
+    ui.painter().rect_stroke(r, 10.0, egui::Stroke::new(2.5_f32, accent.gamma_multiply(pulse.max(0.15))));
+    ui.ctx().request_repaint();
+}
+
+/// Ask for a widget pop-out from code (search results).
+pub fn request_popout(ctx: &egui::Context, kind: WidgetKind) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(POPOUT_REQ), kind));
+}
+
 /// Small ↗ after a card caption: "pop this card out as a VR widget".
+/// Also hosts the search highlight hook, since every card calls it.
 pub fn popout_button(ui: &mut egui::Ui, caption: &str, accent: egui::Color32) {
+    highlight_hook(ui, caption, accent);
     let on = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new(POPOUT_ON))).unwrap_or(false);
     let Some(kind) = WidgetKind::from_caption(caption).filter(|_| on) else { return };
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(28.0, 22.0), egui::Sense::click());

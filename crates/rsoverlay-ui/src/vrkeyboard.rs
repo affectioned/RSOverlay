@@ -101,8 +101,10 @@ const RELEASE: f32 = 0.35;
 
 #[derive(Copy, Clone, Debug, Default)]
 struct ModState {
-    /// Key is down at the OS level.
+    /// Latched (sticky) or held.
     down: bool,
+    /// The OS has seen a key-down for it (internal typing never does).
+    os: bool,
     locked: bool,
     last_tap: f64,
 }
@@ -130,6 +132,8 @@ pub struct VrKeyboard {
 pub struct KbFrame {
     pub haptic: Vec<Hand>,
     pub close: bool,
+    /// Typing into an RSOverlay text field: events for that panel.
+    pub text: Vec<egui::Event>,
 }
 
 fn slot(h: Hand) -> usize {
@@ -176,27 +180,80 @@ impl VrKeyboard {
     fn release_sticky(&mut self) {
         for (k, (_, s)) in self.mods.iter_mut() {
             if s.down && !s.locked {
-                let _ = physical::send_scan(*k, false);
+                if s.os {
+                    let _ = physical::send_scan(*k, false);
+                    s.os = false;
+                }
                 s.down = false;
             }
         }
     }
 
-    fn press_mod(&mut self, k: ScanKey, m: Mod, time: f64) {
+    fn press_mod(&mut self, k: ScanKey, m: Mod, time: f64, internal: bool) {
         let s = &mut self.mods.entry(k).or_insert((m, ModState::default())).1;
+        let up = |s: &mut ModState| {
+            if s.os {
+                let _ = physical::send_scan(k, false);
+                s.os = false;
+            }
+        };
         if s.locked {
             s.locked = false;
             s.down = false;
-            let _ = physical::send_scan(k, false);
+            up(s);
         } else if s.down && time - s.last_tap < DOUBLE_TAP {
             s.locked = true;
         } else if s.down {
             s.down = false;
-            let _ = physical::send_scan(k, false);
+            up(s);
         } else {
             s.down = true;
             s.last_tap = time;
-            let _ = physical::send_scan(k, true);
+            if !internal {
+                let _ = physical::send_scan(k, true);
+                s.os = true;
+            }
+        }
+    }
+
+    fn egui_mods(&self) -> egui::Modifiers {
+        egui::Modifiers {
+            shift: self.mod_active(Mod::Shift),
+            ctrl: self.mod_active(Mod::Ctrl),
+            command: self.mod_active(Mod::Ctrl),
+            alt: self.mod_active(Mod::Alt),
+            mac_cmd: false,
+        }
+    }
+
+    /// The egui events a key produces when typing into RSOverlay itself.
+    fn internal_events(&self, k: &Key) -> Vec<egui::Event> {
+        let key = |key: egui::Key| {
+            let m = self.egui_mods();
+            vec![
+                egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: m },
+                egui::Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers: m },
+            ]
+        };
+        match (k.kind, k.k.scan, k.k.ext) {
+            (Kind::Char, ..) if !self.mod_active(Mod::Ctrl) => {
+                self.labels.get(&k.k).map(|t| vec![egui::Event::Text(t.clone())]).unwrap_or_default()
+            }
+            (Kind::Char, ..) => {
+                // Ctrl+letter shortcuts (copy/paste/select-all).
+                let l = self.labels.get(&k.k).and_then(|t| egui::Key::from_name(&t.to_uppercase()));
+                l.map(key).unwrap_or_default()
+            }
+            (_, 0x39, false) => vec![egui::Event::Text(" ".into())],
+            (_, 0x0E, false) => key(egui::Key::Backspace),
+            (_, 0x1C, false) => key(egui::Key::Enter),
+            (_, 0x0F, false) => key(egui::Key::Tab),
+            (_, 0x01, false) => key(egui::Key::Escape),
+            (_, 0x4B, true) => key(egui::Key::ArrowLeft),
+            (_, 0x4D, true) => key(egui::Key::ArrowRight),
+            (_, 0x48, true) => key(egui::Key::ArrowUp),
+            (_, 0x50, true) => key(egui::Key::ArrowDown),
+            _ => Vec::new(),
         }
     }
 
@@ -208,6 +265,7 @@ impl VrKeyboard {
         hands: &[(Hand, Option<egui::Pos2>, f32)],
         time: f64,
         accent: egui::Color32,
+        internal: bool,
     ) -> KbFrame {
         self.refresh_labels(time);
         if time - self.blocked_at > 0.5 {
@@ -223,7 +281,10 @@ impl VrKeyboard {
         painter.rect_filled(card, 24.0, theme::BG_ROOT);
         painter.rect_stroke(card, 24.0, egui::Stroke::new(1.5_f32, accent.gamma_multiply(0.3)));
         let bar = egui::Rect::from_min_size(card.min + egui::vec2(16.0, 6.0), egui::vec2(card.width() - 32.0, TOP_BAR));
-        if self.blocked {
+        if internal {
+            painter.text(bar.left_center(), egui::Align2::LEFT_CENTER, "TYPING INTO RSOVERLAY",
+                egui::FontId::proportional(theme::SIZE_CAPTION + 1.0), accent);
+        } else if self.blocked {
             painter.text(bar.left_center(), egui::Align2::LEFT_CENTER,
                 "Focused window runs as administrator — Windows (UAC) blocks VR typing; use your PC keyboard",
                 egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), theme::DANGER);
@@ -278,7 +339,14 @@ impl VrKeyboard {
                 if let Some(k) = key_at(p) {
                     out.haptic.push(hand);
                     match k.kind {
-                        Kind::Mod(m, _) => self.press_mod(k.k, m, time),
+                        Kind::Mod(m, _) => self.press_mod(k.k, m, time, internal),
+                        _ if internal => {
+                            // RSOverlay text field focused: type into it,
+                            // never into the desktop.
+                            out.text.extend(self.internal_events(&k));
+                            self.release_sticky();
+                            self.label_at = f64::NEG_INFINITY;
+                        }
                         _ => {
                             let _ = physical::send_scan(k.k, true);
                             self.held[s] = Some((k.k, time, time));
@@ -366,7 +434,7 @@ impl VrKeyboard {
             let _ = physical::send_scan(k, false);
         }
         for (k, (_, s)) in self.mods.iter_mut() {
-            if s.down || s.locked {
+            if s.os {
                 let _ = physical::send_scan(*k, false);
             }
             *s = ModState::default();

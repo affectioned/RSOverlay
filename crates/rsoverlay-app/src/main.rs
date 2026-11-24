@@ -162,6 +162,10 @@ struct Args {
     /// Preview the VR keyboard panel (labels from the live layout).
     #[arg(long)]
     vr_keyboard: bool,
+
+    /// Pre-fill the global search box (screenshot the results list).
+    #[arg(long, value_name = "QUERY")]
+    search: Option<String>,
 }
 
 fn parse_vec3(s: &str) -> Result<(f32, f32, f32), String> {
@@ -311,6 +315,7 @@ fn main() -> Result<()> {
         wrist: args.wrist,
         widgets: args.widgets.clone(),
         vr_keyboard: args.vr_keyboard,
+        search: args.search.clone(),
     };
 
     let result = match mode {

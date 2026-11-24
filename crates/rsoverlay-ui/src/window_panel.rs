@@ -177,7 +177,20 @@ pub fn source_grid(ui: &mut egui::Ui, sources: &mut SourcePicker, open: &[Captur
     let cols = 3usize;
     let gap = theme::GUTTER;
     let w = (ui.available_width() - gap * (cols as f32 - 1.0)) / cols as f32;
-    let choices = sources.choices.clone();
+    ui.horizontal(|ui| {
+        ui.add(egui::TextEdit::singleline(&mut sources.filter).hint_text("Filter windows…").desired_width(320.0));
+        if !sources.filter.is_empty() && pill(ui, "✕", false, accent).on_hover_text("Clear").clicked() {
+            sources.filter.clear();
+        }
+    });
+    ui.add_space(theme::GUTTER);
+    let needle = sources.filter.trim().to_lowercase();
+    let choices: Vec<CaptureSource> =
+        sources.choices.iter().filter(|s| needle.is_empty() || s.label().to_lowercase().contains(&needle)).cloned().collect();
+    if !needle.is_empty() {
+        ui.label(egui::RichText::new(format!("{} of {}", choices.len(), sources.choices.len())).size(theme::SIZE_CAPTION + 1.0).color(theme::FG_MUTED));
+        ui.add_space(6.0);
+    }
     for row in choices.chunks(cols) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;

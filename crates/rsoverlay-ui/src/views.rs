@@ -72,6 +72,8 @@ pub struct SourcePicker {
     pub wants_refresh: bool,
     /// Set by the UI when the user picks a different source.
     pub request: Option<CaptureSource>,
+    /// Desktop-page filter text.
+    pub filter: String,
     /// App icons per window (raw pixels from the app; textures are made
     /// lazily per egui context).
     pub icons: std::collections::HashMap<isize, egui::ColorImage>,
@@ -255,6 +257,7 @@ pub struct DevView {
     pub elevated: bool,
     /// "Restart as admin now" clicked; the app relaunches via UAC.
     pub restart_elevated_requested: bool,
+    pub search: crate::shell::SearchState,
     /// Reset button armed at this egui time (two-step confirm — VR has
     /// no dialogs).
     reset_armed_at: Option<f64>,
@@ -322,6 +325,7 @@ impl Default for DevView {
             elevated: false,
             restart_elevated_requested: false,
             reset_armed_at: None,
+            search: crate::shell::SearchState::default(),
             night_light: crate::nightlight::NightLight::default(),
             tint: [1.0; 4],
             last_frame_time: None,
@@ -374,6 +378,24 @@ impl DevView {
         let msgs = self.battery_osc.messages(&readings, Instant::now());
         self.pending_osc.extend(msgs);
         self.batteries = readings;
+    }
+
+    pub(crate) fn apply_search(&mut self, ctx: &egui::Context, t: crate::search::Target) {
+        use crate::search::Target;
+        match t {
+            Target::Page(p) => self.page = p,
+            Target::Card(p, caption) => {
+                self.page = p;
+                crate::widgets::highlight_card(ctx, caption);
+            }
+            Target::Window(src) => {
+                if !self.dock_layout {
+                    self.page = crate::shell::Page::Desktop;
+                }
+                self.sources.request = Some(src);
+            }
+            Target::Widget(k) => crate::widgets::request_popout(ctx, k),
+        }
     }
 
     /// Widget popped out from a card's ↗ this frame (VR dashboard).
@@ -544,7 +566,15 @@ impl DevView {
             .frame(root.inner_margin(egui::Margin { left: 20.0, right: 20.0, top: 14.0, bottom: 10.0 }))
             .show_separator_line(false)
             .show(ctx, |ui| {
-                let act = crate::shell::header(ui, &self.batteries, self.show_keyboard, self.unread, accent);
+                let entries = crate::search::index(&self.sources.choices, self.dock_layout);
+                // Window results need a list; ask for one when searching.
+                if !self.search.query.is_empty() && self.sources.choices.is_empty() {
+                    self.sources.wants_refresh = true;
+                }
+                let act = crate::shell::header(ui, &self.batteries, self.show_keyboard, self.unread, &mut self.search, &entries, accent);
+                if let Some(t) = act.search_pick {
+                    self.apply_search(ui.ctx(), t);
+                }
                 if act.toggle_keyboard {
                     self.show_keyboard = !self.show_keyboard;
                 }
@@ -1425,5 +1455,37 @@ mod laser_integration_tests {
         frame(&ctx, &mut dev, &mut laser, &mut t, Some(at), 0.9); // swept on, still held
         frame(&ctx, &mut dev, &mut laser, &mut t, Some(at), 0.0); // released
         assert_eq!(dev.page, Page::Home);
+    }
+}
+
+#[cfg(test)]
+mod search_integration_tests {
+    use super::*;
+    use crate::search::Target;
+    use crate::shell::Page;
+
+    #[test]
+    fn picking_a_setting_jumps_and_flashes_its_card() {
+        let ctx = egui::Context::default();
+        let mut dev = DevView { show_volume: false, show_system: false, ..Default::default() };
+        let mut t = 0.0;
+        let mut frame = |dev: &mut DevView| {
+            t += 1.0 / 60.0;
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1365.0, 853.0))),
+                time: Some(t),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |c| dev.ui_with(c, None));
+        };
+        frame(&mut dev);
+        dev.apply_search(&ctx, Target::Card(Page::Settings, "Accessibility"));
+        assert_eq!(dev.page, Page::Settings);
+        for _ in 0..3 {
+            frame(&mut dev);
+        }
+        // The card's header hook consumed the request and scrolled to it.
+        let h = ctx.data(|d| d.get_temp::<(String, f64, bool)>(egui::Id::new("rso-highlight")));
+        assert_eq!(h.map(|(c, _, scrolled)| (c, scrolled)), Some(("Accessibility".to_string(), true)));
     }
 }

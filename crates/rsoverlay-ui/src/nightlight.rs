@@ -95,6 +95,7 @@ impl NightLight {
                 ui.add(crate::icons::icon(crate::icons::MOON, 18.0, accent));
                 ui.add_space(6.0);
                 ui.label(theme::caption("Night light"));
+                crate::widgets::popout_button(ui, "Night light", accent);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let (txt, col) = if self.active_at(minute_of_day) { ("active", accent) } else { ("idle", theme::FG_MUTED) };
                     ui.label(egui::RichText::new(txt).size(theme::SIZE_CAPTION).color(col));

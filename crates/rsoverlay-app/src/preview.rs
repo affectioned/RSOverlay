@@ -59,6 +59,7 @@ pub struct TestHooks {
     pub wrist: bool,
     pub widgets: Option<String>,
     pub vr_keyboard: bool,
+    pub search: Option<String>,
 }
 
 /// Apply CLI overrides to a default Placement. Any field not overridden
@@ -145,6 +146,9 @@ pub fn seed_dev_view(
     }
     if test.dock {
         dev.dock_layout = true;
+    }
+    if let Some(q) = &test.search {
+        dev.search.query = q.clone();
     }
     if let Some(p) = test.page.as_deref().and_then(rsoverlay_ui::shell::Page::from_slug) {
         dev.page = p;
@@ -879,7 +883,7 @@ pub fn run(
                                     .unwrap_or_default();
                                 if test.vr_keyboard {
                                     let t = ctx.input(|i| i.time);
-                                    let _ = vr_keyboard.frame(ctx, &[], t, dev_view.accent);
+                                    let _ = vr_keyboard.frame(ctx, &[], t, dev_view.accent, false);
                                 } else if !widget_tabs.is_empty() {
                                     let _ = dev_view.widget_ui(ctx, &widget_tabs, 0, rsoverlay_ui::window_panel::Attach::LeftHand, Some(&injector));
                                 } else if test.wrist {
