@@ -581,11 +581,30 @@ mod imp {
                     c.stick = h.stick;
                     c.menu = false;
                     mods[hand_slot(c.hand)] = (h.right_mod, h.middle_mod);
+                    // Aim from SteamVR's tip pose: the intended pointing
+                    // direction per controller model (raw pose points
+                    // noticeably off on Index).
+                    if let Some(aim) = h.aim {
+                        let (o, d) = rsoverlay_openvr::ray_from_pose(&aim);
+                        c.origin = o;
+                        c.dir = d;
+                    }
                 }
                 toggle_edit = a.iter().any(|h| h.toggle_edit);
             }
 
             // ── Summon / dismiss: left B / menu button edge.
+            // User laser-angle fine-tune: pitch the ray about the
+            // controller's right axis.
+            if dev_view.vr_laser_angle.abs() > 0.01 {
+                for c in controllers.iter_mut() {
+                    let right = to_affine(&c.pose).matrix3.x_axis;
+                    let rot = glam::Quat::from_axis_angle(glam::Vec3::from(right), dev_view.vr_laser_angle.to_radians());
+                    let d = rot * glam::Vec3::from(c.dir);
+                    c.dir = d.into();
+                }
+            }
+
             // Show/hide the dashboard: XSO's double-press left A / X via
             // SteamVR Input; legacy fallback = off-hand menu button.
             let menu_now = controllers.iter().any(|c| c.hand == wrist_on && c.menu);

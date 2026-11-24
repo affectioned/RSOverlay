@@ -19,6 +19,92 @@ pub struct BatteryReading {
     pub charging: bool,
 }
 
+/// Playtime estimate from each device's recent discharge (or charge)
+/// rate: least-squares slope over the last [`EST_WINDOW_S`]. Battery %
+/// moves in 1 % steps, so it waits for [`EST_MIN_SPAN_S`] of history and
+/// a [`EST_MIN_DELTA`] change before claiming anything; plugging in or
+/// unplugging restarts the history.
+#[derive(Default)]
+pub struct BatteryEstimator {
+    hist: std::collections::HashMap<u32, (bool, std::collections::VecDeque<(f64, f32)>)>,
+}
+
+pub const EST_WINDOW_S: f64 = 15.0 * 60.0;
+pub const EST_MIN_SPAN_S: f64 = 120.0;
+pub const EST_MIN_DELTA: f32 = 0.02;
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Estimate {
+    /// Seconds until empty (discharging) or full (charging).
+    pub secs: f64,
+    pub charging: bool,
+}
+
+impl BatteryEstimator {
+    pub fn update(&mut self, now_s: f64, readings: &[BatteryReading]) {
+        for r in readings {
+            let (charging, q) = self.hist.entry(r.id).or_insert_with(|| (r.charging, Default::default()));
+            if *charging != r.charging {
+                *charging = r.charging;
+                q.clear();
+            }
+            q.push_back((now_s, r.fraction));
+            while q.front().is_some_and(|(t, _)| now_s - t > EST_WINDOW_S) {
+                q.pop_front();
+            }
+        }
+        self.hist.retain(|id, _| readings.iter().any(|r| r.id == *id));
+    }
+
+    pub fn estimate(&self, r: &BatteryReading) -> Option<Estimate> {
+        let (charging, q) = self.hist.get(&r.id)?;
+        let (t0, f0) = *q.front()?;
+        let (t1, _) = *q.back()?;
+        let span = t1 - t0;
+        let lo = q.iter().map(|(_, f)| *f).fold(f32::MAX, f32::min);
+        let hi = q.iter().map(|(_, f)| *f).fold(f32::MIN, f32::max);
+        if span < EST_MIN_SPAN_S || hi - lo < EST_MIN_DELTA {
+            return None;
+        }
+        // Least-squares slope (fraction per second).
+        let n = q.len() as f64;
+        let mt = q.iter().map(|(t, _)| t - t0).sum::<f64>() / n;
+        let mf = q.iter().map(|(_, f)| f64::from(*f - f0)).sum::<f64>() / n;
+        let (mut num, mut den) = (0.0, 0.0);
+        for (t, f) in q {
+            let dt = t - t0 - mt;
+            num += dt * (f64::from(*f - f0) - mf);
+            den += dt * dt;
+        }
+        if den <= 0.0 {
+            return None;
+        }
+        let slope = num / den;
+        let secs = if *charging {
+            if slope <= 0.0 {
+                return None;
+            }
+            f64::from(1.0 - r.fraction) / slope
+        } else {
+            if slope >= 0.0 {
+                return None;
+            }
+            f64::from(r.fraction) / -slope
+        };
+        (secs.is_finite() && secs < 48.0 * 3600.0).then_some(Estimate { secs, charging: *charging })
+    }
+}
+
+/// "2h 05m" / "45m" / "<1m".
+pub fn format_duration(secs: f64) -> String {
+    let m = (secs / 60.0).round() as u64;
+    match m {
+        0 => "<1m".into(),
+        m if m < 60 => format!("{m}m"),
+        m => format!("{}h {:02}m", m / 60, m % 60),
+    }
+}
+
 /// Re-arm margin above the threshold. Without it a device hovering at
 /// the threshold (19 % ↔ 20 % jitter) would re-alert every poll.
 pub const REARM_MARGIN_PCT: u8 = 5;
@@ -65,6 +151,7 @@ fn pct(fraction: f32) -> u32 {
 pub fn card(
     ui: &mut egui::Ui,
     readings: &[BatteryReading],
+    estimates: &BatteryEstimator,
     warn_pct: &mut u8,
     osc: &mut BatteryOsc,
     accent: egui::Color32,
@@ -82,7 +169,7 @@ pub fn card(
             ui.label(theme::body_muted("no battery-reporting devices"));
         }
         for r in readings {
-            row(ui, r, *warn_pct, accent);
+            row(ui, r, estimates.estimate(r), *warn_pct, accent);
         }
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -96,7 +183,7 @@ pub fn card(
     });
 }
 
-fn row(ui: &mut egui::Ui, r: &BatteryReading, warn_pct: u8, accent: egui::Color32) {
+fn row(ui: &mut egui::Ui, r: &BatteryReading, est: Option<Estimate>, warn_pct: u8, accent: egui::Color32) {
     let low = !r.charging && pct(r.fraction) < u32::from(warn_pct);
     let fill = if low { theme::DANGER } else { accent };
     ui.horizontal(|ui| {
@@ -108,6 +195,14 @@ fn row(ui: &mut egui::Ui, r: &BatteryReading, warn_pct: u8, accent: egui::Color3
                 format!("{}%", pct(r.fraction))
             };
             ui.monospace(egui::RichText::new(text).color(fill).size(theme::SIZE_BODY));
+            if let Some(e) = est {
+                let t = if e.charging {
+                    format!("full in ~{}", format_duration(e.secs))
+                } else {
+                    format!("~{} left", format_duration(e.secs))
+                };
+                ui.label(egui::RichText::new(t).size(theme::SIZE_CAPTION + 1.0).color(theme::FG_MUTED));
+            }
         });
     });
     // Thin level bar under the label; painter-drawn so it stays 3px on
@@ -250,6 +345,54 @@ mod tests {
         assert_eq!(osc_device_name(&t), "Tracker5");
         t.label = "Left hand".into();
         assert_eq!(osc_device_name(&t), "LeftHand");
+    }
+
+    fn rd(id: u32, f: f32, charging: bool) -> BatteryReading {
+        BatteryReading { id, label: "HMD".into(), fraction: f, charging }
+    }
+
+    #[test]
+    fn estimate_needs_history_then_tracks_drain() {
+        let mut e = BatteryEstimator::default();
+        // 1 % per minute, sampled every 5 s.
+        let mut last = rd(0, 1.0, false);
+        for i in 0..=120 {
+            let t = i as f64 * 5.0;
+            last = rd(0, 1.0 - (t / 60.0) as f32 * 0.01, false);
+            e.update(t, std::slice::from_ref(&last));
+            if t < EST_MIN_SPAN_S {
+                assert!(e.estimate(&last).is_none(), "too early at {t}s");
+            }
+        }
+        // At 90 %, 1 %/min -> ~90 minutes left.
+        let est = e.estimate(&last).expect("estimate after 10 min");
+        assert!(!est.charging);
+        assert!((est.secs / 60.0 - 90.0).abs() < 2.0, "{}", est.secs / 60.0);
+    }
+
+    #[test]
+    fn plugging_in_resets_and_reports_time_to_full() {
+        let mut e = BatteryEstimator::default();
+        for i in 0..60 {
+            e.update(i as f64 * 5.0, &[rd(0, 0.5 - i as f32 * 0.001, false)]);
+        }
+        e.update(300.0, &[rd(0, 0.44, true)]);
+        assert!(e.estimate(&rd(0, 0.44, true)).is_none(), "history restarted");
+        let mut r = rd(0, 0.44, true);
+        for i in 1..=60 {
+            r = rd(0, 0.44 + i as f32 * 0.002, true); // +2.4 %/min
+            e.update(300.0 + i as f64 * 5.0, std::slice::from_ref(&r));
+        }
+        let est = e.estimate(&r).unwrap();
+        assert!(est.charging);
+        assert!((est.secs / 60.0 - (1.0 - 0.56) / 0.024).abs() < 1.0);
+    }
+
+    #[test]
+    fn duration_format() {
+        assert_eq!(format_duration(20.0), "<1m");
+        assert_eq!(format_duration(45.0 * 60.0), "45m");
+        assert_eq!(format_duration(125.0 * 60.0), "2h 05m");
     }
 
     #[test]

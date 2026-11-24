@@ -211,6 +211,16 @@ fn main() -> Result<()> {
 
     let args = Args::parse();
 
+    // Per-monitor DPI awareness before anything reads coordinates: on a
+    // scaled display (125 %/150 %) an unaware process gets virtualised
+    // cursor and screen metrics, so mirrored-window clicks and the drawn
+    // cursor land off target. (VR mode has no window to do this for us.)
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
+        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
+
     // Load persistent config (accent / placement / toggles). Missing
     // file → defaults. Malformed file → log and fall back so a corrupt
     // config can never brick launch.

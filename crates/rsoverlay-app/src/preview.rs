@@ -124,6 +124,7 @@ pub fn seed_dev_view(
     dev.run_as_admin = cfg.vr.run_as_admin;
     dev.vr_ui_scale = cfg.vr.ui_scale.clamp(0.8, 1.6);
     dev.vr_show_lasers = cfg.vr.show_lasers;
+    dev.vr_laser_angle = cfg.vr.laser_angle.clamp(-30.0, 30.0);
     dev.elevated = rsoverlay_input::elevation::current_process_elevated();
     dev.battery_osc.enabled = cfg.osc.battery_params;
     dev.battery_osc.prefix = cfg.osc.battery_prefix.trim_matches('/').to_string();
@@ -246,6 +247,7 @@ pub fn config_from_dev_view(
         run_as_admin: dev.run_as_admin,
         ui_scale: dev.vr_ui_scale,
         show_lasers: dev.vr_show_lasers,
+        laser_angle: dev.vr_laser_angle,
     };
     out.appearance.reduce_motion = dev.reduce_motion;
     out.macros = rsoverlay_core::config::Macros(

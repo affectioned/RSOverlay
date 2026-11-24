@@ -28,6 +28,7 @@ pub struct WristAction {
 pub fn show(
     ctx: &egui::Context,
     batteries: &[BatteryReading],
+    estimates: &[Option<String>],
     playing: bool,
     track: Option<&str>,
     unread: usize,
@@ -57,12 +58,12 @@ pub fn show(
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
                 ui.vertical(|ui| {
-                    for b in batteries {
+                    for (i, b) in batteries.iter().enumerate() {
                         let pct = (b.fraction * 100.0).round() as u32;
                         let color = if !b.charging && pct < 20 { theme::DANGER } else { accent };
                         let bolt = if b.charging { "⚡" } else { "" };
                         ui.label(
-                            egui::RichText::new(format!("{} {bolt}{pct}", shell::short_device_label(&b.label)))
+                            egui::RichText::new(format!("{} {bolt}{pct}{}", shell::short_device_label(&b.label), estimates.get(i).cloned().flatten().map(|t| format!(" · {t}")).unwrap_or_default()))
                                 .monospace()
                                 .size(theme::SIZE_CAPTION + 2.0)
                                 .color(color),

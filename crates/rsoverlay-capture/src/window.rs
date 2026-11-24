@@ -393,18 +393,49 @@ pub fn cursor_pos() -> Option<(i32, i32)> {
     (ci.flags.0 & CURSOR_SHOWING.0 != 0).then_some((ci.ptScreenPos.x, ci.ptScreenPos.y))
 }
 
-/// RGBA pixels of a window's app icon: (width, height, rgba). Asks the
-/// window (WM_GETICON big → small) with a short timeout so a hung app
-/// can't stall us, then falls back to its window-class icon.
+/// Large (128 px) icon from the window's executable — WM_GETICON
+/// usually hands back 32 px, which looks soft on VR panels.
+fn exe_icon_large(hwnd: isize) -> Option<windows::Win32::UI::WindowsAndMessaging::HICON> {
+    use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows::Win32::UI::WindowsAndMessaging::{PrivateExtractIconsW, HICON};
+    unsafe {
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(HWND(hwnd), Some(&mut pid));
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut path = [0u16; 260];
+        let mut len = path.len() as u32;
+        let ok = QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, windows::core::PWSTR(path.as_mut_ptr()), &mut len).is_ok();
+        let _ = CloseHandle(h);
+        if !ok {
+            return None;
+        }
+        let mut icons = [HICON::default(); 1];
+        let n = PrivateExtractIconsW(&path, 0, 128, 128, Some(&mut icons), None, 0);
+        (n >= 1 && icons[0].0 != 0).then_some(icons[0])
+    }
+}
+
+/// RGBA pixels of a window's app icon: (width, height, rgba). Prefers a
+/// 128 px icon from the executable; otherwise asks the window (WM_GETICON
+/// big → small, short timeout so a hung app can't stall us), then its
+/// window-class icon.
 pub fn window_icon(hwnd: isize) -> Option<(u32, u32, Vec<u8>)> {
+    if let Some(large) = exe_icon_large(hwnd) {
+        let px = icon_pixels(large.0 as usize);
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::DestroyIcon(large);
+        }
+        if px.is_some() {
+            return px;
+        }
+    }
+    window_icon_small(hwnd)
+}
+
+fn window_icon_small(hwnd: isize) -> Option<(u32, u32, Vec<u8>)> {
     use windows::Win32::Foundation::{LPARAM, WPARAM};
-    use windows::Win32::Graphics::Gdi::{
-        DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
-        DIB_RGB_COLORS,
-    };
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetClassLongPtrW, GetIconInfo, SendMessageTimeoutW, GCLP_HICON, GCLP_HICONSM, HICON, ICONINFO,
-        SMTO_ABORTIFHUNG, WM_GETICON,
+        GetClassLongPtrW, SendMessageTimeoutW, GCLP_HICON, GCLP_HICONSM, SMTO_ABORTIFHUNG, WM_GETICON,
     };
     const ICON_BIG: usize = 1;
     const ICON_SMALL2: usize = 2;
@@ -418,6 +449,18 @@ pub fn window_icon(hwnd: isize) -> Option<(u32, u32, Vec<u8>)> {
         let raw = [ask(ICON_BIG), ask(ICON_SMALL2), GetClassLongPtrW(h, GCLP_HICON), GetClassLongPtrW(h, GCLP_HICONSM)]
             .into_iter()
             .find(|&v| v != 0)?;
+        icon_pixels(raw)
+    }
+}
+
+/// HICON → (w, h, RGBA). Caller keeps ownership of the icon.
+fn icon_pixels(raw: usize) -> Option<(u32, u32, Vec<u8>)> {
+    use windows::Win32::Graphics::Gdi::{
+        DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+        DIB_RGB_COLORS,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, HICON, ICONINFO};
+    unsafe {
         let mut info = ICONINFO::default();
         GetIconInfo(HICON(raw as isize), &mut info).ok()?;
         let mut bm = BITMAP::default();
@@ -481,5 +524,21 @@ mod tests {
             assert!(px.as_chunks::<4>().0.iter().any(|p| p[3] > 0), "icon fully transparent");
         }
         assert!(with_icon > 0);
+    }
+}
+
+#[cfg(test)]
+mod icon_size_probe {
+    /// `cargo test -p rsoverlay-capture icon_size -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn icon_size() {
+        let sizes: Vec<(u32, u32)> = super::enumerate_windows()
+            .unwrap()
+            .iter()
+            .filter_map(|w| super::window_icon(w.hwnd).map(|(a, b, _)| (a, b)))
+            .collect();
+        println!("icon sizes: {sizes:?}");
+        assert!(sizes.iter().any(|&(w, _)| w >= 128));
     }
 }

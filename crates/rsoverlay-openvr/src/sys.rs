@@ -303,6 +303,14 @@ pub struct InputAnalogActionData_t {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
+pub struct InputPoseActionData_t {
+    pub bActive: bool,
+    pub activeOrigin: VRInputValueHandle_t,
+    pub pose: TrackedDevicePose_t,
+}
+
+#[repr(C)]
 pub struct IVRInputFnTable {
     pub SetActionManifestPath: unsafe extern "system" fn(pchActionManifestPath: *const c_char) -> EVRInputError, // 0
     pub GetActionSetHandle: unsafe extern "system" fn(pchActionSetName: *const c_char, pHandle: *mut VRActionSetHandle_t) -> EVRInputError, // 1
@@ -311,7 +319,9 @@ pub struct IVRInputFnTable {
     pub UpdateActionState: unsafe extern "system" fn(pSets: *mut VRActiveActionSet_t, unSizeOfVRSelectedActionSet_t: u32, unSetCount: u32) -> EVRInputError, // 4
     pub GetDigitalActionData: unsafe extern "system" fn(action: VRActionHandle_t, pActionData: *mut InputDigitalActionData_t, unActionDataSize: u32, ulRestrictToDevice: VRInputValueHandle_t) -> EVRInputError, // 5
     pub GetAnalogActionData: unsafe extern "system" fn(action: VRActionHandle_t, pActionData: *mut InputAnalogActionData_t, unActionDataSize: u32, ulRestrictToDevice: VRInputValueHandle_t) -> EVRInputError, // 6
-    pub _pad_00: [*const c_void; 14], // 7..=20: poses, skeletal, dominant hand
+    pub _pad_00: [*const c_void; 1], // 7 GetPoseActionDataRelativeToNow
+    pub GetPoseActionDataForNextFrame: unsafe extern "system" fn(action: VRActionHandle_t, eOrigin: ETrackingUniverseOrigin, pActionData: *mut InputPoseActionData_t, unActionDataSize: u32, ulRestrictToDevice: VRInputValueHandle_t) -> EVRInputError, // 8
+    pub _pad_00b: [*const c_void; 12], // 9..=20: skeletal, dominant hand
     pub TriggerHapticVibrationAction: unsafe extern "system" fn(action: VRActionHandle_t, fStartSecondsFromNow: f32, fDurationSeconds: f32, fFrequency: f32, fAmplitude: f32, ulRestrictToDevice: VRInputValueHandle_t) -> EVRInputError, // 21
 }
 
@@ -324,4 +334,7 @@ const _: () = {
     assert!(std::mem::offset_of!(InputDigitalActionData_t, bState) == 16);
     assert!(std::mem::size_of::<InputAnalogActionData_t>() == 48);
     assert!(std::mem::offset_of!(InputAnalogActionData_t, x) == 16);
+    assert!(std::mem::offset_of!(IVRInputFnTable, GetPoseActionDataForNextFrame) == 8 * P);
+    assert!(std::mem::offset_of!(InputPoseActionData_t, pose) == 16);
+    assert!(std::mem::size_of::<InputPoseActionData_t>() == 96);
 };

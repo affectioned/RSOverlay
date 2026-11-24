@@ -625,6 +625,9 @@ pub struct HandInput {
     pub middle_mod: bool,
     /// Rising edge of the edit-mode toggle (double-press left A / X).
     pub toggle_edit: bool,
+    /// SteamVR's per-controller pointing pose (/pose/tip) — where the
+    /// laser should come from. None if the binding/pose is inactive.
+    pub aim: Option<HmdMatrix34_t>,
 }
 
 /// SteamVR Input: action manifest + per-controller default bindings,
@@ -640,6 +643,7 @@ pub struct Input<'a> {
     middle_mod: sys::VRActionHandle_t,
     toggle_edit: sys::VRActionHandle_t,
     haptic: sys::VRActionHandle_t,
+    pointer: sys::VRActionHandle_t,
     hands: [sys::VRInputValueHandle_t; 2],
     _parent: std::marker::PhantomData<&'a OpenVr>,
 }
@@ -691,6 +695,7 @@ impl OpenVr {
                 middle_mod: handle("/actions/rsoverlay/in/MiddleClickModifier")?,
                 toggle_edit: handle("/actions/rsoverlay/in/ToggleEditMode")?,
                 haptic: handle("/actions/rsoverlay/out/Haptic")?,
+                pointer: handle("/actions/rsoverlay/in/Pointer")?,
                 hands,
                 _parent: std::marker::PhantomData,
             })
@@ -726,6 +731,18 @@ impl Input<'_> {
             };
             let stick = self.analog(self.stick, dev);
             let edit = self.digital(self.toggle_edit, dev);
+            let mut pose = std::mem::MaybeUninit::<sys::InputPoseActionData_t>::zeroed();
+            let aim = unsafe {
+                let r = (self.t().GetPoseActionDataForNextFrame)(
+                    self.pointer,
+                    sys::ETrackingUniverseOrigin_Standing,
+                    pose.as_mut_ptr(),
+                    std::mem::size_of::<sys::InputPoseActionData_t>() as u32,
+                    dev,
+                );
+                let p = pose.assume_init();
+                (r == sys::EVRInputError_None && p.bActive && p.pose.bPoseIsValid).then_some(p.pose.mDeviceToAbsoluteTracking)
+            };
             HandInput {
                 trigger: self.analog(self.trigger, dev).x,
                 click: on(self.click),
@@ -734,6 +751,7 @@ impl Input<'_> {
                 right_mod: on(self.right_mod),
                 middle_mod: on(self.middle_mod),
                 toggle_edit: edit.bActive && edit.bState && edit.bChanged,
+                aim,
             }
         })
     }

@@ -38,10 +38,39 @@ pub fn install_loaders(ctx: &egui::Context) {
     egui_extras::install_image_loaders(ctx);
 }
 
+/// Raster density for the SVGs, in pixels per point: the highest UI
+/// scale we render at (VR, 2.25 ppp) × 1.5 supersampling, so a downscale
+/// never blurs. egui 0.26 rasterises `fit_to_exact_size` images at
+/// *point* size, ignoring pixels-per-point (upstream TODO) — an 18 pt
+/// icon came out 18 px and was stretched 2.25× on VR panels, visibly
+/// soft on high-PPD headsets.
+const RASTER_PX_PER_PT: f32 = 2.25 * 1.5;
+/// Every bundled SVG is authored on a 48-unit viewBox.
+const VIEWBOX: f32 = 48.0;
+
 /// Build a right-sized image widget for one of the bundled icons, tinted
 /// by the given color. Icons ship as white-fill SVGs so any tint lands cleanly.
+///
+/// `fit_to_original_size(scale)` sets the raster size (VIEWBOX × scale
+/// px); `max_size` then shrinks only the *displayed* size to `size` pt.
 pub fn icon(source: ImageSource<'static>, size: f32, tint: egui::Color32) -> egui::Image<'static> {
+    let scale = (size * RASTER_PX_PER_PT / VIEWBOX).max(1.0);
     egui::Image::new(source)
-        .fit_to_exact_size(egui::vec2(size, size))
+        .fit_to_original_size(scale)
+        .max_size(egui::vec2(size, size))
         .tint(tint)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn icons_rasterise_at_pixel_density_but_display_at_point_size() {
+        let img = icon(SETTINGS, 18.0, egui::Color32::WHITE);
+        // The raster comes back at 48 × scale ≈ 61 px; displayed at 18 pt.
+        let raster = 18.0 * RASTER_PX_PER_PT;
+        let shown = img.calc_size(egui::vec2(1000.0, 1000.0), Some(egui::vec2(raster, raster)));
+        assert!((shown.x - 18.0).abs() < 0.01 && (shown.y - 18.0).abs() < 0.01, "{shown:?}");
+    }
 }

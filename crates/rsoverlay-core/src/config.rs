@@ -37,11 +37,14 @@ pub struct VrCfg {
     pub ui_scale: f32,
     /// Accessibility: draw laser beams from the controllers.
     pub show_lasers: bool,
+    /// Fine-tune the laser's pitch on top of SteamVR's tip pose, degrees
+    /// (negative = aim lower).
+    pub laser_angle: f32,
 }
 
 impl Default for VrCfg {
     fn default() -> Self {
-        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true }
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0 }
     }
 }
 

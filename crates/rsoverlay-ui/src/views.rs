@@ -232,6 +232,8 @@ pub struct DevView {
     pending_hit: Option<MirrorHit>,
     batteries: Vec<BatteryReading>,
     pub battery_osc: crate::battery::BatteryOsc,
+    battery_est: crate::battery::BatteryEstimator,
+    started: Instant,
     pending_osc: Vec<(String, rsoverlay_osc::OscValue)>,
     low_battery: LowBatteryWatch,
     toasts: VecDeque<Toast>,
@@ -252,6 +254,7 @@ pub struct DevView {
     /// Accessibility: VR UI size multiplier.
     pub vr_ui_scale: f32,
     pub vr_show_lasers: bool,
+    pub vr_laser_angle: f32,
     pub run_as_admin: bool,
     /// Set by the app: is this process elevated right now?
     pub elevated: bool,
@@ -308,6 +311,8 @@ impl Default for DevView {
             pending_hit: None,
             batteries: Vec::new(),
             battery_osc: crate::battery::BatteryOsc::default(),
+            battery_est: crate::battery::BatteryEstimator::default(),
+            started: Instant::now(),
             pending_osc: Vec::new(),
             low_battery: LowBatteryWatch::default(),
             toasts: VecDeque::new(),
@@ -321,6 +326,7 @@ impl Default for DevView {
             vr_wrist_opacity: 1.0,
             vr_ui_scale: 1.0,
             vr_show_lasers: true,
+            vr_laser_angle: 0.0,
             run_as_admin: false,
             elevated: false,
             restart_elevated_requested: false,
@@ -375,6 +381,7 @@ impl DevView {
         for n in self.low_battery.update(&readings, self.battery_warn_pct) {
             self.push_notification(n);
         }
+        self.battery_est.update(self.started.elapsed().as_secs_f64(), &readings);
         let msgs = self.battery_osc.messages(&readings, Instant::now());
         self.pending_osc.extend(msgs);
         self.batteries = readings;
@@ -423,7 +430,7 @@ impl DevView {
             K::NowPlaying => media_card(ui, self.media.as_ref(), accent),
             K::System => self.system.show(ui, self.last_fps, accent),
             K::Volume => self.volume.show(ui, accent),
-            K::Battery => crate::battery::card(ui, &self.batteries, &mut self.battery_warn_pct, &mut self.battery_osc, accent),
+            K::Battery => crate::battery::card(ui, &self.batteries, &self.battery_est, &mut self.battery_warn_pct, &mut self.battery_osc, accent),
             K::Macros => self.macros.card(ui, injector, accent),
             K::Chat => {
                 if let Some(msg) = chatbox_card(ui, &mut self.chat_draft, &mut self.now_playing.enabled, accent) {
@@ -444,7 +451,12 @@ impl DevView {
         self.tick_state(ctx);
         let playing = self.media.as_ref().is_some_and(|m| m.playing);
         let track = self.media.as_ref().and_then(crate::now_playing::format_line);
-        crate::wrist::show(ctx, &self.batteries, playing, track.as_deref(), self.unread, self.accent)
+        let est: Vec<Option<String>> = self
+            .batteries
+            .iter()
+            .map(|b| self.battery_est.estimate(b).filter(|e| !e.charging).map(|e| crate::battery::format_duration(e.secs)))
+            .collect();
+        crate::wrist::show(ctx, &self.batteries, &est, playing, track.as_deref(), self.unread, self.accent)
     }
 
     /// RGB multiplier + opacity to apply to the whole overlay.
@@ -699,7 +711,7 @@ impl DevView {
                         l.add_space(theme::GUTTER);
                     }
                     if self.show_battery {
-                        crate::battery::card(r, &self.batteries, &mut self.battery_warn_pct, &mut self.battery_osc, accent);
+                        crate::battery::card(r, &self.batteries, &self.battery_est, &mut self.battery_warn_pct, &mut self.battery_osc, accent);
                         r.add_space(theme::GUTTER);
                     }
                     if self.show_macros {
@@ -783,7 +795,7 @@ impl DevView {
                     l.add_space(theme::GUTTER);
                     vr_card(l, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, accent);
                     l.add_space(theme::GUTTER);
-                    accessibility_card(l, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.reduce_motion, accent);
+                    accessibility_card(l, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.reduce_motion, accent);
                     l.add_space(theme::GUTTER);
                     if admin_card(l, &mut self.run_as_admin, self.elevated, accent) {
                         self.restart_elevated_requested = true;
@@ -858,7 +870,7 @@ fn reset_card(ui: &mut egui::Ui, armed_at: &mut Option<f64>) -> bool {
     confirmed
 }
 
-fn accessibility_card(ui: &mut egui::Ui, scale: &mut f32, lasers: &mut bool, reduce_motion: &mut bool, accent: egui::Color32) {
+fn accessibility_card(ui: &mut egui::Ui, scale: &mut f32, lasers: &mut bool, laser_angle: &mut f32, reduce_motion: &mut bool, accent: egui::Color32) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         card_header(ui, icons::SETTINGS, "Accessibility", accent);
@@ -868,6 +880,12 @@ fn accessibility_card(ui: &mut egui::Ui, scale: &mut f32, lasers: &mut bool, red
             ui.add(egui::Slider::new(scale, 0.8..=1.6).fixed_decimals(1).suffix("×"));
         });
         ui.checkbox(lasers, "Laser beams").on_hover_text("Draw a beam from each controller while it points at a panel");
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Laser angle"));
+            ui.add(egui::Slider::new(laser_angle, -30.0..=30.0).suffix("°").fixed_decimals(0));
+        })
+        .response
+        .on_hover_text("Tilt the laser up/down to match how you hold your controller");
         ui.checkbox(reduce_motion, "Reduce motion").on_hover_text("Make page, toast and highlight transitions instant");
         ui.label(egui::RichText::new("Moving/resizing a panel always shows a glowing outline + size readout, with a haptic tick on grab and release.")
             .size(theme::SIZE_CAPTION + 1.0).color(theme::FG_MUTED));
