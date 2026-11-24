@@ -1,4 +1,4 @@
-# XSOverlay feature parity — gap analysis
+# XSOverlay feature parity: gap analysis
 
 Feature inventory taken from XSOverlay Beta's user-facing settings model
 and subsystem names (2026-11-24). **Feature level only**: this lists
@@ -6,59 +6,72 @@ and subsystem names (2026-11-24). **Feature level only**: this lists
 strings are reused in RSOverlay; every implementation here is written
 from scratch against public Windows / OpenVR APIs.
 
+Goal: **behave** like XSO (bindings, wrist, grab/scale, layouts,
+keyboard) so moving over is easy, with RSOverlay's own look.
+
 Legend: ✅ shipped · 🟡 partial · ❌ missing · ⛔ non-goal
+Last reviewed: M60 (2026-11-24).
 
 ## Core overlay & windows
 
 | XSO feature | RSO | Notes |
 |---|---|---|
-| Launch with SteamVR (startup overlay app) | ✅ | M58: registers a .vrmanifest via IVRApplications; auto-launch on first run, user-toggleable in SteamVR › Startup; exits on SteamVR quit |
-| Desktop mirror | ✅ | M14 (GPU path actually live since `03ad266`) |
-| Per-window capture | ✅ | M31, WGC |
-| Window previews in picker | ❌ | thumbnails in the source dropdown |
-| Multiple window overlays at once | ❌ | next step after M31 |
-| Attach overlay to world / head / left hand / right hand | 🟡 | anchor enum exists; per-window + live hand tracking missing |
-| Gather overlays into grid + auto-recenter | ❌ | |
-| Curved overlays + curve bias | 🟡 | curvature ✅ (M24, sent to SteamVR since M38), bias ❌ |
-| Clip angle (hide when viewed edge-on) | ❌ | cheap: dot(view, normal) threshold |
-| Default overlay scale / opacity | ✅ | size + opacity (M35, compositor alpha) |
-| Per-overlay min/max capture FPS | ❌ | throttles capture thread |
+| Launch with SteamVR (startup overlay app) | ✅ | M58: `.vrmanifest` registered via IVRApplications; auto-launch on first run, toggle in SteamVR › Startup; exits when SteamVR quits |
+| Desktop mirror | ✅ | M14, GPU-to-GPU; cursor drawn on monitor mirrors (M47) |
+| Per-window capture | ✅ | M31, Windows Graphics Capture, GPU-to-GPU |
+| Window picker with previews | 🟡 | Desktop page tiles with real app icons + search filter (M47/M50); no live thumbnails |
+| Multiple window overlays at once | ✅ | M44: up to 6 windows, 14 floating panels in total |
+| Attach overlay to world / head / left hand / right hand | ✅ | M44 windows, M46 widgets, M59 dashboard; grabbing a docked panel undocks it |
+| Gather overlays + recenter | 🟡 | Recenter arcs every world panel (and the keyboard) in front of you; no grid view |
+| Curved overlays + curve bias | 🟡 | curvature ✅ (M24); bias ❌ |
+| Clip angle (hide when viewed edge-on) | ✅ | M44, default 60°, every panel |
+| Default overlay scale / opacity | ✅ | M35 |
+| Per-overlay min/max capture FPS | 🟡 | automatic: panels you aren't looking at refresh ~5×/s (M55); no per-panel setting |
 | Force higher-quality overlays | 🟡 | `overlay_texture_size` config |
+| Layouts (save / load panel arrangements) | ✅ | M53: 8 slots, favourite slot auto-loads at startup, from the wrist or Layouts page |
 
 ## Input
 
 | XSO feature | RSO | Notes |
 |---|---|---|
-| Laser mouse: click / long-press / drag | 🟡 | M38: click + drag + stick scroll, either hand; right/middle click + long-press ❌ |
-| Grab / push / scale gestures (+ sensitivity, dampening, smart roll) | ❌ | |
-| Pointer scale, scroll speed, double-click delay | ❌ | |
+| SteamVR Input with XSO's default bindings | ✅ | M49: Index, Touch, Vive, WMR; rebindable in SteamVR |
+| Laser mouse: click / drag / scroll | ✅ | M38 + M49: either hand, stick scroll, click stabilisation |
+| Right / middle click | ✅ | M49: trackpad modifiers while clicking |
+| Long-press | ❌ | |
+| Grab / push / scale gestures | ✅ | M44: grab rides the laser and faces you, stick push/pull + scale, two-hand scale, live size readout (M49) |
+| Grab sensitivity / dampening / smart roll settings | 🟡 | pose smoothing built in; no user settings |
+| Pointer scale, scroll speed, double-click delay | 🟡 | scroll speed + cursor smoothing + laser angle ✅ (M53/M51); pointer scale, double-click ❌ |
 | Automatic mouse control | ❌ | |
 | Touch-injection input method (alt. to mouse) | ❌ | `InjectTouchInput` |
 | Block input to background app (on hover / in layout mode) | ❌ | |
-| Haptics strength | 🟡 | M38 click tick; strength setting ❌ |
+| Haptics | 🟡 | click + grab ticks; no strength setting |
 | Gamepad (XInput) + sim-control bindings | ❌ | flight-sim crowd |
-| Elevated-window input (admin permissions helper) | ❌ | needs an elevated helper process |
+| Elevated-window input | ✅ | M45: optional run-as-administrator relaunch; elevated windows show a "use your PC" notice when not elevated |
 
 ## Keyboard
 
 | XSO feature | RSO | Notes |
 |---|---|---|
-| Virtual keyboard + chords | ✅ | M18 / M26 |
-| Physical layouts | ✅ | M27 (5 layouts; XSO also has JIS) |
+| Virtual keyboard + chords | ✅ | M18 / M26, physical-style with scan codes (M46) |
+| Physical layouts | ✅ | M27 + labels from the live Windows layout; XSO also has JIS |
+| Key hold behaviour | ✅ | M46: **real hold** by default (better than XSO's repeated presses in games); auto-repeat opt-in |
+| Sticky / locked modifiers, VRChat chatbox mode, compact / full | ✅ | M46–M55 |
 | Typing sounds + swappable sound packs | ❌ | |
 | Keyboard opacity | ❌ | |
-| Favorite layout quick-switch | ❌ | |
+| Favourite layout quick-switch | ❌ | |
 
 ## Wrist / dashboard
 
 | XSO feature | RSO | Notes |
 |---|---|---|
-| Wrist overlay offsets / rotation / scale / opacity / clip angle | 🟡 | placement card; rotation, opacity, clip ❌ |
-| Dominant-hand setting | ❌ | |
+| Wrist toolbar stack (actions, layouts, clock, media, devices) | ✅ | M54; compact by default with **More** (M59); every button labelled |
+| Wrist toolbar button customisation | ✅ | M55 |
+| Wrist offsets / rotation / scale / opacity / clip angle | ✅ | grab to move + scale, opacity (M44), clip angle shared with all panels |
+| Dominant-hand setting | ✅ | Laser hand Right / Left; the wrist goes on the other hand |
 | Hide wrist overlay | ❌ | |
 | Wrist background theme image | ❌ | |
 | 12/24h + date format | 🟡 | follows system locale; no override |
-| Battery % on wrist + font scale | ✅ | M29 card |
+| Battery % on wrist | ✅ | M29 / M54, with playtime estimates (M51) |
 | Low-battery warning % | ✅ | M29 |
 | Low-battery **sound** | ❌ | toast only |
 
@@ -67,35 +80,40 @@ Legend: ✅ shipped · 🟡 partial · ❌ missing · ⛔ non-goal
 | XSO feature | RSO | Notes |
 |---|---|---|
 | Master volume + mute | ✅ | M32 |
-| **Per-app volume / mute mixer** | ✅ | M32 |
-| CPU / GPU load + temp, RAM, frametime | ✅ | M36: CPU/GPU/RAM/VRAM + fps; temps ⛔ (ring-0 driver) |
-| Night light (scheduled warm tint, intensity) | ✅ | M35, compositor colour multiply |
+| Per-app volume / mute mixer | ✅ | M32 |
+| CPU / GPU load + temp, RAM, frametime | ✅ | M36: CPU/GPU/RAM/VRAM + fps; temps ⛔ (needs a ring-0 driver) |
+| Night light (scheduled warm tint, intensity) | ✅ | M35 |
 | Media auto-detect + controls | ✅ | M5 / M20 |
-| Media-derived theming / adaptive accent | ❌ | album-art palette → accent |
-| Dark theme + accent color | ✅ | AMOLED + accent picker |
+| Media-derived theming | ✅ | M55: accent follows album art (opt-in) |
+| Dark theme + accent colour | ✅ | AMOLED black + accent presets / picker |
 | Themes folder | ❌ | |
-| Notification API | ✅ | M2 |
+| Notification API | ✅ | M2, XSO-compatible JSON |
 | Notification scale / offsets | ❌ | |
-| OSC device events (battery etc. → VRChat) | ✅ | M37 — see [OSC.md](OSC.md) |
+| OSC device events (battery etc. → VRChat) | ✅ | M37, see [OSC.md](OSC.md) |
 | Discord Rich Presence | ✅ | M25 |
 | Localization | 🟡 | 9 languages vs XSO's ~40 |
-| Plugin applications | ❌ | WASM-only per ROADMAP non-goals |
-| Analytics | ⛔ | telemetry off by default, ever |
+| Plugin applications | ❌ | WASM-only, see ROADMAP non-goals |
+| Analytics | ⛔ | no telemetry by default, ever |
 
-## RSO-only (XSO doesn't have)
+## RSO-only (XSO doesn't have these)
 
-Now-playing → VRChat chatbox bridge (M28), macro / StreamDeck grid (M30),
-VRChat chatbox composer (M8), AMOLED true-black theme, no Chromium.
+- Pop-out widgets from any dashboard card; drop onto each other to merge
+  into tabs, split back out (M46)
+- Global search across settings, pages and windows (M50)
+- Real key hold on the keyboard (M46)
+- Battery playtime estimates (M51)
+- Live measurement of RSOverlay's own footprint: CPU, RAM, VRAM, frame
+  time (M52)
+- Now-playing → VRChat chatbox bridge (M28), chatbox composer (M8)
+- Macro / StreamDeck grid (M30)
+- VR preview: every panel in 3D on the desktop, layout presets (M60)
+- AMOLED true-black design, no Chromium / Unity / Mono
 
-## Suggested order (value ÷ cost)
+## Next parity gaps (value ÷ cost)
 
-Done: volume mixer (M32), night light + opacity (M35), system stats
-(M36), battery OSC (M37). Also shipped outside the list: dashboard
-redesign (M33) and motion system (M34).
-
-Next:
-1. **Clip angle** — hide overlays viewed edge-on; needs HMD pose.
-2. **Multiple window overlays** — biggest UX jump after M31.
-3. **VR controller input** — laser click/drag/scroll shipped (M38);
-   next: grab-to-move/scale, right-click, long-press.
-4. **Keyboard sound packs + opacity.**
+1. **Keyboard opacity + typing sounds.** Small, frequently noticed.
+2. **Long-press + double-click delay.** Rounds out the laser mouse.
+3. **Hide wrist** + **low-battery sound**.
+4. **Window thumbnails** in the Desktop picker.
+5. **Notification scale / offsets.**
+6. Touch injection, gamepad bindings, curve bias (smaller audiences).

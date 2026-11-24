@@ -11,75 +11,52 @@ scratch against public Windows / OpenVR APIs.
 
 ---
 
-## What's shipped (M0 → M10)
+## What's shipped (M0 → M60)
 
-Preview mode (no HMD needed), OpenVR red-square submission, DXGI desktop
-mirror, egui dashboard with AMOLED theme + hand-authored SVG icon set,
-runtime accent/card customization, SMTC now-playing, XSOverlay-compatible
-WebSocket notification server with live toasts, VRChat OSC `/chatbox/input`,
-`SendInput` mirror-to-desktop click forwarding.
+Last reviewed 2026-11-24. Parity detail lives in
+[XSO_PARITY.md](XSO_PARITY.md).
 
-## XSOverlay feature-parity track
+- **Foundations (M0–M17):** desktop preview, OpenVR overlay FFI, DXGI
+  desktop mirror, egui dashboard, XSO-compatible notification WebSocket,
+  VRChat OSC chatbox, SendInput click forwarding, VR preview, placement
+  system, the real dashboard submitted to SteamVR via DX12.
+- **Everyday features (M18–M38):** virtual keyboard + chords, persistent
+  config with hot-reload, notification history, media controls,
+  Reset defaults, curved overlays, Discord Rich Presence, 9 languages,
+  now-playing → chatbox, battery widget, macros, per-window capture
+  (WGC), volume mixer, dashboard redesign + motion, night light, system
+  stats, battery → VRChat OSC, laser click / drag / scroll.
+- **XSO-style VR shell (M44–M56):** wrist toolbar on the off hand,
+  summoned dashboard, multiple window overlays, XSO grab model (push /
+  pull / scale / two-hand), dock to world / head / hand, clip angle,
+  UAC awareness + run as admin, pop-out widgets with merge / split, real
+  key hold, SteamVR Input with XSO default bindings, global search,
+  battery playtime, Performance card, 8 layout slots, look-based
+  throttling, media theme, wrist customisation.
+- **Own identity + polish (M57–M60):** RSOverlay's own design (AMOLED
+  black, Inter, rose accent), labelled navigation everywhere, compact
+  wrist with More, dock + close on every panel, launch with SteamVR, VR
+  preview scenes and Steam store screenshots.
 
-These are the behaviors ex-XSO users expect, lifted from XSO's own
-Steam-page feature list. The RS-unique brutalist AMOLED visual design
-stays — only the interaction model matches.
+## XSOverlay parity: remaining gaps
 
-| XSO feature | RSOverlay status |
-|---|---|
-| SteamVR Input 2.0 bindings | planned |
-| Left / Middle / Right click + long-press / drag via laser | **left click + drag + scroll shipped** (M38); right/middle/long-press planned |
-| Window re-centering + grid view | planned |
-| Window move/scale/management at any range | **Placement card + CLI + persistence shipped**, grab/drag planned |
-| **Curved overlays** | **shipped** (M24) — `Placement.curvature` slider |
-| User-editable localization (9 UI languages + 5 physical keyboards) | **shipped** (M27) |
-| Auto keyboard layout from system | **shipped** — `KEYEVENTF_UNICODE` lets the host layout handle mapping |
-| Custom keyboard sounds | planned |
-| **Layout save / load** | **shipped** (M19) — accent + placement + card toggles autosave to `%APPDATA%\RSOverlay\config.toml`, hot-reload picks up external edits (M23) |
-| Optional background-input blocking | planned |
-| **Battery widget + low-battery alerts** | **shipped** (M29) |
-| **Notifications API** (toasts from 3rd-party apps) | **shipped** (M2) |
-| **Notifications history + clear all** | **shipped** (M21) |
-| **Media player integrations** — now-playing + controls | **shipped** (M5 + M20) |
-| **Discord Rich Presence** | **shipped** (M25) |
-| **Virtual keyboard** + chords (Ctrl+C / Alt+Tab / Win+D) | **shipped** (M18 + M26) |
-| **Reset defaults** button (XSO #160, 8 comments) | **shipped** (M22) |
+Ranked by value ÷ cost; full table in [XSO_PARITY.md](XSO_PARITY.md).
 
-## Near-term (next 5 milestones, chosen by signal)
-
-Ranked by cross-wishlist demand × implementation cost in a Rust + wgpu stack.
-
-1. **GPU-to-GPU mirror interop (zero CPU readback).** Current mirror does a
-   full ~14 MB CPU round-trip per frame (`CopyResource` → `Map` → `Vec<u8>`
-   → `queue.write_texture`), which puts user-perceived latency in the
-   25-40 ms range. The fix: open the DXGI-duplicated `ID3D11Texture2D` as
-   a shared NT handle, open on the wgpu DX12 side via
-   `wgpu_hal::dx12::Device::texture_from_raw`, drop the memcpy entirely.
-   Target: sub-16 ms perceived latency on 60 Hz desktops. This is the
-   project's explicit hard rule ("GPU-to-GPU, no readback") and it's the
-   single biggest UX win available.
-2. **Notifications overhaul.** Clear-all, multi-stack (done — polish next),
-   scrollable history pane. *XSO #127/#128/#131 cluster, 3 `Planned` tags.*
-3. ~~**Window capture (Windows Graphics Capture API).**~~ **Shipped** (M31) —
-   GPU-to-GPU WGC per-window mirror, live source picker in the Desktop
-   card, `--window` / `--list-windows`, clicks raise the window first.
-   Next: multiple simultaneous window panels. *OVR top complaint cluster +
-   XSO #30/#117/#139.*
-4. **Keyboard layouts.** Save keyboard position/scale per layout +
-   favorites + quick-switch. Pure serde work. *XSO #185/#316/#337, all
-   `Planned`; OVR #6 physical-keyboard calibration.*
-5. ~~**Battery / HMD stats widget.**~~ **Shipped** (M29) — IVRSystem_022
-   battery props for HMD / hands / trackers, configurable warn threshold,
-   one-shot low-battery toast with 5 % re-arm hysteresis. Per-device hide
-   toggles still open. *XSO #203/#216/#339; OVR #17.*
+1. **Keyboard opacity + typing sounds.**
+2. **Long-press + double-click delay** on the laser mouse.
+3. **Hide wrist** + **low-battery sound**.
+4. **Window thumbnails** in the Desktop picker.
+5. **Notification scale / offsets.**
+6. Touch injection, gamepad bindings, curve bias.
 
 ## Working in VR (productivity track)
 
 RSOverlay should be a daily driver for people who *work* in VR, not
 only play. Foundations already shipped: window overlays with a real
-mouse (press / drag / right-click / wheel), layouts per setup, a
+mouse (press / drag / right-click / wheel), 8 layout slots, a
 physical-style keyboard that types in any language, global search,
-macros, DPI-correct input.
+macros, DPI-correct input, dock-anywhere panels. The VR preview's
+"work" scene (`--vr-preview --scene work`) shows the target setup.
 
 1. **Focus mode** — one toggle that silences notifications/toasts and
    dims or throttles panels you aren't looking at, so the window you're
@@ -95,34 +72,33 @@ macros, DPI-correct input.
 
 ## Mid-term
 
-- **Reset-settings tray action** (XSO #160, second-highest signal) + full
-  `config.toml` hot-reload with watcher.
-- ~~**Macros / virtual StreamDeck**~~ — **shipped** (M30). Editable button
-  grid firing `ctrl+shift+m`-style shortcuts (F13–F24, media keys) as one
-  atomic SendInput batch; persisted as `[[macros]]`. *OVR top-5.*
+- **Notifications polish.** History + clear-all shipped (M21); next:
+  per-app mute, scrollable history in a widget, size / offset settings.
+  *XSO #127/#128/#131.*
+- **Per-layout keyboard presets.** Layout slots already store the
+  keyboard pose (M53); next: favourites + quick-switch.
+  *XSO #185/#316/#337; OVR #6.*
 - **Service discovery via mDNS** so companion apps autoconnect to the
   notification server (XSO #188).
-- **"Apply as new center" / HMD-anchored panels.** Already on our anchor
-  enum — needs UI + persistence. *XSO #64, OVR #16 head-locked pin.*
 - **Toolbar whitelist / blacklist**, window frame chrome toggles (OVR #7).
 - **Horizontal scroll forwarding** on captured windows (XSO #115).
-- **Discord / media button bar** (XSO #119/#120 — mute/deafen, next/prev).
-- ~~**Song-title OSC bridge to VRChat chatbox**~~ — **shipped** (M28). SMTC → chat,
-  paced at ≥2 s, 20 s refresh, 144-char cap. Toggle in the chatbox card.
-- **Hand-tracking input** (OVR #5) — unlocks fingertip typing. Needs
-  SteamVR hand-tracking consumption via OpenXR skeletal tracking.
+- **Discord button bar** (mute / deafen) next to the media controls
+  (XSO #119/#120).
+- **Per-device battery hide toggles** (battery widget follow-up).
+- **Hand-tracking input** (OVR #5): fingertip typing via OpenXR
+  skeletal tracking.
 
 ## Long-term
 
 - **OpenXR path alongside OpenVR.** Opens the door for the flight-sim
   crowd on non-SteamVR runtimes. *OVR #2.*
 - **Linux / Wayland capture backend** via PipeWire + xdg-desktop-portal.
-  Preview binary already runs on Linux today. *OVR #1 — the single loudest
+  *OVR #1 — the single loudest
   OVRT ask.*
-- **End-user customization beyond accent.** Density presets, font scale,
-  layout grid override, per-panel opacity, saved "profiles" users can
-  swap at runtime. Groundwork is in place (`theme.rs` tokens, Appearance
-  card) — this expands the surface.
+- **End-user customization beyond accent.** Density presets, layout
+  grid override, per-panel opacity, saved "profiles" users can swap at
+  runtime. VR text size already ships (Accessibility); groundwork is in
+  `theme.rs` tokens + the Appearance card.
 - **`wry` WebView2 opt-in browser overlay.** Explicitly opt-in — not the
   always-on Chromium dependency XSO/OVRT ship.
 
