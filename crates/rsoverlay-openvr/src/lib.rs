@@ -197,6 +197,25 @@ impl<'a> Overlay<'a> {
         check(r, "SetOverlayAlpha")
     }
 
+    pub fn set_curvature(&self, handle: VROverlayHandle_t, curvature: f32) -> Result<(), OpenVrError> {
+        let r = unsafe { (self.table().SetOverlayCurvature)(handle, curvature.clamp(0.0, 1.0)) };
+        check(r, "SetOverlayCurvature")
+    }
+
+    /// Cast a ray (standing-space origin + direction) at the overlay.
+    /// Returns the hit UV (as OpenVR reports it) and distance in metres.
+    /// The compositor accounts for curvature and texture bounds.
+    pub fn intersect(&self, handle: VROverlayHandle_t, origin: [f32; 3], dir: [f32; 3]) -> Option<([f32; 2], f32)> {
+        let params = sys::VROverlayIntersectionParams_t {
+            vSource: sys::HmdVector3_t { v: origin },
+            vDirection: sys::HmdVector3_t { v: dir },
+            eOrigin: sys::ETrackingUniverseOrigin_Standing,
+        };
+        let mut out = sys::VROverlayIntersectionResults_t::default();
+        let hit = unsafe { (self.table().ComputeOverlayIntersection)(handle, &params, &mut out) };
+        hit.then_some((out.vUVs.v, out.fDistance))
+    }
+
     pub fn set_width(&self, handle: VROverlayHandle_t, meters: f32) -> Result<(), OpenVrError> {
         let r = unsafe { (self.table().SetOverlayWidthInMeters)(handle, meters) };
         check(r, "SetOverlayWidthInMeters")
@@ -272,6 +291,36 @@ impl<'a> Overlay<'a> {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Hand {
+    Left,
+    Right,
+}
+
+/// One hand controller's pointing ray + inputs for this frame.
+#[derive(Copy, Clone, Debug)]
+pub struct Controller {
+    pub index: u32,
+    pub hand: Hand,
+    /// Standing-space ray origin (metres) and unit direction.
+    pub origin: [f32; 3],
+    pub dir: [f32; 3],
+    /// Trigger pull 0..=1.
+    pub trigger: f32,
+    /// Thumbstick / trackpad (x, y), each -1..=1.
+    pub stick: [f32; 2],
+}
+
+/// Pointing ray of a tracked pose: origin = translation column,
+/// direction = the device's −Z axis (OpenVR's "forward").
+pub fn ray_from_pose(m: &HmdMatrix34_t) -> ([f32; 3], [f32; 3]) {
+    let m = &m.m;
+    let origin = [m[0][3], m[1][3], m[2][3]];
+    let d = [-m[0][2], -m[1][2], -m[2][2]];
+    let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(f32::EPSILON);
+    (origin, [d[0] / len, d[1] / len, d[2] / len])
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum DeviceKind {
     Hmd,
@@ -345,6 +394,61 @@ impl<'a> System<'a> {
         out
     }
 
+    /// Left + right hand controllers with a valid pose this frame.
+    pub fn controllers(&self) -> Vec<Controller> {
+        let t = self.table();
+        let mut poses = [sys::TrackedDevicePose_t {
+            mDeviceToAbsoluteTracking: HmdMatrix34_t { m: [[0.0; 4]; 3] },
+            vVelocity: Default::default(),
+            vAngularVelocity: Default::default(),
+            eTrackingResult: 0,
+            bPoseIsValid: false,
+            bDeviceIsConnected: false,
+        }; sys::k_unMaxTrackedDeviceCount as usize];
+        unsafe {
+            (t.GetDeviceToAbsoluteTrackingPose)(
+                sys::ETrackingUniverseOrigin_Standing,
+                0.0,
+                poses.as_mut_ptr(),
+                poses.len() as u32,
+            );
+        }
+        let mut out = Vec::with_capacity(2);
+        for (hand, role) in [
+            (Hand::Left, sys::ETrackedControllerRole_LeftHand),
+            (Hand::Right, sys::ETrackedControllerRole_RightHand),
+        ] {
+            let idx = unsafe { (t.GetTrackedDeviceIndexForControllerRole)(role) };
+            let Some(pose) = poses.get(idx as usize).filter(|p| p.bPoseIsValid) else { continue };
+            let mut st = sys::VRControllerState_t::default();
+            let ok = unsafe {
+                (t.GetControllerState)(idx, &mut st, std::mem::size_of::<sys::VRControllerState_t>() as u32)
+            };
+            if !ok {
+                continue;
+            }
+            let (origin, dir) = ray_from_pose(&pose.mDeviceToAbsoluteTracking);
+            out.push(Controller {
+                index: idx,
+                hand,
+                origin,
+                dir,
+                // Analog pull where reported; fall back to the digital bit
+                // (some wands report 0.0 analog with the button down).
+                trigger: st.rAxis[1][0].max(
+                    if st.ulButtonPressed & (1u64 << sys::k_EButton_SteamVR_Trigger) != 0 { 1.0 } else { 0.0 },
+                ),
+                stick: st.rAxis[0],
+            });
+        }
+        out
+    }
+
+    /// Short haptic tick. `micros` is capped at 3999 by OpenVR.
+    pub fn haptic(&self, index: u32, micros: u16) {
+        unsafe { (self.table().TriggerHapticPulse)(index, 0, micros.min(3999)) }
+    }
+
     fn bool_prop(&self, i: u32, prop: sys::ETrackedDeviceProperty) -> Option<bool> {
         let mut err = 0;
         let v = unsafe { (self.table().GetBoolTrackedDeviceProperty)(i, prop, &mut err) };
@@ -396,5 +500,25 @@ pub fn pose_translation(x: f32, y: f32, z: f32) -> HmdMatrix34_t {
             [0.0, 1.0, 0.0, y],
             [0.0, 0.0, 1.0, z],
         ],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ray_identity_points_down_negative_z() {
+        let (o, d) = ray_from_pose(&pose_translation(1.0, 2.0, 3.0));
+        assert_eq!(o, [1.0, 2.0, 3.0]);
+        assert_eq!(d, [0.0, 0.0, -1.0]);
+    }
+
+    #[test]
+    fn ray_follows_yaw() {
+        // 90° yaw left (rotation about +Y): -Z forward becomes -X.
+        let m = HmdMatrix34_t { m: [[0.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0]] };
+        let (_, d) = ray_from_pose(&m);
+        assert!((d[0] + 1.0).abs() < 1e-6 && d[1].abs() < 1e-6 && d[2].abs() < 1e-6);
     }
 }

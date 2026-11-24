@@ -75,12 +75,16 @@ pub struct IVROverlayFnTable {
     pub SetOverlayAlpha: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fAlpha: f32) -> EVROverlayError, // 15
     pub _pad_01c: [*const c_void; 5], // 16..=20
     pub SetOverlayWidthInMeters: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fWidthInMeters: f32) -> EVROverlayError,
-    pub _pad_02: [*const c_void; 8], // 22..=29
+    pub _pad_02: [*const c_void; 1], // 22 GetOverlayWidthInMeters
+    pub SetOverlayCurvature: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fCurvature: f32) -> EVROverlayError, // 23
+    pub _pad_02b: [*const c_void; 6], // 24..=29
     pub SetOverlayTransformAbsolute: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, eTrackingOrigin: ETrackingUniverseOrigin, pMatTrackingOriginToOverlayTransform: *const HmdMatrix34_t) -> EVROverlayError,
     pub _pad_03: [*const c_void; 9], // 31..=39
     pub ShowOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
     pub HideOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
-    pub _pad_04: [*const c_void; 14], // 42..=55
+    pub _pad_04: [*const c_void; 7], // 42..=48
+    pub ComputeOverlayIntersection: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, pParams: *const VROverlayIntersectionParams_t, pResults: *mut VROverlayIntersectionResults_t) -> bool, // 49
+    pub _pad_04b: [*const c_void; 6], // 50..=55
     pub SetOverlayTexture: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, pTexture: *const Texture_t) -> EVROverlayError,
     pub ClearOverlayTexture: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
 }
@@ -93,6 +97,8 @@ const _: () = {
     assert!(std::mem::offset_of!(IVROverlayFnTable, DestroyOverlay) == 2 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayColor) == 13 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayAlpha) == 15 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayCurvature) == 23 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, ComputeOverlayIntersection) == 49 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayWidthInMeters) == 21 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayTransformAbsolute) == 30 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, ShowOverlay) == 40 * P);
@@ -142,10 +148,12 @@ pub const ETrackedPropertyError_Success: ETrackedPropertyError = 0;
 
 #[repr(C)]
 pub struct IVRSystemFnTable {
-    /// Slots 0..=17: render targets, projection, distortion, vsync,
-    /// adapter, poses, sorted indices, activity, ApplyTransform,
-    /// GetTrackedDeviceIndexForControllerRole. Unused here.
-    pub _pad_00: [*const c_void; 18],
+    /// Slots 0..=10: render targets, projection, distortion, vsync,
+    /// adapter / display. Unused here.
+    pub _pad_00: [*const c_void; 11],
+    pub GetDeviceToAbsoluteTrackingPose: unsafe extern "system" fn(eOrigin: ETrackingUniverseOrigin, fPredictedSecondsToPhotonsFromNow: f32, pTrackedDevicePoseArray: *mut TrackedDevicePose_t, unTrackedDevicePoseArrayCount: u32), // 11
+    pub _pad_00b: [*const c_void; 5], // 12..=16
+    pub GetTrackedDeviceIndexForControllerRole: unsafe extern "system" fn(unDeviceType: ETrackedControllerRole) -> TrackedDeviceIndex_t, // 17
     pub GetControllerRoleForTrackedDeviceIndex: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t) -> ETrackedControllerRole, // 18
     pub GetTrackedDeviceClass: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t) -> ETrackedDeviceClass, // 19
     pub IsTrackedDeviceConnected: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t) -> bool, // 20
@@ -153,7 +161,81 @@ pub struct IVRSystemFnTable {
     pub GetFloatTrackedDeviceProperty: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t, prop: ETrackedDeviceProperty, pError: *mut ETrackedPropertyError) -> f32, // 22
     pub _pad_01: [*const c_void; 4], // 23..=26: Int32 / Uint64 / Matrix34 / Array
     pub GetStringTrackedDeviceProperty: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t, prop: ETrackedDeviceProperty, pchValue: *mut c_char, unBufferSize: u32, pError: *mut ETrackedPropertyError) -> u32, // 27
+    pub _pad_02: [*const c_void; 5], // 28..=32: prop error name, poll events, hidden-area mesh
+    pub GetControllerState: unsafe extern "system" fn(unControllerDeviceIndex: TrackedDeviceIndex_t, pControllerState: *mut VRControllerState_t, unControllerStateSize: u32) -> bool, // 33
+    pub _pad_03: [*const c_void; 1], // 34 GetControllerStateWithPose
+    pub TriggerHapticPulse: unsafe extern "system" fn(unControllerDeviceIndex: TrackedDeviceIndex_t, unAxisId: u32, usDurationMicroSec: u16), // 35
 }
+
+pub const k_unTrackedDeviceIndexInvalid: TrackedDeviceIndex_t = 0xFFFF_FFFF;
+/// Bit in VRControllerState_t::ulButtonPressed (EVRButtonId 33).
+pub const k_EButton_SteamVR_Trigger: u32 = 33;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct HmdVector3_t {
+    pub v: [f32; 3],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct HmdVector2_t {
+    pub v: [f32; 2],
+}
+
+/// Natural (8-byte) packing on Windows — the header only forces
+/// pack(4) on Linux/macOS — so there's a 4-byte hole after
+/// unPacketNum and the struct is 64 bytes.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct VRControllerState_t {
+    pub unPacketNum: u32,
+    pub ulButtonPressed: u64,
+    pub ulButtonTouched: u64,
+    /// [0] = trackpad / thumbstick, [1] = trigger (x = pull 0..1).
+    pub rAxis: [[f32; 2]; 5],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct TrackedDevicePose_t {
+    pub mDeviceToAbsoluteTracking: HmdMatrix34_t,
+    pub vVelocity: HmdVector3_t,
+    pub vAngularVelocity: HmdVector3_t,
+    pub eTrackingResult: i32,
+    pub bPoseIsValid: bool,
+    pub bDeviceIsConnected: bool,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct VROverlayIntersectionParams_t {
+    pub vSource: HmdVector3_t,
+    pub vDirection: HmdVector3_t,
+    pub eOrigin: ETrackingUniverseOrigin,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct VROverlayIntersectionResults_t {
+    pub vPoint: HmdVector3_t,
+    pub vNormal: HmdVector3_t,
+    pub vUVs: HmdVector2_t,
+    pub fDistance: f32,
+}
+
+const _: () = {
+    const P: usize = std::mem::size_of::<*const c_void>();
+    assert!(std::mem::offset_of!(IVRSystemFnTable, GetDeviceToAbsoluteTrackingPose) == 11 * P);
+    assert!(std::mem::offset_of!(IVRSystemFnTable, GetTrackedDeviceIndexForControllerRole) == 17 * P);
+    assert!(std::mem::offset_of!(IVRSystemFnTable, GetControllerState) == 33 * P);
+    assert!(std::mem::offset_of!(IVRSystemFnTable, TriggerHapticPulse) == 35 * P);
+    assert!(std::mem::size_of::<VRControllerState_t>() == 64);
+    assert!(std::mem::offset_of!(VRControllerState_t, ulButtonPressed) == 8);
+    assert!(std::mem::size_of::<TrackedDevicePose_t>() == 80);
+    assert!(std::mem::size_of::<VROverlayIntersectionParams_t>() == 28);
+    assert!(std::mem::size_of::<VROverlayIntersectionResults_t>() == 36);
+};
 
 // Compile-time guard: slot 27 must sit at byte offset 27 * ptr_size.
 const _: () = assert!(

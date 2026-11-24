@@ -18,7 +18,7 @@ Legend: ✅ shipped · 🟡 partial · ❌ missing · ⛔ non-goal
 | Multiple window overlays at once | ❌ | next step after M31 |
 | Attach overlay to world / head / left hand / right hand | 🟡 | anchor enum exists; per-window + live hand tracking missing |
 | Gather overlays into grid + auto-recenter | ❌ | |
-| Curved overlays + curve bias | 🟡 | curvature ✅ (M24), bias ❌ |
+| Curved overlays + curve bias | 🟡 | curvature ✅ (M24, sent to SteamVR since M38), bias ❌ |
 | Clip angle (hide when viewed edge-on) | ❌ | cheap: dot(view, normal) threshold |
 | Default overlay scale / opacity | ✅ | size + opacity (M35, compositor alpha) |
 | Per-overlay min/max capture FPS | ❌ | throttles capture thread |
@@ -28,13 +28,13 @@ Legend: ✅ shipped · 🟡 partial · ❌ missing · ⛔ non-goal
 
 | XSO feature | RSO | Notes |
 |---|---|---|
-| Laser mouse: click / long-press / drag | ❌ | blocked on VR controller input |
+| Laser mouse: click / long-press / drag | 🟡 | M38: click + drag + stick scroll, either hand; right/middle click + long-press ❌ |
 | Grab / push / scale gestures (+ sensitivity, dampening, smart roll) | ❌ | |
 | Pointer scale, scroll speed, double-click delay | ❌ | |
 | Automatic mouse control | ❌ | |
 | Touch-injection input method (alt. to mouse) | ❌ | `InjectTouchInput` |
 | Block input to background app (on hover / in layout mode) | ❌ | |
-| Haptics strength | ❌ | |
+| Haptics strength | 🟡 | M38 click tick; strength setting ❌ |
 | Gamepad (XInput) + sim-control bindings | ❌ | flight-sim crowd |
 | Elevated-window input (admin permissions helper) | ❌ | needs an elevated helper process |
 
@@ -95,6 +95,6 @@ redesign (M33) and motion system (M34).
 Next:
 1. **Clip angle** — hide overlays viewed edge-on; needs HMD pose.
 2. **Multiple window overlays** — biggest UX jump after M31.
-3. **VR controller input** (laser click/drag, grab/scale) — unlocks
-   the whole Input section; the real foundation still missing.
+3. **VR controller input** — laser click/drag/scroll shipped (M38);
+   next: grab-to-move/scale, right-click, long-press.
 4. **Keyboard sound packs + opacity.**

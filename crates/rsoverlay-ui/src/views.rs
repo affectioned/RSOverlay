@@ -1103,3 +1103,68 @@ fn toast_card(ui: &mut egui::Ui, n: &Notification, accent: egui::Color32) {
         });
     });
 }
+
+#[cfg(test)]
+mod laser_integration_tests {
+    use super::*;
+    use crate::laser::{Hand, HandSample, LaserInput};
+    use crate::shell::Page;
+
+    const PANEL: egui::Vec2 = egui::vec2(1365.0, 853.0);
+
+    fn view() -> DevView {
+        // No worker threads in tests: hide the cards that spawn them.
+        DevView { show_volume: false, show_system: false, ..Default::default() }
+    }
+
+    /// Run one frame fed only by laser samples.
+    fn frame(ctx: &egui::Context, dev: &mut DevView, laser: &mut LaserInput, t: &mut f64, hit: Option<egui::Pos2>, trigger: f32) {
+        let lf = laser.update(&[HandSample { hand: Hand::Right, hit, trigger, stick_y: 0.0 }], 1.0 / 90.0);
+        *t += 1.0 / 90.0;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, PANEL)),
+            time: Some(*t),
+            events: lf.events,
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| dev.ui_with(ctx, None));
+    }
+
+    fn click(ctx: &egui::Context, dev: &mut DevView, laser: &mut LaserInput, t: &mut f64, at: egui::Pos2) {
+        frame(ctx, dev, laser, t, Some(at), 0.0); // hover
+        frame(ctx, dev, laser, t, Some(at), 0.9); // pull
+        frame(ctx, dev, laser, t, Some(at), 0.0); // release
+    }
+
+    /// First rail y (scanning down) where a laser click opens Settings.
+    fn settings_y(ctx: &egui::Context, dev: &mut DevView, laser: &mut LaserInput, t: &mut f64) -> Option<f32> {
+        (60..800).step_by(6).map(|y| y as f32).find(|&y| {
+            dev.page = Page::Home;
+            click(ctx, dev, laser, t, egui::pos2(80.0, y));
+            dev.page == Page::Settings
+        })
+    }
+
+    #[test]
+    fn laser_click_drives_nav_rail() {
+        let ctx = egui::Context::default();
+        let (mut dev, mut laser, mut t) = (view(), LaserInput::default(), 0.0);
+        frame(&ctx, &mut dev, &mut laser, &mut t, None, 0.0);
+        let y = settings_y(&ctx, &mut dev, &mut laser, &mut t);
+        assert!(y.is_some(), "no laser click on the rail opened Settings");
+    }
+
+    #[test]
+    fn held_trigger_swept_onto_rail_does_not_click() {
+        let ctx = egui::Context::default();
+        let (mut dev, mut laser, mut t) = (view(), LaserInput::default(), 0.0);
+        frame(&ctx, &mut dev, &mut laser, &mut t, None, 0.0);
+        let y = settings_y(&ctx, &mut dev, &mut laser, &mut t).expect("rail item");
+        dev.page = Page::Home;
+        let at = egui::pos2(80.0, y);
+        frame(&ctx, &mut dev, &mut laser, &mut t, None, 0.9); // pulled off-panel
+        frame(&ctx, &mut dev, &mut laser, &mut t, Some(at), 0.9); // swept on, still held
+        frame(&ctx, &mut dev, &mut laser, &mut t, Some(at), 0.0); // released
+        assert_eq!(dev.page, Page::Home);
+    }
+}

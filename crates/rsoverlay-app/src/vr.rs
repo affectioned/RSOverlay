@@ -9,7 +9,8 @@
 mod imp {
     use anyhow::{anyhow, Context, Result};
     use rsoverlay_notify::NotifyChannel;
-    use rsoverlay_openvr::{pose_translation, DeviceBattery, DeviceKind, OpenVr};
+    use rsoverlay_openvr::{pose_translation, DeviceBattery, DeviceKind, Hand, OpenVr};
+    use rsoverlay_ui::laser::{self, HandSample, LaserInput};
     use rsoverlay_render::GpuCtx;
     use rsoverlay_ui::{battery::BatteryReading, views::DevView, EguiPanel};
     use std::ffi::c_void;
@@ -21,6 +22,11 @@ mod imp {
 
     const OVERLAY_TEX_W: u32 = 2048;
     const OVERLAY_TEX_H: u32 = 1280;
+    /// Click tick length. Short enough to read as a "detent", not a buzz.
+    const CLICK_HAPTIC_US: u16 = 1200;
+    /// egui points per overlay texel (EguiPanel renders at 1.5 ppp).
+    const PPP: f32 = 1.5;
+
     /// Battery props change slowly; polling 64 device slots every
     /// frame would be wasted IPC to vrserver.
     const BATTERY_POLL: Duration = Duration::from_secs(5);
@@ -52,6 +58,9 @@ mod imp {
         overlay
             .set_width(handle, p.size_w)
             .context("SetOverlayWidthInMeters")?;
+        if let Err(e) = overlay.set_curvature(handle, p.curvature) {
+            warn!("SetOverlayCurvature: {e:#}");
+        }
         let pose = pose_translation(p.offset_x, p.offset_y, p.offset_z);
         overlay
             .set_transform_absolute(handle, &pose)
@@ -85,6 +94,10 @@ mod imp {
         // Last tint pushed to the compositor; only re-send on change
         // (each call is an IPC round-trip to vrcompositor).
         let mut applied_tint = [f32::NAN; 4];
+        let mut laser = LaserInput::default();
+        let started = Instant::now();
+        let mut last_frame = Instant::now();
+        let panel = egui::vec2(OVERLAY_TEX_W as f32 / PPP, OVERLAY_TEX_H as f32 / PPP);
 
         overlay.show(handle).ok();
         info!(
@@ -102,9 +115,9 @@ mod imp {
 
         let mut frame = 0u64;
         while running.load(Ordering::SeqCst) {
-            // 1. Render the dashboard into the overlay texture. No window
-            // input — we pass an empty RawInput. Interaction via laser
-            // pointer / controller lands in the next milestone.
+            // 1. Render the dashboard into the overlay texture, driven by
+            // the controller lasers (ray → ComputeOverlayIntersection →
+            // egui pointer events).
             frame = frame.wrapping_add(1);
             dev_view.frame = frame;
             if let Some(sys) = &system {
@@ -113,22 +126,53 @@ mod imp {
                     dev_view.set_batteries(sys.batteries().iter().map(reading).collect());
                 }
             }
+            let dt = last_frame.elapsed().as_secs_f32();
+            last_frame = Instant::now();
+            let controllers = system.as_ref().map(|s| s.controllers()).unwrap_or_default();
+            let samples: Vec<HandSample> = controllers
+                .iter()
+                .map(|c| HandSample {
+                    hand: match c.hand {
+                        Hand::Left => laser::Hand::Left,
+                        Hand::Right => laser::Hand::Right,
+                    },
+                    hit: overlay
+                        .intersect(handle, c.origin, c.dir)
+                        .map(|(uv, _dist)| LaserInput::uv_to_points(uv, panel)),
+                    trigger: c.trigger,
+                    stick_y: c.stick[1],
+                })
+                .collect();
+            let lf = laser.update(&samples, dt);
+            if let (Some(h), Some(sys)) = (lf.haptic, &system) {
+                let want = match h {
+                    laser::Hand::Left => Hand::Left,
+                    laser::Hand::Right => Hand::Right,
+                };
+                if let Some(c) = controllers.iter().find(|c| c.hand == want) {
+                    sys.haptic(c.index, CLICK_HAPTIC_US);
+                }
+            }
             let raw_input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(
-                        OVERLAY_TEX_W as f32 / 1.5,
-                        OVERLAY_TEX_H as f32 / 1.5,
-                    ),
-                )),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, panel)),
+                // Explicit clock: the motion system (M34) and toasts read
+                // ctx time, which otherwise doesn't advance without a
+                // windowing integration.
+                time: Some(started.elapsed().as_secs_f64()),
+                predicted_dt: dt.clamp(1.0 / 240.0, 0.1),
+                events: lf.events,
                 ..Default::default()
             };
+            let accent = dev_view.accent;
             egui_panel.render(
                 &gpu.device,
                 &gpu.queue,
                 &overlay_view,
                 raw_input,
-                |ctx| dev_view.ui_with(ctx, injector.as_ref()),
+                |ctx| {
+                    dev_view.ui_with(ctx, injector.as_ref());
+                    laser::paint_cursor(ctx, lf.cursor, accent);
+                },
             );
 
             // 1a. OSC out: chatbox + avatar parameters (battery).

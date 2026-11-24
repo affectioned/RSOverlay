@@ -28,7 +28,7 @@ stays — only the interaction model matches.
 | XSO feature | RSOverlay status |
 |---|---|
 | SteamVR Input 2.0 bindings | planned |
-| Left / Middle / Right click + long-press / drag via laser | planned |
+| Left / Middle / Right click + long-press / drag via laser | **left click + drag + scroll shipped** (M38); right/middle/long-press planned |
 | Window re-centering + grid view | planned |
 | Window move/scale/management at any range | **Placement card + CLI + persistence shipped**, grab/drag planned |
 | **Curved overlays** | **shipped** (M24) — `Placement.curvature` slider |

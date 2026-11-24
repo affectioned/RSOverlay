@@ -11,6 +11,7 @@ pub mod i18n;
 pub mod icons;
 pub mod keyboard;
 pub mod keyboard_layout;
+pub mod laser;
 pub mod locale;
 pub mod macros;
 pub mod media;
