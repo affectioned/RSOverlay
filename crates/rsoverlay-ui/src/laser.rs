@@ -21,6 +21,12 @@ pub const PRESS: f32 = 0.75;
 pub const RELEASE: f32 = 0.35;
 pub const DEAD_ZONE: f32 = 0.2;
 pub const SCROLL_SPEED: f32 = 900.0;
+/// Click stabilisation radius, points. egui turns a press into a drag
+/// after 6 pt of movement (hard-coded `MAX_CLICK_DIST`) — about a
+/// millimetre on a wrist panel, i.e. any hand tremor during a trigger
+/// pull. While held, the pointer stays pinned at the press point until
+/// the laser leaves this radius; then it's a genuine drag.
+pub const DRAG_SLOP: f32 = 24.0;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Hand {
@@ -53,6 +59,10 @@ pub struct LaserInput {
     /// Per-hand trigger latch (hysteresis), indexed by `slot()`.
     latched: [bool; 2],
     last_pos: Option<egui::Pos2>,
+    /// Where the current press started (stabilisation anchor).
+    press_anchor: Option<egui::Pos2>,
+    /// The press has escaped DRAG_SLOP — report real positions.
+    dragging: bool,
 }
 
 fn slot(h: Hand) -> usize {
@@ -99,6 +109,19 @@ impl LaserInput {
         let sample = self.active.and_then(|h| samples.iter().find(|s| s.hand == h));
         let hit = sample.and_then(|s| s.hit);
 
+        // Stabilise: while held and within the slop, report the anchor.
+        let hit = hit.map(|pos| match self.press_anchor {
+            Some(a) if self.pressed && !self.dragging => {
+                if pos.distance(a) > DRAG_SLOP {
+                    self.dragging = true;
+                    pos
+                } else {
+                    a
+                }
+            }
+            _ => pos,
+        });
+
         match hit {
             Some(pos) => {
                 out.events.push(egui::Event::PointerMoved(pos));
@@ -116,6 +139,8 @@ impl LaserInput {
             // held elsewhere and swept onto the panel must not click.
             if pressed_now == Some(s.hand) && !self.pressed && hit.is_some() {
                 self.pressed = true;
+                self.press_anchor = self.last_pos;
+                self.dragging = false;
                 out.haptic = Some(s.hand);
                 out.events.push(button(self.last_pos.unwrap_or_default(), true));
             } else if !latched && self.pressed {
@@ -137,6 +162,8 @@ impl LaserInput {
 
     fn release(&mut self, out: &mut LaserFrame) {
         self.pressed = false;
+        self.press_anchor = None;
+        self.dragging = false;
         out.events.push(button(self.last_pos.unwrap_or_default(), false));
     }
 }
@@ -236,6 +263,31 @@ mod tests {
         let f = l.update(&both(0.0, 0.9), 0.011);
         assert_eq!(f.cursor, Some((egui::pos2(50.0, 50.0), true)));
         assert_eq!(f.haptic, Some(Hand::Right));
+    }
+
+    #[test]
+    fn jitter_during_click_is_pinned() {
+        let mut l = LaserInput::default();
+        l.update(&[s(Hand::Right, Some((100.0, 100.0)), 0.0)], 0.011);
+        l.update(&[s(Hand::Right, Some((100.0, 100.0)), 0.9)], 0.011);
+        // Trigger-pull tremor: 10 pt away — still reported at the anchor.
+        let f = l.update(&[s(Hand::Right, Some((108.0, 106.0)), 0.9)], 0.011);
+        assert!(f.events.contains(&egui::Event::PointerMoved(egui::pos2(100.0, 100.0))));
+        let f = l.update(&[s(Hand::Right, Some((108.0, 106.0)), 0.0)], 0.011);
+        assert!(f.events.iter().any(|e| matches!(e,
+            egui::Event::PointerButton { pos, pressed: false, .. } if *pos == egui::pos2(100.0, 100.0))));
+    }
+
+    #[test]
+    fn real_drag_escapes_slop() {
+        let mut l = LaserInput::default();
+        l.update(&[s(Hand::Right, Some((100.0, 100.0)), 0.0)], 0.011);
+        l.update(&[s(Hand::Right, Some((100.0, 100.0)), 0.9)], 0.011);
+        let f = l.update(&[s(Hand::Right, Some((160.0, 100.0)), 0.9)], 0.011);
+        assert!(f.events.contains(&egui::Event::PointerMoved(egui::pos2(160.0, 100.0))));
+        // Once dragging, small moves pass straight through.
+        let f = l.update(&[s(Hand::Right, Some((162.0, 101.0)), 0.9)], 0.011);
+        assert!(f.events.contains(&egui::Event::PointerMoved(egui::pos2(162.0, 101.0))));
     }
 
     #[test]

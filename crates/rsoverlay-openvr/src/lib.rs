@@ -52,8 +52,23 @@ impl OpenVrFns {
         #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         let lib_name = "openvr_api";
 
-        let lib = unsafe { Library::new(lib_name) }
-            .map_err(|e| OpenVrError::LoadLib(e.to_string()))?;
+        // 1. Bundled next to the exe / on the DLL search path.
+        // 2. The installed SteamVR runtime, located the way OpenVR itself
+        //    does it: %LOCALAPPDATA%\openvr\openvrpaths.vrpath → "runtime".
+        let lib = match unsafe { Library::new(lib_name) } {
+            Ok(l) => l,
+            Err(first) => {
+                let candidates = runtime_dirs().into_iter().map(|d| runtime_dll(&d));
+                candidates
+                    .filter(|p| p.exists())
+                    .find_map(|p| {
+                        let l = unsafe { Library::new(&p) }.ok()?;
+                        tracing::info!("loaded {} from SteamVR runtime", p.display());
+                        Some(l)
+                    })
+                    .ok_or_else(|| OpenVrError::LoadLib(format!("{first}; SteamVR runtime not found either")))?
+            }
+        };
         unsafe {
             let vr_init_internal: Symbol<sys::FnVR_InitInternal> = lib
                 .get(b"VR_InitInternal\0")
@@ -80,6 +95,42 @@ impl OpenVrFns {
             })
         }
     }
+}
+
+/// Runtime roots listed in `openvrpaths.vrpath` (SteamVR's own path
+/// registry), first entry first.
+fn runtime_dirs() -> Vec<std::path::PathBuf> {
+    #[cfg(windows)]
+    let base = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from);
+    #[cfg(not(windows))]
+    let base = std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config"));
+    let Some(file) = base.map(|b| b.join("openvr").join("openvrpaths.vrpath")) else { return Vec::new() };
+    std::fs::read_to_string(file).map(|t| parse_runtime_paths(&t)).unwrap_or_default()
+}
+
+fn runtime_dll(root: &std::path::Path) -> std::path::PathBuf {
+    #[cfg(windows)]
+    return root.join("bin").join("win64").join("openvr_api.dll");
+    #[cfg(not(windows))]
+    return root.join("bin").join("linux64").join("libopenvr_api.so");
+}
+
+/// Pull the `"runtime": [ ... ]` string array out of the vrpath JSON.
+/// Hand-rolled to avoid a serde_json dependency for one array; handles
+/// the `\` escaping Windows paths carry.
+fn parse_runtime_paths(json: &str) -> Vec<std::path::PathBuf> {
+    let Some(k) = json.find("\"runtime\"") else { return Vec::new() };
+    let rest = &json[k..];
+    let (Some(open), Some(close)) = (rest.find('['), rest.find(']')) else { return Vec::new() };
+    if close < open {
+        return Vec::new();
+    }
+    rest[open + 1..close]
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .map(|s| std::path::PathBuf::from(s.replace("\\\\", "\\")))
+        .collect()
 }
 
 /// Safe RAII handle to the OpenVR runtime. Shuts down on drop.
@@ -195,6 +246,19 @@ impl<'a> Overlay<'a> {
     pub fn set_alpha(&self, handle: VROverlayHandle_t, alpha: f32) -> Result<(), OpenVrError> {
         let r = unsafe { (self.table().SetOverlayAlpha)(handle, alpha) };
         check(r, "SetOverlayAlpha")
+    }
+
+    /// Parent the overlay to a tracked device (controller / HMD); `m`
+    /// is the device-local transform. The compositor follows the device
+    /// every frame — no per-frame updates needed from us.
+    pub fn set_transform_device_relative(
+        &self,
+        handle: VROverlayHandle_t,
+        device: u32,
+        m: &HmdMatrix34_t,
+    ) -> Result<(), OpenVrError> {
+        let r = unsafe { (self.table().SetOverlayTransformTrackedDeviceRelative)(handle, device, m) };
+        check(r, "SetOverlayTransformTrackedDeviceRelative")
     }
 
     pub fn set_curvature(&self, handle: VROverlayHandle_t, curvature: f32) -> Result<(), OpenVrError> {
@@ -444,6 +508,16 @@ impl<'a> System<'a> {
         out
     }
 
+    /// Device index for a hand, if that controller is connected.
+    pub fn hand_index(&self, hand: Hand) -> Option<u32> {
+        let role = match hand {
+            Hand::Left => sys::ETrackedControllerRole_LeftHand,
+            Hand::Right => sys::ETrackedControllerRole_RightHand,
+        };
+        let i = unsafe { (self.table().GetTrackedDeviceIndexForControllerRole)(role) };
+        (i != sys::k_unTrackedDeviceIndexInvalid && unsafe { (self.table().IsTrackedDeviceConnected)(i) }).then_some(i)
+    }
+
     /// Short haptic tick. `micros` is capped at 3999 by OpenVR.
     pub fn haptic(&self, index: u32, micros: u16) {
         unsafe { (self.table().TriggerHapticPulse)(index, 0, micros.min(3999)) }
@@ -492,6 +566,20 @@ fn check(code: sys::EVROverlayError, op: &'static str) -> Result<(), OpenVrError
     }
 }
 
+/// Device-local pose: translate `(x, y, z)` metres, then pitch about
+/// the device's X axis by `pitch_deg` (negative tilts the panel's face
+/// up toward the wearer). Row-major 3x4.
+pub fn pose_offset_pitch(x: f32, y: f32, z: f32, pitch_deg: f32) -> HmdMatrix34_t {
+    let (s, c) = pitch_deg.to_radians().sin_cos();
+    HmdMatrix34_t {
+        m: [
+            [1.0, 0.0, 0.0, x],
+            [0.0, c, -s, y],
+            [0.0, s, c, z],
+        ],
+    }
+}
+
 /// Build a row-major 3x4 pose matrix placing a point at `(x, y, z)` facing -Z.
 pub fn pose_translation(x: f32, y: f32, z: f32) -> HmdMatrix34_t {
     HmdMatrix34_t {
@@ -506,6 +594,22 @@ pub fn pose_translation(x: f32, y: f32, z: f32) -> HmdMatrix34_t {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_vrpath_runtime() {
+        let json = r#"{ "config" : [ "C:\\x" ], "runtime" : [ "C:\\Program Files (x86)\\Steam\\steamapps\\common\\SteamVR" ], "version" : 1 }"#;
+        let p = parse_runtime_paths(json);
+        assert_eq!(p, vec![std::path::PathBuf::from(r"C:\Program Files (x86)\Steam\steamapps\common\SteamVR")]);
+        assert!(parse_runtime_paths("{}").is_empty());
+    }
+
+    #[test]
+    fn pitch_tilts_normal_up() {
+        // Overlay faces +Z; pitching -90° about X turns that to +Y (up).
+        let m = pose_offset_pitch(0.0, 0.0, 0.0, -90.0).m;
+        let normal = [m[0][2], m[1][2], m[2][2]];
+        assert!(normal[0].abs() < 1e-6 && (normal[1] - 1.0).abs() < 1e-6 && normal[2].abs() < 1e-6);
+    }
 
     #[test]
     fn ray_identity_points_down_negative_z() {

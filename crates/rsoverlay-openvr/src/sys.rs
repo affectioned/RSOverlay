@@ -79,7 +79,9 @@ pub struct IVROverlayFnTable {
     pub SetOverlayCurvature: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fCurvature: f32) -> EVROverlayError, // 23
     pub _pad_02b: [*const c_void; 6], // 24..=29
     pub SetOverlayTransformAbsolute: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, eTrackingOrigin: ETrackingUniverseOrigin, pMatTrackingOriginToOverlayTransform: *const HmdMatrix34_t) -> EVROverlayError,
-    pub _pad_03: [*const c_void; 9], // 31..=39
+    pub _pad_03: [*const c_void; 1], // 31 GetOverlayTransformAbsolute
+    pub SetOverlayTransformTrackedDeviceRelative: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, unTrackedDevice: TrackedDeviceIndex_t, pmatTrackedDeviceToOverlayTransform: *const HmdMatrix34_t) -> EVROverlayError, // 32
+    pub _pad_03b: [*const c_void; 7], // 33..=39
     pub ShowOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
     pub HideOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
     pub _pad_04: [*const c_void; 7], // 42..=48
@@ -98,6 +100,7 @@ const _: () = {
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayColor) == 13 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayAlpha) == 15 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayCurvature) == 23 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayTransformTrackedDeviceRelative) == 32 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, ComputeOverlayIntersection) == 49 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayWidthInMeters) == 21 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayTransformAbsolute) == 30 * P);

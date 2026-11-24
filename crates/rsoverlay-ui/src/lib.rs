@@ -49,6 +49,13 @@ impl EguiPanel {
         Self { ctx, renderer, width, height, ppp }
     }
 
+    /// UI scale. VR uses a larger value than the desktop preview: the
+    /// panel is small in the field of view, so fewer, bigger points.
+    pub fn set_pixels_per_point(&mut self, ppp: f32) {
+        self.ppp = ppp;
+        self.ctx.set_pixels_per_point(ppp);
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         self.width = width;
         self.height = height;

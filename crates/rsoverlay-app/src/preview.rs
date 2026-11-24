@@ -963,17 +963,17 @@ fn capture_loop(monitor_index: u32, tx: mpsc::SyncSender<Frame>) {
 }
 
 /// Rolling FPS counter — one sample per second.
-struct FpsCounter {
+pub(crate) struct FpsCounter {
     last_sample: Instant,
     frames: u32,
     cached: f32,
 }
 
 impl FpsCounter {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { last_sample: Instant::now(), frames: 0, cached: 0.0 }
     }
-    fn tick(&mut self) -> f32 {
+    pub(crate) fn tick(&mut self) -> f32 {
         self.frames += 1;
         let elapsed = self.last_sample.elapsed().as_secs_f32();
         if elapsed >= 0.5 {

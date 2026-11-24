@@ -9,7 +9,7 @@
 mod imp {
     use anyhow::{anyhow, Context, Result};
     use rsoverlay_notify::NotifyChannel;
-    use rsoverlay_openvr::{pose_translation, DeviceBattery, DeviceKind, Hand, OpenVr};
+    use rsoverlay_openvr::{pose_offset_pitch, pose_translation, DeviceBattery, DeviceKind, Hand, OpenVr};
     use rsoverlay_ui::laser::{self, HandSample, LaserInput};
     use rsoverlay_render::GpuCtx;
     use rsoverlay_ui::{battery::BatteryReading, views::DevView, EguiPanel};
@@ -24,8 +24,23 @@ mod imp {
     const OVERLAY_TEX_H: u32 = 1280;
     /// Click tick length. Short enough to read as a "detent", not a buzz.
     const CLICK_HAPTIC_US: u16 = 1200;
-    /// egui points per overlay texel (EguiPanel renders at 1.5 ppp).
-    const PPP: f32 = 1.5;
+    /// Texels per egui point in VR. Higher than the desktop's 1.5: the
+    /// wrist panel is small in view, so the UI gets fewer, bigger points
+    /// (≈ 910 × 570 pt) — compact, XSO-style density.
+    const PPP: f32 = 2.25;
+
+    /// Wrist mount, in the left controller's frame (−Z = pointing
+    /// direction, +Y = top of the controller, +Z = back toward the
+    /// wrist): sit just above the back of the hand, face tilted 60° up
+    /// toward the wearer — glance at your wrist and it's there.
+    const WRIST_OFFSET: [f32; 3] = [0.0, 0.03, 0.12];
+    const WRIST_PITCH_DEG: f32 = -60.0;
+    const WRIST_WIDTH_M: f32 = 0.40;
+    /// HMD-locked: a comfortable reading distance, slightly below eye line.
+    const HMD_OFFSET: [f32; 3] = [0.0, -0.10, -0.60];
+    /// How often to re-check which device the panel is parented to
+    /// (controllers connect late / swap roles).
+    const ATTACH_POLL: Duration = Duration::from_secs(1);
 
     /// Battery props change slowly; polling 64 device slots every
     /// frame would be wasted IPC to vrserver.
@@ -55,8 +70,10 @@ mod imp {
         // anchor=Wrist will switch to SetOverlayTransformTrackedDevice
         // Relative with the user's non-dominant controller.
         let p = &config.placement;
+        let anchor = config.placement.anchor;
+        let width = if anchor == rsoverlay_core::PlacementAnchor::Wrist { WRIST_WIDTH_M } else { p.size_w };
         overlay
-            .set_width(handle, p.size_w)
+            .set_width(handle, width)
             .context("SetOverlayWidthInMeters")?;
         if let Err(e) = overlay.set_curvature(handle, p.curvature) {
             warn!("SetOverlayCurvature: {e:#}");
@@ -81,6 +98,7 @@ mod imp {
 
         let mut egui_panel =
             EguiPanel::new(&gpu.device, overlay_format, OVERLAY_TEX_W, OVERLAY_TEX_H);
+        egui_panel.set_pixels_per_point(PPP);
         let mut dev_view = DevView::default();
         crate::preview::seed_dev_view(
             &mut dev_view,
@@ -95,15 +113,17 @@ mod imp {
         // (each call is an IPC round-trip to vrcompositor).
         let mut applied_tint = [f32::NAN; 4];
         let mut laser = LaserInput::default();
+        let mut fps = crate::preview::FpsCounter::new();
+        // Which device the overlay is currently parented to (None =
+        // absolute). Re-resolved every ATTACH_POLL.
+        let mut attached_to: Option<u32> = None;
+        let mut last_attach_check: Option<Instant> = None;
         let started = Instant::now();
         let mut last_frame = Instant::now();
         let panel = egui::vec2(OVERLAY_TEX_W as f32 / PPP, OVERLAY_TEX_H as f32 / PPP);
 
         overlay.show(handle).ok();
-        info!(
-            "OpenVR overlay registered at (0, 1.5, -1.5) — \
-             dashboard streaming via DirectX 12"
-        );
+        info!("OpenVR overlay registered (anchor {:?}) — dashboard streaming via DirectX 12", anchor);
 
         let running = Arc::new(AtomicBool::new(true));
         let r = running.clone();
@@ -120,17 +140,50 @@ mod imp {
             // egui pointer events).
             frame = frame.wrapping_add(1);
             dev_view.frame = frame;
+            dev_view.last_fps = fps.tick();
             if let Some(sys) = &system {
                 if last_battery_poll.is_none_or(|t| t.elapsed() >= BATTERY_POLL) {
                     last_battery_poll = Some(Instant::now());
                     dev_view.set_batteries(sys.batteries().iter().map(reading).collect());
                 }
             }
+            // 0. Keep the panel parented per the Placement anchor. The
+            // compositor tracks the device for us; we only re-issue the
+            // transform when the device index changes.
+            if last_attach_check.is_none_or(|t| t.elapsed() >= ATTACH_POLL) {
+                last_attach_check = Some(Instant::now());
+                let target = match (anchor, &system) {
+                    (rsoverlay_core::PlacementAnchor::Wrist, Some(s)) => s.hand_index(Hand::Left),
+                    (rsoverlay_core::PlacementAnchor::Hmd, _) => Some(0), // HMD is always device 0
+                    _ => None,
+                };
+                if target != attached_to {
+                    let res = match (anchor, target) {
+                        (rsoverlay_core::PlacementAnchor::Wrist, Some(dev)) => {
+                            let [x, y, z] = WRIST_OFFSET;
+                            overlay.set_transform_device_relative(handle, dev, &pose_offset_pitch(x, y, z, WRIST_PITCH_DEG))
+                        }
+                        (rsoverlay_core::PlacementAnchor::Hmd, Some(dev)) => {
+                            let [x, y, z] = HMD_OFFSET;
+                            overlay.set_transform_device_relative(handle, dev, &pose_translation(x, y, z))
+                        }
+                        _ => overlay.set_transform_absolute(handle, &pose),
+                    };
+                    match res {
+                        Ok(()) => info!("overlay anchored to {:?} (device {:?})", anchor, target),
+                        Err(e) => warn!("anchoring overlay: {e:#}"),
+                    }
+                    attached_to = target;
+                }
+            }
+
             let dt = last_frame.elapsed().as_secs_f32();
             last_frame = Instant::now();
             let controllers = system.as_ref().map(|s| s.controllers()).unwrap_or_default();
+            let wrist_hand = (anchor == rsoverlay_core::PlacementAnchor::Wrist && attached_to.is_some()).then_some(Hand::Left);
             let samples: Vec<HandSample> = controllers
                 .iter()
+                .filter(|c| Some(c.hand) != wrist_hand)
                 .map(|c| HandSample {
                     hand: match c.hand {
                         Hand::Left => laser::Hand::Left,
@@ -144,6 +197,9 @@ mod imp {
                 })
                 .collect();
             let lf = laser.update(&samples, dt);
+            if let Some(h) = lf.haptic {
+                info!("laser click ({h:?})");
+            }
             if let (Some(h), Some(sys)) = (lf.haptic, &system) {
                 let want = match h {
                     laser::Hand::Left => Hand::Left,
