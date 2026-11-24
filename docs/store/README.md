@@ -5,6 +5,7 @@ contents and a demo track (no real desktop or listening history).
 
 | File | Preset |
 | --- | --- |
+| `overview.png` | all of the below in one shareable image (`python tools/make-overview.py`) |
 | `vr-work.png` | editor + notes + terminal arc, stats widget, keyboard |
 | `vr-gaming.png` | game guide, media/macros + battery widgets, wrist expanded |
 | `vr-social.png` | dashboard on Chat, keyboard, notifications + media |
@@ -18,6 +19,7 @@ Regenerate (after UI changes):
 for s in work gaming social dashboard wrist-compact wrist-expanded; do
   cargo run -p rsoverlay-app -- --vr-preview --scene $s --screenshot docs/store/vr-$s.png --exit-after 300
 done
+python tools/make-overview.py   # rebuild overview.png (needs Pillow)
 ```
 
 Interactive: `cargo run -p rsoverlay-app -- --vr-preview`, then keys 1-6

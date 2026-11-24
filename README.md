@@ -12,7 +12,8 @@ easy. It has its own look, and it's built to be light.
 | ![Dashboard](docs/store/vr-dashboard.png) | ![Social VR: chat, keyboard, notifications, music](docs/store/vr-social.png) |
 | ![In game: guide, media and battery widgets, wrist](docs/store/vr-gaming.png) | ![Wrist toolbar, compact](docs/store/vr-wrist-compact.png) |
 
-<sub>Screenshots are rendered by the built-in VR preview (`--vr-preview --scene …`)
+<sub>Everything at a glance: [overview.png](docs/store/overview.png).
+Screenshots are rendered by the built-in VR preview (`--vr-preview --scene …`)
 with mock window contents. See [docs/store](docs/store/README.md).</sub>
 
 > **Not affiliated with XSOverlay or OVR Toolkit.** Every line is written
