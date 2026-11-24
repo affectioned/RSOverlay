@@ -2286,6 +2286,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rsoverlay-sysinfo"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+ "windows",
+]
+
+[[package]]
 name = "rsoverlay-ui"
 version = "0.1.0"
 dependencies = [
@@ -2299,6 +2307,7 @@ dependencies = [
  "rsoverlay-input",
  "rsoverlay-notify",
  "rsoverlay-osc",
+ "rsoverlay-sysinfo",
  "serde",
  "tracing",
  "wgpu",

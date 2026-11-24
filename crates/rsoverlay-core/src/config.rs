@@ -91,6 +91,7 @@ pub struct Appearance {
     pub show_battery: bool,
     pub show_macros: bool,
     pub show_volume: bool,
+    pub show_system: bool,
     /// Accessibility: disable UI transitions.
     pub reduce_motion: bool,
     /// Low-battery toast threshold, percent. Clamped to 5..=50 in UI.
@@ -113,6 +114,7 @@ impl Default for Appearance {
             show_battery: true,
             show_macros: true,
             show_volume: true,
+            show_system: true,
             reduce_motion: false,
             battery_warn_pct: 20,
         }

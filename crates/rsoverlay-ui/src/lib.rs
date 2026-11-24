@@ -18,6 +18,7 @@ pub mod motion;
 pub mod nightlight;
 pub mod now_playing;
 pub mod shell;
+pub mod system;
 pub mod theme;
 pub mod views;
 pub mod volume;

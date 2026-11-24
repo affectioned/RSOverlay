@@ -176,6 +176,8 @@ pub struct DevView {
     pub macros: crate::macros::MacroDeck,
     pub show_volume: bool,
     volume: crate::volume::VolumeCard,
+    pub show_system: bool,
+    system: crate::system::SystemCard,
     /// Current dashboard page (nav rail selection).
     pub page: crate::shell::Page,
     /// Notifications received since the Notifications page was last
@@ -236,6 +238,8 @@ impl Default for DevView {
             macros: crate::macros::MacroDeck::default(),
             show_volume: true,
             volume: crate::volume::VolumeCard::default(),
+            show_system: true,
+            system: crate::system::SystemCard::default(),
             page: crate::shell::Page::default(),
             unread: 0,
             language: crate::i18n::Lang::default(),
@@ -494,10 +498,22 @@ impl DevView {
             Page::Home => {
                 // Two tile columns; each tile honours its Appearance toggle.
                 ui.columns(2, |cols| {
-                    let (l, r) = cols.split_at_mut(1);
-                    let (l, r) = (&mut l[0], &mut r[0]);
+                    let (lc, rc) = cols.split_at_mut(1);
+                    let (lp, rp) = (&mut lc[0], &mut rc[0]);
+                    // ui.columns() hands out *justified* layouts, and egui
+                    // letter-justifies wrapped text in those. Re-plain them
+                    // (and hand the used rects back to the parents below,
+                    // so the scroll area still knows the page height).
+                    let plain = egui::Layout::top_down(egui::Align::Min);
+                    let mut l = lp.child_ui(lp.max_rect(), plain);
+                    let mut r = rp.child_ui(rp.max_rect(), plain);
+                    let (l, r) = (&mut l, &mut r);
                     if self.show_media {
                         media_card(l, self.media.as_ref(), accent);
+                        l.add_space(theme::GUTTER);
+                    }
+                    if self.show_system {
+                        self.system.show(l, self.last_fps, accent);
                         l.add_space(theme::GUTTER);
                     }
                     if self.show_volume {
@@ -517,6 +533,8 @@ impl DevView {
                             self.pending_chat = Some(msg);
                         }
                     }
+                    lp.allocate_rect(l.min_rect(), egui::Sense::hover());
+                    rp.allocate_rect(r.min_rect(), egui::Sense::hover());
                 });
             }
             Page::Desktop => {
@@ -544,8 +562,16 @@ impl DevView {
             }
             Page::Settings => {
                 ui.columns(2, |cols| {
-                    let (l, r) = cols.split_at_mut(1);
-                    let (l, r) = (&mut l[0], &mut r[0]);
+                    let (lc, rc) = cols.split_at_mut(1);
+                    let (lp, rp) = (&mut lc[0], &mut rc[0]);
+                    // ui.columns() hands out *justified* layouts, and egui
+                    // letter-justifies wrapped text in those. Re-plain them
+                    // (and hand the used rects back to the parents below,
+                    // so the scroll area still knows the page height).
+                    let plain = egui::Layout::top_down(egui::Align::Min);
+                    let mut l = lp.child_ui(lp.max_rect(), plain);
+                    let mut r = rp.child_ui(rp.max_rect(), plain);
+                    let (l, r) = (&mut l, &mut r);
                     if appearance_card(
                         l,
                         &mut self.accent,
@@ -557,6 +583,7 @@ impl DevView {
                         &mut self.show_battery,
                         &mut self.show_macros,
                         &mut self.show_volume,
+                        &mut self.show_system,
                         &mut self.reduce_motion,
                         &mut self.language,
                         &mut self.keyboard.layout,
@@ -568,6 +595,8 @@ impl DevView {
                     placement_card(r, &mut self.placement, accent);
                     r.add_space(theme::GUTTER);
                     stats_card(r, self.frame, self.last_fps, self.notifications_received, accent);
+                    lp.allocate_rect(l.min_rect(), egui::Sense::hover());
+                    rp.allocate_rect(r.min_rect(), egui::Sense::hover());
                 });
             }
         }
@@ -807,6 +836,7 @@ fn appearance_card(
     show_battery: &mut bool,
     show_macros: &mut bool,
     show_volume: &mut bool,
+    show_system: &mut bool,
     reduce_motion: &mut bool,
     language: &mut crate::i18n::Lang,
     keyboard_layout: &mut crate::keyboard_layout::LayoutId,
@@ -866,6 +896,7 @@ fn appearance_card(
             ui.checkbox(show_battery, "Battery");
             ui.checkbox(show_macros, "Macros");
             ui.checkbox(show_volume, "Volume");
+            ui.checkbox(show_system, "System");
         });
         ui.add_space(4.0);
         ui.checkbox(reduce_motion, "Reduce motion")

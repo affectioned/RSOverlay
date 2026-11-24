@@ -112,6 +112,7 @@ pub fn seed_dev_view(
     dev.show_battery = cfg.appearance.show_battery;
     dev.show_macros = cfg.appearance.show_macros;
     dev.show_volume = cfg.appearance.show_volume;
+    dev.show_system = cfg.appearance.show_system;
     dev.reduce_motion = cfg.appearance.reduce_motion;
     dev.macros.entries = cfg
         .macros
@@ -216,6 +217,7 @@ pub fn config_from_dev_view(
     out.appearance.show_battery = dev.show_battery;
     out.appearance.show_macros = dev.show_macros;
     out.appearance.show_volume = dev.show_volume;
+    out.appearance.show_system = dev.show_system;
     out.appearance.reduce_motion = dev.reduce_motion;
     out.macros = rsoverlay_core::config::Macros(
         dev.macros
@@ -385,6 +387,7 @@ fn configs_equivalent(a: &rsoverlay_core::Config, b: &rsoverlay_core::Config) ->
         && a.appearance.show_battery == b.appearance.show_battery
         && a.appearance.show_macros == b.appearance.show_macros
         && a.appearance.show_volume == b.appearance.show_volume
+        && a.appearance.show_system == b.appearance.show_system
         && a.appearance.reduce_motion == b.appearance.reduce_motion
         && a.macros == b.macros
         && a.appearance.battery_warn_pct == b.appearance.battery_warn_pct
