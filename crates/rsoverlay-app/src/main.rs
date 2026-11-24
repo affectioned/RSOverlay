@@ -146,6 +146,14 @@ struct Args {
     /// macros / notifications / settings). Handy with --screenshot.
     #[arg(long, value_name = "PAGE")]
     page: Option<String>,
+
+    /// Preview the VR dashboard layout (bottom dock instead of side rail).
+    #[arg(long)]
+    dock: bool,
+
+    /// Preview the VR wrist watch-face instead of the dashboard.
+    #[arg(long)]
+    wrist: bool,
 }
 
 fn parse_vec3(s: &str) -> Result<(f32, f32, f32), String> {
@@ -280,6 +288,8 @@ fn main() -> Result<()> {
         demo_batteries: args.demo_batteries,
         switch_to_window: args.switch_to_window.clone(),
         page: args.page.clone(),
+        dock: args.dock,
+        wrist: args.wrist,
     };
 
     let result = match mode {

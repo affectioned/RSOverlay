@@ -171,7 +171,9 @@ pub struct IVRSystemFnTable {
 }
 
 pub const k_unTrackedDeviceIndexInvalid: TrackedDeviceIndex_t = 0xFFFF_FFFF;
-/// Bit in VRControllerState_t::ulButtonPressed (EVRButtonId 33).
+/// Bits in VRControllerState_t::ulButtonPressed (EVRButtonId).
+pub const k_EButton_ApplicationMenu: u32 = 1; // B / menu
+pub const k_EButton_Grip: u32 = 2;
 pub const k_EButton_SteamVR_Trigger: u32 = 33;
 
 #[repr(C)]

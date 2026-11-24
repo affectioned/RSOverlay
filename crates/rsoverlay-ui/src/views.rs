@@ -163,6 +163,10 @@ pub struct DevView {
     pub last_fps: f32,
     pub mirror: Option<MirrorHandle>,
     pub sources: SourcePicker,
+    /// Sources currently open as floating VR window overlays (set by the
+    /// app) — highlighted in the VR Desktop grid.
+    pub open_windows: Vec<CaptureSource>,
+    sources_refreshed_at: f64,
     pub forward_input: bool,
     pub accent: egui::Color32,
     pub show_mirror: bool,
@@ -207,6 +211,13 @@ pub struct DevView {
     page_since: f64,
     /// Accessibility: make every transition instant. Persists.
     pub reduce_motion: bool,
+    /// VR dashboards: SteamVR-style bottom dock instead of the side rail.
+    pub dock_layout: bool,
+    /// VR: wrist on the right hand, laser from the left.
+    pub vr_left_handed: bool,
+    /// VR: panels fade out beyond this off-axis view angle (degrees).
+    pub vr_clip_angle: f32,
+    pub vr_wrist_opacity: f32,
     pub night_light: crate::nightlight::NightLight,
     /// Overlay colour multiplier (rgb) + opacity (a) for this frame;
     /// the app hands it to the compositor / preview shaders.
@@ -227,6 +238,8 @@ impl Default for DevView {
             last_fps: 0.0,
             mirror: None,
             sources: SourcePicker::default(),
+            open_windows: Vec::new(),
+            sources_refreshed_at: f64::NEG_INFINITY,
             forward_input: false,
             accent: theme::ACCENT,
             show_mirror: true,
@@ -259,6 +272,10 @@ impl Default for DevView {
             last_page: crate::shell::Page::default(),
             page_since: f64::NEG_INFINITY,
             reduce_motion: false,
+            dock_layout: false,
+            vr_left_handed: false,
+            vr_clip_angle: 60.0,
+            vr_wrist_opacity: 1.0,
             night_light: crate::nightlight::NightLight::default(),
             tint: [1.0; 4],
             last_frame_time: None,
@@ -313,6 +330,15 @@ impl DevView {
         self.batteries = readings;
     }
 
+    /// The wrist watch-face (VR). Shares all state with the dashboard;
+    /// returns what the wearer tapped.
+    pub fn wrist_ui(&mut self, ctx: &egui::Context) -> crate::wrist::WristAction {
+        self.tick_state(ctx);
+        let playing = self.media.as_ref().is_some_and(|m| m.playing);
+        let track = self.media.as_ref().and_then(crate::now_playing::format_line);
+        crate::wrist::show(ctx, &self.batteries, playing, track.as_deref(), self.unread, self.accent)
+    }
+
     /// RGB multiplier + opacity to apply to the whole overlay.
     pub fn overlay_tint(&self) -> [f32; 4] {
         self.tint
@@ -355,11 +381,11 @@ impl DevView {
     /// OS. When `None`, the keyboard renders but keys are inert —
     /// useful for VR mode before laser input is wired, or headless
     /// rendering.
-    pub fn ui_with(
-        &mut self,
-        ctx: &egui::Context,
-        injector: Option<&rsoverlay_input::InputInjector>,
-    ) {
+    /// Per-frame state that must advance whether or not the dashboard is
+    /// drawn (toast expiry, media poll, now-playing bridge, night light).
+    /// Called by every surface (dashboard, wrist); idempotent within a
+    /// frame.
+    fn tick_state(&mut self, ctx: &egui::Context) {
         let now = Instant::now();
         while matches!(self.toasts.front(), Some(t) if t.expires < now) {
             self.toasts.pop_front();
@@ -377,7 +403,26 @@ impl DevView {
                 });
             }
         }
+        crate::motion::set_reduce_motion(self.reduce_motion);
+        let t = ctx.input(|i| i.time);
+        let dt = self.last_frame_time.map_or(0.0, |p| (t - p) as f32);
+        self.last_frame_time = Some(t);
+        let [r, g, b] = self.night_light.tick(minute_of_day(), dt);
+        self.tint = [r, g, b, self.placement.opacity.clamp(0.2, 1.0)];
+        if (self.tint[2] - crate::nightlight::multiplier(self.night_light.strength)[2]).abs() > 1e-3
+            && self.night_light.active_at(minute_of_day())
+        {
+            ctx.request_repaint();
+        }
+    }
 
+    pub fn ui_with(
+        &mut self,
+        ctx: &egui::Context,
+        injector: Option<&rsoverlay_input::InputInjector>,
+    ) {
+        self.tick_state(ctx);
+        let now = Instant::now();
         let accent = self.accent;
         // Slider fills, checkbox ticks and text selection follow the
         // user accent instead of egui's stock blue.
@@ -390,24 +435,11 @@ impl DevView {
         if self.page == crate::shell::Page::Notifications {
             self.unread = 0;
         }
-        crate::motion::set_reduce_motion(self.reduce_motion);
         if self.page != self.last_page {
             self.last_page = self.page;
             self.page_since = ctx.input(|i| i.time);
         }
         let enter = crate::motion::progress(ctx, self.page_since, crate::motion::MEDIUM);
-        {
-            let t = ctx.input(|i| i.time);
-            let dt = self.last_frame_time.map_or(0.0, |p| (t - p) as f32);
-            self.last_frame_time = Some(t);
-            let [r, g, b] = self.night_light.tick(minute_of_day(), dt);
-            self.tint = [r, g, b, self.placement.opacity.clamp(0.2, 1.0)];
-            if (self.tint[2] - crate::nightlight::multiplier(self.night_light.strength)[2]).abs() > 1e-3
-                && self.night_light.active_at(minute_of_day())
-            {
-                ctx.request_repaint();
-            }
-        }
 
         let root = egui::Frame::none().fill(theme::BG_ROOT);
         egui::TopBottomPanel::top("header")
@@ -422,6 +454,12 @@ impl DevView {
                     self.page = crate::shell::Page::Notifications;
                 }
             });
+        if self.dock_layout {
+            egui::TopBottomPanel::bottom("dock")
+                .frame(root.inner_margin(egui::Margin { left: 20.0, right: 20.0, top: 6.0, bottom: 14.0 }))
+                .show_separator_line(false)
+                .show(ctx, |ui| crate::shell::dock(ui, &mut self.page, self.unread, accent));
+        } else {
         egui::SidePanel::left("nav")
             .exact_width(crate::shell::RAIL_WIDTH)
             .resizable(false)
@@ -430,6 +468,7 @@ impl DevView {
             .show(ctx, |ui| {
                 crate::shell::nav_rail(ui, &mut self.page, self.unread, accent);
             });
+        }
         egui::CentralPanel::default()
             .frame(root.inner_margin(egui::Margin { left: 20.0, right: 20.0, top: 8.0, bottom: 16.0 }))
             .show(ctx, |ui| {
@@ -450,7 +489,7 @@ impl DevView {
                 }
             });
 
-        if self.show_keyboard {
+        if self.show_keyboard && !self.dock_layout {
             if let Some(inj) = injector {
                 egui::Area::new(egui::Id::new("virtual-keyboard"))
                     .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -theme::GUTTER))
@@ -548,6 +587,16 @@ impl DevView {
                     rp.allocate_rect(r.min_rect(), egui::Sense::hover());
                 });
             }
+            Page::Desktop if self.dock_layout => {
+                // VR: pick a window/monitor to pop out as its own overlay.
+                // Refresh the list every 2 s while this page is open.
+                let t = ui.input(|i| i.time);
+                if t - self.sources_refreshed_at > 2.0 {
+                    self.sources_refreshed_at = t;
+                    self.sources.wants_refresh = true;
+                }
+                crate::window_panel::source_grid(ui, &mut self.sources, &self.open_windows, accent);
+            }
             Page::Desktop => {
                 forward_toggle(ui, &mut self.forward_input, accent);
                 ui.add_space(theme::GUTTER);
@@ -603,6 +652,8 @@ impl DevView {
                     }
                     l.add_space(theme::GUTTER);
                     self.night_light.card(l, minute_of_day(), accent);
+                    l.add_space(theme::GUTTER);
+                    vr_card(l, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, accent);
                     placement_card(r, &mut self.placement, accent);
                     r.add_space(theme::GUTTER);
                     stats_card(r, self.frame, self.last_fps, self.notifications_received, accent);
@@ -612,6 +663,33 @@ impl DevView {
             }
         }
     }
+}
+
+fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opacity: &mut f32, accent: egui::Color32) {
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::POINTER, "VR", accent);
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Laser hand"));
+            for (lh, label) in [(false, "Right"), (true, "Left")] {
+                let sel = *left_handed == lh;
+                if ui.selectable_label(sel, egui::RichText::new(label).color(if sel { accent } else { theme::FG_MUTED })).clicked() {
+                    *left_handed = lh;
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Hide beyond"));
+            ui.add(egui::Slider::new(clip, 30.0..=90.0).suffix("°").fixed_decimals(0));
+        })
+        .response
+        .on_hover_text("Panels fade out when you look at them from further off-axis than this");
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Wrist opacity"));
+            ui.add(egui::Slider::new(wrist_opacity, 0.2..=1.0).fixed_decimals(2));
+        });
+    });
 }
 
 fn minute_of_day() -> u16 {

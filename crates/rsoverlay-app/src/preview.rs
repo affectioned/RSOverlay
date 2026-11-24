@@ -55,6 +55,8 @@ pub struct TestHooks {
     pub demo_batteries: bool,
     pub switch_to_window: Option<String>,
     pub page: Option<String>,
+    pub dock: bool,
+    pub wrist: bool,
 }
 
 /// Apply CLI overrides to a default Placement. Any field not overridden
@@ -113,6 +115,9 @@ pub fn seed_dev_view(
     dev.show_macros = cfg.appearance.show_macros;
     dev.show_volume = cfg.appearance.show_volume;
     dev.show_system = cfg.appearance.show_system;
+    dev.vr_left_handed = cfg.vr.left_handed;
+    dev.vr_clip_angle = cfg.vr.clip_angle.clamp(30.0, 90.0);
+    dev.vr_wrist_opacity = cfg.vr.wrist_opacity.clamp(0.2, 1.0);
     dev.battery_osc.enabled = cfg.osc.battery_params;
     dev.battery_osc.prefix = cfg.osc.battery_prefix.trim_matches('/').to_string();
     dev.reduce_motion = cfg.appearance.reduce_motion;
@@ -131,6 +136,9 @@ pub fn seed_dev_view(
     }
     if test.show_history {
         dev.show_history = true;
+    }
+    if test.dock {
+        dev.dock_layout = true;
     }
     if let Some(p) = test.page.as_deref().and_then(rsoverlay_ui::shell::Page::from_slug) {
         dev.page = p;
@@ -221,6 +229,11 @@ pub fn config_from_dev_view(
     out.appearance.show_volume = dev.show_volume;
     out.appearance.show_system = dev.show_system;
     out.osc.battery_params = dev.battery_osc.enabled;
+    out.vr = rsoverlay_core::config::VrCfg {
+        left_handed: dev.vr_left_handed,
+        clip_angle: dev.vr_clip_angle,
+        wrist_opacity: dev.vr_wrist_opacity,
+    };
     out.appearance.reduce_motion = dev.reduce_motion;
     out.macros = rsoverlay_core::config::Macros(
         dev.macros
@@ -404,6 +417,7 @@ fn configs_equivalent(a: &rsoverlay_core::Config, b: &rsoverlay_core::Config) ->
         && (a.placement.opacity - b.placement.opacity).abs() < 0.001
         && a.night_light == b.night_light
         && a.osc == b.osc
+        && a.vr == b.vr
 }
 
 /// Save the given surface frame to a PNG. BGRA → RGBA swizzle, then
@@ -846,7 +860,13 @@ pub fn run(
                             &gpu.queue,
                             &overlay_target.view,
                             raw_input,
-                            |ctx| dev_view.ui_with(ctx, Some(&injector)),
+                            |ctx| {
+                                if test.wrist {
+                                    let _ = dev_view.wrist_ui(ctx);
+                                } else {
+                                    dev_view.ui_with(ctx, Some(&injector));
+                                }
+                            },
                         );
 
                         // 2. Blit the overlay target into the window.

@@ -154,6 +154,45 @@ fn nav_item(ui: &mut egui::Ui, p: Page, selected: bool, badge: usize, accent: eg
     (rect, resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked())
 }
 
+/// SteamVR-style dock: a centred row of large icon tiles (VR dashboard).
+pub fn dock(ui: &mut egui::Ui, page: &mut Page, badge: usize, accent: egui::Color32) {
+    const TILE: egui::Vec2 = egui::vec2(96.0, 72.0);
+    const GAP: f32 = 10.0;
+    let n = Page::ALL.len() as f32;
+    let total = n * TILE.x + (n - 1.0) * GAP;
+    ui.horizontal(|ui| {
+        ui.add_space(((ui.available_width() - total) / 2.0).max(0.0));
+        ui.spacing_mut().item_spacing.x = GAP;
+        for p in Page::ALL {
+            let (rect, resp) = ui.allocate_exact_size(TILE, egui::Sense::click());
+            let selected = *page == p;
+            let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
+            let on = motion::toggle(ui.ctx(), resp.id.with("sel"), selected, motion::MEDIUM);
+            let base = motion::mix(theme::BG_CARD, egui::Color32::from_rgb(0x1C, 0x20, 0x26), hover);
+            ui.painter().rect_filled(rect, 14.0, motion::mix(base, accent.gamma_multiply(0.18), on));
+            let tint = motion::mix(theme::FG_MUTED, accent, on);
+            let icon_rect = egui::Rect::from_center_size(rect.center() - egui::vec2(0.0, 10.0), egui::vec2(28.0, 28.0));
+            icon(p.icon(), 28.0, tint).paint_at(ui, icon_rect);
+            ui.painter().text(
+                rect.center_bottom() - egui::vec2(0.0, 12.0),
+                egui::Align2::CENTER_CENTER,
+                p.label(),
+                egui::FontId::proportional(theme::SIZE_CAPTION + 1.0),
+                motion::mix(theme::FG_MUTED, theme::FG_PRIMARY, on.max(hover)),
+            );
+            if p == Page::Notifications && badge > 0 {
+                let c = rect.right_top() + egui::vec2(-16.0, 14.0);
+                ui.painter().circle_filled(c, 9.0, accent);
+                ui.painter().text(c, egui::Align2::CENTER_CENTER, badge.min(99).to_string(),
+                    egui::FontId::monospace(theme::SIZE_CAPTION), theme::BG_ROOT);
+            }
+            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                *page = p;
+            }
+        }
+    });
+}
+
 /// What the header asked for this frame.
 #[derive(Default)]
 pub struct HeaderActions {

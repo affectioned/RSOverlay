@@ -373,6 +373,11 @@ pub struct Controller {
     pub trigger: f32,
     /// Thumbstick / trackpad (x, y), each -1..=1.
     pub stick: [f32; 2],
+    /// Full device-to-standing pose (for grabbing panels).
+    pub pose: HmdMatrix34_t,
+    /// Application-menu button (B on Index, menu on wands).
+    pub menu: bool,
+    pub grip: bool,
 }
 
 /// Pointing ray of a tracked pose: origin = translation column,
@@ -460,6 +465,11 @@ impl<'a> System<'a> {
 
     /// Left + right hand controllers with a valid pose this frame.
     pub fn controllers(&self) -> Vec<Controller> {
+        self.tracking().1
+    }
+
+    /// HMD pose (device 0) + hand controllers, from one pose fetch.
+    pub fn tracking(&self) -> (Option<HmdMatrix34_t>, Vec<Controller>) {
         let t = self.table();
         let mut poses = [sys::TrackedDevicePose_t {
             mDeviceToAbsoluteTracking: HmdMatrix34_t { m: [[0.0; 4]; 3] },
@@ -492,7 +502,11 @@ impl<'a> System<'a> {
                 continue;
             }
             let (origin, dir) = ray_from_pose(&pose.mDeviceToAbsoluteTracking);
+            let bit = |b: u32| st.ulButtonPressed & (1u64 << b) != 0;
             out.push(Controller {
+                pose: pose.mDeviceToAbsoluteTracking,
+                menu: bit(sys::k_EButton_ApplicationMenu),
+                grip: bit(sys::k_EButton_Grip),
                 index: idx,
                 hand,
                 origin,
@@ -505,7 +519,8 @@ impl<'a> System<'a> {
                 stick: st.rAxis[0],
             });
         }
-        out
+        let hmd = poses.first().filter(|p| p.bPoseIsValid).map(|p| p.mDeviceToAbsoluteTracking);
+        (hmd, out)
     }
 
     /// Device index for a hand, if that controller is connected.

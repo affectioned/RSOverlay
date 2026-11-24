@@ -14,10 +14,28 @@ pub struct Config {
     pub placement: Placement,
     pub night_light: NightLightCfg,
     pub osc: OscCfg,
+    pub vr: VrCfg,
     /// Virtual StreamDeck buttons. Serialized as `[[macros]]` tables.
     /// Must stay the last field: TOML arrays of tables have to follow
     /// every plain table in the document.
     pub macros: Macros,
+}
+
+/// VR presentation behaviour (XSO-equivalent knobs).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VrCfg {
+    /// The wrist goes on the *other* hand; the laser hand is this one.
+    pub left_handed: bool,
+    /// Panels fade out when viewed more than this many degrees off-axis.
+    pub clip_angle: f32,
+    pub wrist_opacity: f32,
+}
+
+impl Default for VrCfg {
+    fn default() -> Self {
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0 }
+    }
 }
 
 /// VRChat OSC output beyond the chatbox.
@@ -87,8 +105,8 @@ impl Default for Macros {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Appearance {
-    /// Accent color stored as `#rrggbb` hex. Falls back to the muted
-    /// teal default if missing or malformed.
+    /// Accent color stored as `#rrggbb` hex. Falls back to the rose
+    /// default if missing or malformed.
     pub accent_hex: String,
     pub show_mirror: bool,
     pub show_media: bool,
@@ -118,7 +136,7 @@ pub struct Appearance {
 impl Default for Appearance {
     fn default() -> Self {
         Self {
-            accent_hex: "#7DD3C0".into(),
+            accent_hex: "#E88FA2".into(),
             show_mirror: true,
             show_media: true,
             show_chat: true,

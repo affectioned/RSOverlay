@@ -23,6 +23,9 @@ pub mod system;
 pub mod theme;
 pub mod views;
 pub mod volume;
+pub mod vrkeyboard;
+pub mod window_panel;
+pub mod wrist;
 
 pub struct EguiPanel {
     pub ctx: egui::Context,
@@ -30,6 +33,7 @@ pub struct EguiPanel {
     width: u32,
     height: u32,
     ppp: f32,
+    clear: wgpu::Color,
 }
 
 impl EguiPanel {
@@ -46,7 +50,7 @@ impl EguiPanel {
         ctx.set_pixels_per_point(ppp);
         theme::install(&ctx);
         icons::install_loaders(&ctx);
-        Self { ctx, renderer, width, height, ppp }
+        Self { ctx, renderer, width, height, ppp, clear: wgpu::Color::BLACK }
     }
 
     /// UI scale. VR uses a larger value than the desktop preview: the
@@ -54,6 +58,12 @@ impl EguiPanel {
     pub fn set_pixels_per_point(&mut self, ppp: f32) {
         self.ppp = ppp;
         self.ctx.set_pixels_per_point(ppp);
+    }
+
+    /// Background the target is cleared to before egui draws. VR panels
+    /// clear to transparent so rounded corners show the world behind.
+    pub fn set_clear(&mut self, clear: wgpu::Color) {
+        self.clear = clear;
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -91,7 +101,7 @@ impl EguiPanel {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         // BG_ROOT = pure black (AMOLED).
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        load: wgpu::LoadOp::Clear(self.clear),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
