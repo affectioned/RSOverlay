@@ -208,9 +208,6 @@ pub struct DevView {
     pub show_media: bool,
     pub show_chat: bool,
     pub show_keyboard: bool,
-    /// Dashboard quick actions the VR shell carries out (recenter,
-    /// stats pop-out), taken once per frame like a wrist action.
-    pub dash_action: crate::wrist::WristAction,
     /// VR dashboard docking, shown in its bottom bar like every other
     /// floating panel; the VR shell owns the pose and reports back here.
     pub dash_attach: crate::window_panel::Attach,
@@ -325,7 +322,6 @@ impl Default for DevView {
             show_media: true,
             show_chat: true,
             show_keyboard: false,
-            dash_action: Default::default(),
             dash_attach: crate::window_panel::Attach::World,
             dash_dock: None,
             dash_close: false,
@@ -805,9 +801,6 @@ impl DevView {
                 if q.add_window {
                     self.page = crate::shell::Page::Desktop;
                 }
-                // VR-side actions ride the wrist's action path.
-                self.dash_action.recenter |= q.recenter;
-                self.dash_action.popout_stats |= q.stats;
             });
         egui::TopBottomPanel::top("header")
             .frame(root.inner_margin(egui::Margin { left: 20.0, right: 20.0, top: 14.0, bottom: 10.0 }))

@@ -196,7 +196,7 @@ impl Preset {
             ],
             Self::Dashboard => vec![
                 widget(vec![WidgetKind::System, WidgetKind::NowPlaying], -46.0, 0.75, 1.52),
-                dash(Page::Home, 0.0, 0.72, 1.48, Some((0.06, 0.29))),
+                dash(Page::Home, 0.0, 0.72, 1.48, Some((0.07, 0.27))),
                 wrist(false, Vec3::new(-0.27, 1.07, -0.33), None),
             ],
             Self::WristCompact => vec![wrist(false, Vec3::new(-0.15, 1.30, -0.30), Some((0.90, 0.07)))],

@@ -11,7 +11,7 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else 'docs/store/overview.png'
 WRIST_CROP = (400, 400, 1520, 1030)  # 16:9 around the wrist
 SHOTS = [
     ('vr-work', 'Working in VR', 'editor, notes and terminal around you · stats · keyboard', None),
-    ('vr-dashboard', 'Dashboard', 'labelled sidebar · quick actions · pop-out widgets', None),
+    ('vr-dashboard', 'Dashboard', 'labelled sidebar · search · pop-out widgets', None),
     ('vr-social', 'Social VR', 'chatbox + keyboard · notifications · now playing', None),
     ('vr-gaming', 'In game', 'guide pinned aside · media and battery widgets · wrist', None),
     ('vr-wrist-compact', 'Wrist toolbar', 'compact by default: the everyday four + More', WRIST_CROP),

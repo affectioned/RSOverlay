@@ -60,8 +60,8 @@ time live, so you can check the claim yourself.
 - Every button is labelled; tooltips name the rest
 
 **Dashboard**
-- Labelled sidebar with quick actions (Keyboard, Add window, Recenter,
-  Stats); global search across settings, pages and windows
+- Labelled sidebar; global search across settings, pages and windows
+  (everyday actions live on the wrist, not duplicated here)
 - Pop any card out as a floating widget; drop widgets onto each other to
   merge them into tabs, split them back out
 

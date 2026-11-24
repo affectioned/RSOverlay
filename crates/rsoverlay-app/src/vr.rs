@@ -1126,10 +1126,6 @@ mod imp {
                     laser::paint_cursor(ctx, cursor, accent);
                 });
             }
-            // Dashboard quick actions (recenter, stats) share this path.
-            let quick = std::mem::take(&mut dev_view.dash_action);
-            act.recenter |= quick.recenter;
-            act.popout_stats |= quick.popout_stats;
             toggle_dash |= act.toggle_dashboard;
             if act.toggle_keyboard {
                 dev_view.show_keyboard = !dev_view.show_keyboard;

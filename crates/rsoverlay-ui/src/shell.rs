@@ -7,8 +7,8 @@
 //! ```text
 //! ┌────────────┬─────────────────────────────────────────┐
 //! │ ◈ RSOverlay│ 10:42 PM · Tue, Nov 24  [Search…]  82 🔔 │  header
-//! │ ⌨ Kbd ＋Add├─────────────────────────────────────────┤
-//! │ ↻ Rec ▮Stat│  Home                                   │  quick actions
+//! │ ⌨ Kbd ＋Add├─────────────────────────────────────────┤  quick actions
+//! │            │  Home                                   │  (desktop only)
 //! │            │  ──                                     │
 //! │ ⌂ Home     │                                         │
 //! │ ▭ Desktop  │        page content (scrolls)           │
@@ -104,16 +104,11 @@ impl Page {
 pub struct QuickActions {
     pub toggle_keyboard: bool,
     pub add_window: bool,
-    /// VR only: gather panels in front of you.
-    pub recenter: bool,
-    /// VR only: pop the performance widget out (or close it).
-    pub stats: bool,
 }
 
-/// Left sidebar: wordmark, the quick actions you reach for constantly
-/// (Keyboard, Add window, and in VR Recenter + Stats) as labelled
-/// tiles, then the labelled destinations. `badge` puts a count on
-/// Notifications.
+/// Left sidebar: wordmark, quick-action tiles (desktop only: in VR the
+/// wrist toolbar already carries Keyboard / Add / Recenter / Stats), then
+/// the labelled destinations. `badge` puts a count on Notifications.
 ///
 /// The selection highlight is one shape that *slides* to the active
 /// row: a placeholder is reserved in the paint list before the rows are
@@ -133,9 +128,15 @@ pub fn nav_rail(ui: &mut egui::Ui, page: &mut Page, badge: usize, keyboard_open:
         ui.add_space(2.0);
         ui.label(egui::RichText::new("RSOverlay").font(theme::display(19.0)).color(theme::FG_PRIMARY));
     });
-    ui.add_space(8.0);
-    let quick = quick_actions(ui, keyboard_open, vr, accent);
-    ui.add_space(10.0);
+    let quick = if vr {
+        ui.add_space(6.0);
+        QuickActions::default()
+    } else {
+        ui.add_space(8.0);
+        let q = quick_actions(ui, keyboard_open, accent);
+        ui.add_space(10.0);
+        q
+    };
     let slot = ui.painter().add(egui::Shape::Noop);
     let mut selected_rect = None;
     for p in Page::ALL {
@@ -158,16 +159,12 @@ pub fn nav_rail(ui: &mut egui::Ui, page: &mut Page, badge: usize, keyboard_open:
 }
 
 /// Two-column grid of labelled action tiles.
-fn quick_actions(ui: &mut egui::Ui, keyboard_open: bool, vr: bool, accent: egui::Color32) -> QuickActions {
+fn quick_actions(ui: &mut egui::Ui, keyboard_open: bool, accent: egui::Color32) -> QuickActions {
     let mut out = QuickActions::default();
-    let mut tiles: Vec<(egui::ImageSource<'static>, &str, &str, bool, u8)> = vec![
+    let tiles: [(egui::ImageSource<'static>, &str, &str, bool, u8); 2] = [
         (icons::KEYBOARD, "Keyboard", if keyboard_open { "Hide the keyboard" } else { "Show the keyboard" }, keyboard_open, 0),
         (icons::PLUS, "Add window", "Capture a window or monitor", false, 1),
     ];
-    if vr {
-        tiles.push((icons::RECENTER, "Recenter", "Gather panels in front of you", false, 2));
-        tiles.push((icons::CHART, "Stats", "Pop out performance stats", false, 3));
-    }
     const GAP: f32 = 6.0;
     let w = (ui.available_width() - GAP) / 2.0;
     for pair in tiles.chunks(2) {
@@ -188,9 +185,7 @@ fn quick_actions(ui: &mut egui::Ui, keyboard_open: bool, vr: bool, accent: egui:
                 if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     match id {
                         0 => out.toggle_keyboard = true,
-                        1 => out.add_window = true,
-                        2 => out.recenter = true,
-                        _ => out.stats = true,
+                        _ => out.add_window = true,
                     }
                 }
             }
