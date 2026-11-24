@@ -15,6 +15,7 @@ pub mod locale;
 pub mod macros;
 pub mod media;
 pub mod now_playing;
+pub mod shell;
 pub mod theme;
 pub mod views;
 pub mod volume;

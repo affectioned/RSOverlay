@@ -5,11 +5,9 @@
 
 use crate::battery::{BatteryReading, LowBatteryWatch};
 use crate::icons::{self, icon};
-use crate::locale;
 use crate::media::{self, MediaCommand, MediaInfo};
 use crate::now_playing::NowPlayingBridge;
 use crate::theme;
-use chrono::Local;
 use rsoverlay_notify::Notification;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -164,6 +162,11 @@ pub struct DevView {
     pub macros: crate::macros::MacroDeck,
     pub show_volume: bool,
     volume: crate::volume::VolumeCard,
+    /// Current dashboard page (nav rail selection).
+    pub page: crate::shell::Page,
+    /// Notifications received since the Notifications page was last
+    /// open — drives the rail badge and the header bell highlight.
+    unread: usize,
     /// Active UI language + keyboard layout. Both persist to config.
     pub language: crate::i18n::Lang,
     /// Set to true when the user clicks "Reset defaults" in the
@@ -207,6 +210,8 @@ impl Default for DevView {
             macros: crate::macros::MacroDeck::default(),
             show_volume: true,
             volume: crate::volume::VolumeCard::default(),
+            page: crate::shell::Page::default(),
+            unread: 0,
             language: crate::i18n::Lang::default(),
             reset_requested: false,
             placement: Placement::default(),
@@ -230,6 +235,7 @@ impl DevView {
     pub fn push_notification(&mut self, n: Notification) {
         const MAX_HISTORY: usize = 50;
         self.notifications_received += 1;
+        self.unread += 1;
         let timeout = n.timeout.clamp(0.5, 30.0);
         let expires = Instant::now() + Duration::from_secs_f32(timeout);
         self.history.push_back(HistoryEntry {
@@ -250,6 +256,7 @@ impl DevView {
     pub fn clear_all_notifications(&mut self) {
         self.toasts.clear();
         self.history.clear();
+        self.unread = 0;
     }
 
     /// Replace the battery readings (the app polls OpenVR every few
@@ -326,100 +333,38 @@ impl DevView {
                 st.visuals.selection.stroke.color = theme::BG_ROOT;
             });
         }
-        egui::CentralPanel::default()
-            .frame(egui::Frame::central_panel(&ctx.style()).fill(theme::BG_ROOT))
+        if self.page == crate::shell::Page::Notifications {
+            self.unread = 0;
+        }
+
+        let root = egui::Frame::none().fill(theme::BG_ROOT);
+        egui::TopBottomPanel::top("header")
+            .frame(root.inner_margin(egui::Margin { left: 20.0, right: 20.0, top: 14.0, bottom: 10.0 }))
+            .show_separator_line(false)
             .show(ctx, |ui| {
-                ui.add_space(theme::GUTTER);
-                clock_card(ui, accent);
-                ui.add_space(theme::GUTTER);
-                // Content row: left column packs all cards vertically,
-                // right column holds the mirror. Default window height
-                // is sized to fit every left-column card without
-                // scrolling — if the user shrinks the window, bottom
-                // cards clip but that's a conscious resize choice.
-                ui.horizontal_top(|ui| {
-                    ui.vertical(|ui| {
-                        ui.set_width(theme::COL_LEFT_WIDTH);
-                        if self.show_media {
-                            media_card(ui, self.media.as_ref(), accent);
-                            ui.add_space(theme::GUTTER);
-                        }
-                        stats_card(
-                            ui,
-                            self.frame,
-                            self.last_fps,
-                            self.notifications_received,
-                            accent,
-                        );
-                        ui.add_space(theme::GUTTER);
-                        if self.show_volume {
-                            self.volume.show(ui, accent);
-                            ui.add_space(theme::GUTTER);
-                        }
-                        if self.show_battery {
-                            crate::battery::card(
-                                ui,
-                                &self.batteries,
-                                &mut self.battery_warn_pct,
-                                accent,
-                            );
-                            ui.add_space(theme::GUTTER);
-                        }
-                        forward_toggle(ui, &mut self.forward_input, accent);
-                        ui.add_space(theme::GUTTER);
-                        if self.show_chat {
-                            if let Some(msg) =
-                                chatbox_card(
-                                    ui,
-                                    &mut self.chat_draft,
-                                    &mut self.now_playing.enabled,
-                                    accent,
-                                )
-                            {
-                                self.pending_chat = Some(msg);
-                            }
-                            ui.add_space(theme::GUTTER);
-                        }
-                        if self.show_macros {
-                            self.macros.card(ui, injector, accent);
-                            ui.add_space(theme::GUTTER);
-                        }
-                        if self.show_history {
-                            if history_card(ui, &self.history, accent) {
-                                self.clear_all_notifications();
-                            }
-                            ui.add_space(theme::GUTTER);
-                        }
-                        if appearance_card(
-                            ui,
-                            &mut self.accent,
-                            &mut self.show_mirror,
-                            &mut self.show_media,
-                            &mut self.show_chat,
-                            &mut self.show_keyboard,
-                            &mut self.show_history,
-                            &mut self.show_battery,
-                            &mut self.show_macros,
-                            &mut self.show_volume,
-                            &mut self.language,
-                            &mut self.keyboard.layout,
-                        ) {
-                            self.reset_requested = true;
-                        }
-                        ui.add_space(theme::GUTTER);
-                        placement_card(ui, &mut self.placement, accent);
-                    });
-                    ui.add_space(theme::GUTTER);
-                    if self.show_mirror {
-                        ui.vertical(|ui| {
-                            if let Some(hit) =
-                                mirror_card(ui, self.mirror, &mut self.sources, self.forward_input, accent)
-                            {
-                                self.pending_hit = Some(hit);
-                            }
-                        });
-                    }
-                });
+                let act = crate::shell::header(ui, &self.batteries, self.show_keyboard, self.unread, accent);
+                if act.toggle_keyboard {
+                    self.show_keyboard = !self.show_keyboard;
+                }
+                if act.open_notifications {
+                    self.page = crate::shell::Page::Notifications;
+                }
+            });
+        egui::SidePanel::left("nav")
+            .exact_width(crate::shell::RAIL_WIDTH)
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(root.inner_margin(egui::Margin { left: 12.0, right: 0.0, top: 8.0, bottom: 12.0 }))
+            .show(ctx, |ui| {
+                crate::shell::nav_rail(ui, &mut self.page, self.unread, accent);
+            });
+        egui::CentralPanel::default()
+            .frame(root.inner_margin(egui::Margin { left: 20.0, right: 20.0, top: 8.0, bottom: 16.0 }))
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_source(("page", self.page.slug()))
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| self.page_body(ui, injector, accent));
             });
 
         if self.show_keyboard {
@@ -437,7 +382,9 @@ impl DevView {
         }
 
         egui::Area::new(egui::Id::new("toasts"))
-            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-theme::GUTTER, theme::GUTTER))
+            // Below the header strip so toasts never cover the clock or
+            // battery chips.
+            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-theme::GUTTER, 84.0))
             .show(ctx, |ui| {
                 for t in self.toasts.iter() {
                     toast_card(ui, &t.n, accent);
@@ -449,37 +396,94 @@ impl DevView {
     }
 }
 
-fn clock_card(ui: &mut egui::Ui, accent: egui::Color32) {
-    let now = Local::now();
-    // Follow the host's clock convention: 12h with AM/PM on US-English and
-    // friends, 24h everywhere else. Detected from the system locale, not
-    // from chrono; chrono formats, the OS decides.
-    let time = if locale::uses_24h_clock() {
-        now.format("%H:%M").to_string()
-    } else {
-        now.format("%-I:%M %p").to_string()
-    };
-    let date = now.format("%A · %b %-d").to_string();
-    theme::card().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.add(icon(icons::BRAND, 56.0, accent));
-            ui.add_space(14.0);
-            ui.label(theme::headline(&time));
-            ui.add_space(16.0);
-            ui.separator();
-            ui.add_space(8.0);
-            ui.vertical(|ui| {
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.add(icon(icons::CLOCK, 18.0, accent));
-                    ui.add_space(6.0);
-                    ui.label(theme::caption("RSOverlay"));
+impl DevView {
+    fn page_body(
+        &mut self,
+        ui: &mut egui::Ui,
+        injector: Option<&rsoverlay_input::InputInjector>,
+        accent: egui::Color32,
+    ) {
+        use crate::shell::{page_title, Page};
+        page_title(ui, self.page.label());
+        match self.page {
+            Page::Home => {
+                // Two tile columns; each tile honours its Appearance toggle.
+                ui.columns(2, |cols| {
+                    let (l, r) = cols.split_at_mut(1);
+                    let (l, r) = (&mut l[0], &mut r[0]);
+                    if self.show_media {
+                        media_card(l, self.media.as_ref(), accent);
+                        l.add_space(theme::GUTTER);
+                    }
+                    if self.show_volume {
+                        self.volume.show(l, accent);
+                        l.add_space(theme::GUTTER);
+                    }
+                    if self.show_battery {
+                        crate::battery::card(r, &self.batteries, &mut self.battery_warn_pct, accent);
+                        r.add_space(theme::GUTTER);
+                    }
+                    if self.show_macros {
+                        self.macros.card(r, injector, accent);
+                        r.add_space(theme::GUTTER);
+                    }
+                    if self.show_chat {
+                        if let Some(msg) = chatbox_card(r, &mut self.chat_draft, &mut self.now_playing.enabled, accent) {
+                            self.pending_chat = Some(msg);
+                        }
+                    }
                 });
-                ui.label(theme::body_muted(&date));
-            });
-        });
-    });
+            }
+            Page::Desktop => {
+                forward_toggle(ui, &mut self.forward_input, accent);
+                ui.add_space(theme::GUTTER);
+                if let Some(hit) = mirror_card(ui, self.mirror, &mut self.sources, self.forward_input, accent) {
+                    self.pending_hit = Some(hit);
+                }
+            }
+            Page::Audio => {
+                media_card(ui, self.media.as_ref(), accent);
+                ui.add_space(theme::GUTTER);
+                self.volume.show(ui, accent);
+            }
+            Page::Chat => {
+                if let Some(msg) = chatbox_card(ui, &mut self.chat_draft, &mut self.now_playing.enabled, accent) {
+                    self.pending_chat = Some(msg);
+                }
+            }
+            Page::Macros => self.macros.card(ui, injector, accent),
+            Page::Notifications => {
+                if history_card(ui, &self.history, accent) {
+                    self.clear_all_notifications();
+                }
+            }
+            Page::Settings => {
+                ui.columns(2, |cols| {
+                    let (l, r) = cols.split_at_mut(1);
+                    let (l, r) = (&mut l[0], &mut r[0]);
+                    if appearance_card(
+                        l,
+                        &mut self.accent,
+                        &mut self.show_mirror,
+                        &mut self.show_media,
+                        &mut self.show_chat,
+                        &mut self.show_keyboard,
+                        &mut self.show_history,
+                        &mut self.show_battery,
+                        &mut self.show_macros,
+                        &mut self.show_volume,
+                        &mut self.language,
+                        &mut self.keyboard.layout,
+                    ) {
+                        self.reset_requested = true;
+                    }
+                    placement_card(r, &mut self.placement, accent);
+                    r.add_space(theme::GUTTER);
+                    stats_card(r, self.frame, self.last_fps, self.notifications_received, accent);
+                });
+            }
+        }
+    }
 }
 
 fn media_card(ui: &mut egui::Ui, info: Option<&MediaInfo>, accent: egui::Color32) {
@@ -643,7 +647,8 @@ fn history_card(
             return;
         }
         egui::ScrollArea::vertical()
-            .max_height(220.0)
+            .id_source("history")
+            .max_height(560.0)
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 for entry in history.iter().rev() {
@@ -803,9 +808,12 @@ fn chatbox_card(
                 .desired_width(f32::INFINITY)
                 .hint_text("message VRChat chatbox…"),
         );
-        let submit =
-            (edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                || ui.button(egui::RichText::new("send").color(accent)).clicked();
+        // Own row: inside a justified column a bare button would stretch
+        // to full width.
+        let clicked = ui
+            .horizontal(|ui| ui.button(egui::RichText::new("send").color(accent)).clicked())
+            .inner;
+        let submit = (edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) || clicked;
         if submit && !draft.trim().is_empty() {
             result = Some(rsoverlay_osc::ChatMessage {
                 text: draft.clone(),

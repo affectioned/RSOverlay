@@ -54,6 +54,7 @@ pub struct TestHooks {
     pub show_history: bool,
     pub demo_batteries: bool,
     pub switch_to_window: Option<String>,
+    pub page: Option<String>,
 }
 
 /// Apply CLI overrides to a default Placement. Any field not overridden
@@ -126,6 +127,9 @@ pub fn seed_dev_view(
     }
     if test.show_history {
         dev.show_history = true;
+    }
+    if let Some(p) = test.page.as_deref().and_then(rsoverlay_ui::shell::Page::from_slug) {
+        dev.page = p;
     }
     if test.demo_batteries {
         use rsoverlay_ui::battery::BatteryReading;

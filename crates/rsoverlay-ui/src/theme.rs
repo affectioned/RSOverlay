@@ -14,7 +14,9 @@ pub const BG_ROOT: Color32 = Color32::from_rgb(0x00, 0x00, 0x00);
 pub const BG_CARD: Color32 = Color32::from_rgb(0x0F, 0x11, 0x15);
 /// Inner stroke on every card — replaces the shadow we'd otherwise burn into
 /// the OpenVR compositor at low alpha (which bands).
-pub const STROKE_CARD: Color32 = Color32::from_rgba_premultiplied(0xFF, 0xFF, 0xFF, 0x0F); // ~6%
+// Premultiplied: RGB must not exceed alpha. The old (0xFF,0xFF,0xFF,0x0F)
+// literal broke that and rendered as a near-solid white border.
+pub const STROKE_CARD: Color32 = Color32::from_rgba_premultiplied(0x10, 0x10, 0x10, 0x10); // ~6%
 pub const FG_PRIMARY: Color32 = Color32::from_rgb(0xF2, 0xF3, 0xF5);
 pub const FG_MUTED: Color32 = Color32::from_rgb(0x8A, 0x8F, 0x99);
 /// Default accent — overridden at runtime by the user via the Appearance card.
@@ -44,7 +46,6 @@ pub const PAD_CARD_H: f32 = 18.0;
 pub const PAD_CARD_V: f32 = 16.0;
 
 pub const GUTTER: f32 = 12.0;
-pub const COL_LEFT_WIDTH: f32 = 300.0;
 
 pub const SIZE_HEADLINE: f32 = 42.0;
 pub const SIZE_CARD_TITLE: f32 = 18.0;
@@ -57,7 +58,9 @@ pub fn install(ctx: &egui::Context) {
     style.visuals.override_text_color = Some(FG_PRIMARY);
     style.visuals.panel_fill = BG_ROOT;
     style.visuals.window_fill = BG_ROOT;
-    style.visuals.extreme_bg_color = BG_CARD;
+    // Text fields + slider rails: one step above the card so inputs read
+    // as inputs (equal to BG_CARD they vanished into the card).
+    style.visuals.extreme_bg_color = egui::Color32::from_rgb(0x16, 0x19, 0x1E);
     style.visuals.widgets.noninteractive.bg_fill = BG_CARD;
     style.spacing.item_spacing = egui::vec2(GUTTER, 8.0);
     // Scrollbar — wide enough and bright enough to actually read against
@@ -66,12 +69,22 @@ pub fn install(ctx: &egui::Context) {
     style.spacing.scroll.bar_inner_margin = 4.0;
     style.spacing.scroll.bar_outer_margin = 2.0;
     style.spacing.scroll.handle_min_length = 32.0;
-    style.visuals.widgets.inactive.bg_fill =
-        egui::Color32::from_rgb(0x2A, 0x2E, 0x34);
-    style.visuals.widgets.hovered.bg_fill =
-        egui::Color32::from_rgb(0x3A, 0x3E, 0x44);
-    style.visuals.widgets.active.bg_fill =
-        egui::Color32::from_rgb(0x55, 0x5A, 0x62);
+    // Controls sit two steps above the card fill — visible on OLED
+    // without the old flat grey slabs. No borders; fill carries state.
+    for (w, fill) in [
+        (&mut style.visuals.widgets.inactive, egui::Color32::from_rgb(0x1C, 0x20, 0x26)),
+        (&mut style.visuals.widgets.hovered, egui::Color32::from_rgb(0x27, 0x2C, 0x33)),
+        (&mut style.visuals.widgets.active, egui::Color32::from_rgb(0x33, 0x39, 0x41)),
+    ] {
+        w.bg_fill = fill;
+        w.weak_bg_fill = fill;
+        w.bg_stroke = egui::Stroke::NONE;
+        w.rounding = egui::Rounding::same(8.0);
+    }
+    style.visuals.widgets.inactive.fg_stroke.color = FG_PRIMARY;
+    // VR hit targets: lasers jitter, so every control gets real height.
+    style.spacing.interact_size.y = 30.0;
+    style.spacing.button_padding = egui::vec2(12.0, 6.0);
     ctx.set_style(style);
 
     // Tabular numerals look right on data; we fake it by using the monospace

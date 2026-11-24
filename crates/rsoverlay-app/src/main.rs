@@ -141,6 +141,11 @@ struct Args {
     /// Desktop card's source picker uses.
     #[arg(long, value_name = "TITLE")]
     switch_to_window: Option<String>,
+
+    /// Open the dashboard on this page (home / desktop / audio / chat /
+    /// macros / notifications / settings). Handy with --screenshot.
+    #[arg(long, value_name = "PAGE")]
+    page: Option<String>,
 }
 
 fn parse_vec3(s: &str) -> Result<(f32, f32, f32), String> {
@@ -274,6 +279,7 @@ fn main() -> Result<()> {
         show_history: args.show_history,
         demo_batteries: args.demo_batteries,
         switch_to_window: args.switch_to_window.clone(),
+        page: args.page.clone(),
     };
 
     let result = match mode {
