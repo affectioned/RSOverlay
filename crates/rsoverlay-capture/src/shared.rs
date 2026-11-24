@@ -30,10 +30,10 @@ use windows::Win32::Graphics::Direct3D::{
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
     D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-    D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SDK_VERSION,
+    D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SDK_VERSION,
     D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
 };
-use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
+use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM_SRGB, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, IDXGIAdapter, IDXGIAdapter1, IDXGIFactory1, IDXGIKeyedMutex,
     IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource, IDXGIResource1,
@@ -59,7 +59,7 @@ pub struct SharedCapture {
     /// mutex-enabled resource. Dead-code allowance until the fence
     /// handshake lands.
     #[allow(dead_code)]
-    keyed_mutex: IDXGIKeyedMutex,
+    keyed_mutex: Option<IDXGIKeyedMutex>,
     /// NT HANDLE we hand to the render crate so it can open the texture
     /// on the wgpu DX12 device. Closed on drop.
     shared_handle: HANDLE,
@@ -117,7 +117,10 @@ impl SharedCapture {
                 Height: height,
                 MipLevels: 1,
                 ArraySize: 1,
-                Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                // _SRGB: same typeless family as the duplication frame,
+                // so CopyResource stays legal; the D3D12 reader opens it
+                // as Bgra8UnormSrgb to match the CPU path's color.
+                Format: DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
                 SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
                 Usage: D3D11_USAGE_DEFAULT,
                 BindFlags: (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32,
@@ -127,7 +130,12 @@ impl SharedCapture {
                 // reader-side acquire (see shared.rs note) the mutex
                 // flag just makes D3D12 reads return undefined data.
                 // Sync comes back with the D3D12 fence milestone.
-                MiscFlags: D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0 as u32,
+                //
+                // D3D11 rejects SHARED_NTHANDLE on its own (E_INVALIDARG):
+                // it must be paired with SHARED or SHARED_KEYEDMUTEX.
+                // Without the pairing this path never ran and every
+                // session silently fell back to CPU readback.
+                MiscFlags: (D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0) as u32,
             };
             let mut tex: Option<ID3D11Texture2D> = None;
             device
@@ -137,9 +145,9 @@ impl SharedCapture {
 
             // Pull the keyed mutex out of the texture; it's the sync
             // primitive both sides use.
-            let keyed_mutex: IDXGIKeyedMutex = shared_tex
-                .cast()
-                .context("IDXGIKeyedMutex cast on shared tex")?;
+            // Only present once the texture carries SHARED_KEYEDMUTEX
+            // (fence milestone); today the cast is expected to fail.
+            let keyed_mutex: Option<IDXGIKeyedMutex> = shared_tex.cast().ok();
 
             // CreateSharedHandle requires IDXGIResource1.
             let resource1: IDXGIResource1 =

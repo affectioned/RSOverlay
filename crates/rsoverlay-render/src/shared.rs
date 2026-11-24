@@ -81,7 +81,10 @@ impl SharedMirror {
 
         let hal_texture = wgpu_hal::dx12::Device::texture_from_raw(
             d3d12_resource,
-            TextureFormat::Bgra8Unorm,
+            // sRGB to match the CPU mirror path (MirrorTexture): sampling
+            // decodes to linear before egui re-encodes on output. A plain
+            // Unorm view here double-encodes and washes the mirror out.
+            TextureFormat::Bgra8UnormSrgb,
             TextureDimension::D2,
             Extent3d { width, height, depth_or_array_layers: 1 },
             1,
@@ -94,7 +97,7 @@ impl SharedMirror {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
-            format: TextureFormat::Bgra8Unorm,
+            format: TextureFormat::Bgra8UnormSrgb,
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
             view_formats: &[],
         };
