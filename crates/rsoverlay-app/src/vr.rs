@@ -527,6 +527,7 @@ mod imp {
         info!("VR shell up — wrist on the off hand; double-press left A/X (or the wrist Menu button) shows the dashboard");
 
         while running.load(Ordering::SeqCst) {
+            let frame_start = Instant::now();
             frame = frame.wrapping_add(1);
             dev_view.frame = frame;
             dev_view.last_fps = fps.tick();
@@ -1339,6 +1340,8 @@ mod imp {
                     warn!("elevated relaunch cancelled or failed");
                 }
             }
+
+            dev_view.record_frame_ms(frame_start.elapsed().as_secs_f32() * 1000.0);
 
             let tint = dev_view.overlay_tint();
             wrist.apply_tint(&overlay, [tint[0], tint[1], tint[2], tint[3] * dev_view.vr_wrist_opacity]);

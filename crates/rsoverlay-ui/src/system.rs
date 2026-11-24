@@ -13,6 +13,11 @@ pub struct SystemCard {
 }
 
 impl SystemCard {
+    /// Latest sample (starts the sampler on first use).
+    pub fn snapshot(&mut self) -> Option<rsoverlay_sysinfo::Snapshot> {
+        Some(self.sampler.get_or_insert_with(Sampler::spawn).snapshot())
+    }
+
     pub fn show(&mut self, ui: &mut egui::Ui, overlay_fps: f32, accent: egui::Color32) {
         let s = self.sampler.get_or_insert_with(Sampler::spawn).snapshot();
         theme::card().show(ui, |ui| {

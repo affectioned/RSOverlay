@@ -192,6 +192,10 @@ impl Default for Placement {
 pub struct DevView {
     pub frame: u64,
     pub last_fps: f32,
+    /// CPU time to build + render every panel this frame (ms), and a
+    /// short history for the sparkline. Set by the app.
+    pub frame_ms: f32,
+    frame_ms_hist: VecDeque<f32>,
     pub mirror: Option<MirrorHandle>,
     pub sources: SourcePicker,
     /// Sources currently open as floating VR window overlays (set by the
@@ -282,6 +286,8 @@ impl Default for DevView {
         Self {
             frame: 0,
             last_fps: 0.0,
+            frame_ms: 0.0,
+            frame_ms_hist: VecDeque::new(),
             mirror: None,
             sources: SourcePicker::default(),
             open_windows: Vec::new(),
@@ -457,6 +463,16 @@ impl DevView {
             .map(|b| self.battery_est.estimate(b).filter(|e| !e.charging).map(|e| crate::battery::format_duration(e.secs)))
             .collect();
         crate::wrist::show(ctx, &self.batteries, &est, playing, track.as_deref(), self.unread, self.accent)
+    }
+
+    /// Record this frame's render cost (ms) for the Performance card.
+    pub fn record_frame_ms(&mut self, ms: f32) {
+        // Light smoothing so the headline number is readable.
+        self.frame_ms = if self.frame_ms == 0.0 { ms } else { self.frame_ms * 0.9 + ms * 0.1 };
+        self.frame_ms_hist.push_back(ms);
+        while self.frame_ms_hist.len() > 120 {
+            self.frame_ms_hist.pop_front();
+        }
     }
 
     /// RGB multiplier + opacity to apply to the whole overlay.
@@ -802,7 +818,8 @@ impl DevView {
                     }
                     placement_card(r, &mut self.placement, accent);
                     r.add_space(theme::GUTTER);
-                    stats_card(r, self.frame, self.last_fps, self.notifications_received, accent);
+                    let snap = self.system.snapshot();
+                    performance_card(r, snap.as_ref(), self.frame_ms, &self.frame_ms_hist, self.last_fps, self.notifications_received, accent);
                     r.add_space(theme::GUTTER);
                     if reset_card(r, &mut self.reset_armed_at) {
                         self.reset_requested = true;
@@ -999,6 +1016,76 @@ fn card_header(
     });
 }
 
+/// RSOverlay's own footprint, measured live — the "how light are we"
+/// card. Only our own numbers; no claims we can't measure here.
+fn performance_card(
+    ui: &mut egui::Ui,
+    snap: Option<&rsoverlay_sysinfo::Snapshot>,
+    frame_ms: f32,
+    hist: &VecDeque<f32>,
+    fps: f32,
+    notifs: u64,
+    accent: egui::Color32,
+) {
+    use rsoverlay_sysinfo::format_bytes;
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::PULSE, "Stats", accent);
+        ui.add_space(8.0);
+        let own = snap.map(|s| s.own).unwrap_or_default();
+        let tiles = [
+            ("CPU", own.cpu_pct.map_or("—".into(), |c| format!("{c:.1}%"))),
+            ("RAM", if own.ram > 0 { format_bytes(own.ram) } else { "—".into() }),
+            ("VRAM", own.vram.map_or("—".into(), format_bytes)),
+            ("Frame", format!("{frame_ms:.2} ms")),
+        ];
+        ui.columns(4, |cols| {
+            for (c, (k, v)) in cols.iter_mut().zip(tiles) {
+                c.vertical_centered(|ui| {
+                    ui.label(egui::RichText::new(v).size(20.0).strong().color(accent));
+                    ui.label(egui::RichText::new(k).size(theme::SIZE_CAPTION + 1.0).color(theme::FG_MUTED));
+                });
+            }
+        });
+        ui.add_space(8.0);
+        // Frame-time sparkline (last ~2 s of frames).
+        let (r, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 36.0), egui::Sense::hover());
+        ui.painter().rect_filled(r, 8.0, egui::Color32::from_rgb(0x16, 0x19, 0x1E));
+        if hist.len() > 1 {
+            let top = hist.iter().copied().fold(1.0_f32, f32::max);
+            let pts: Vec<egui::Pos2> = hist
+                .iter()
+                .enumerate()
+                .map(|(i, v)| {
+                    egui::pos2(
+                        r.left() + 6.0 + (r.width() - 12.0) * i as f32 / (hist.len() - 1) as f32,
+                        r.bottom() - 6.0 - (r.height() - 12.0) * (v / top).min(1.0),
+                    )
+                })
+                .collect();
+            ui.painter().add(egui::Shape::line(pts, egui::Stroke::new(1.5_f32, accent)));
+            ui.painter().text(r.right_top() + egui::vec2(-8.0, 6.0), egui::Align2::RIGHT_TOP, format!("peak {top:.1} ms"),
+                egui::FontId::monospace(theme::SIZE_CAPTION), theme::FG_MUTED);
+        }
+        ui.add_space(8.0);
+        for badge in [
+            "GPU-to-GPU capture — zero CPU frame copies",
+            "Native Rust — no browser engine",
+            "Hidden panels cost nothing — not rendered",
+        ] {
+            ui.horizontal(|ui| {
+                ui.painter().circle_filled(ui.cursor().min + egui::vec2(4.0, 9.0), 3.0, accent);
+                ui.add_space(14.0);
+                ui.label(egui::RichText::new(badge).size(theme::SIZE_CAPTION + 2.0).color(theme::FG_PRIMARY));
+            });
+        }
+        ui.add_space(6.0);
+        kv(ui, "overlay fps", &format!("{fps:.0}"));
+        kv(ui, "notifications", &notifs.to_string());
+    });
+}
+
+#[allow(dead_code)]
 fn stats_card(ui: &mut egui::Ui, frame_count: u64, fps: f32, notifs: u64, accent: egui::Color32) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());

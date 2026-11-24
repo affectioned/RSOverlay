@@ -28,6 +28,25 @@ pub struct Snapshot {
     pub ram_total: u64,
     pub vram_used: Option<u64>,
     pub vram_total: Option<u64>,
+    /// RSOverlay's own footprint (the "how light are we" numbers).
+    pub own: Own,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Own {
+    /// % of the *whole machine's* CPU (all cores = 100).
+    pub cpu_pct: Option<f32>,
+    /// Working set (resident RAM).
+    pub ram: u64,
+    /// Video memory this process has committed (our textures only).
+    pub vram: Option<u64>,
+}
+
+/// Own CPU % of the machine from two process-time samples (100 ns
+/// ticks) over `wall_s` seconds on `cores` logical CPUs.
+pub fn own_cpu_pct(prev_ticks: u64, now_ticks: u64, wall_s: f64, cores: usize) -> Option<f32> {
+    let busy = now_ticks.checked_sub(prev_ticks)? as f64 / 1e7;
+    (wall_s > 0.0 && cores > 0).then(|| (100.0 * busy / (wall_s * cores as f64)).clamp(0.0, 100.0) as f32)
 }
 
 pub struct Sampler {
@@ -88,7 +107,14 @@ mod imp {
     use std::sync::{Arc, Mutex};
     use windows::core::{w, PCWSTR};
     use windows::Win32::Foundation::FILETIME;
-    use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, DXGI_ADAPTER_DESC1, DXGI_ADAPTER_FLAG_SOFTWARE};
+    use super::{own_cpu_pct, Own};
+    use windows::core::ComInterface;
+    use windows::Win32::Graphics::Dxgi::{
+        CreateDXGIFactory1, IDXGIAdapter3, IDXGIFactory1, DXGI_ADAPTER_DESC1, DXGI_ADAPTER_FLAG_SOFTWARE,
+        DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO,
+    };
+    use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX};
+    use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
     use windows::Win32::System::Performance::{
         PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterArrayW, PdhOpenQueryW,
         PDH_CSTATUS_VALID_DATA, PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_MORE_DATA,
@@ -99,6 +125,10 @@ mod imp {
     pub(super) fn worker(shared: Arc<Mutex<Snapshot>>, stop: Arc<AtomicBool>) {
         let pdh = Pdh::open();
         let vram_total = largest_dedicated_vram();
+        let adapter3 = largest_adapter3();
+        let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+        let mut prev_own = own_ticks();
+        let mut prev_wall = std::time::Instant::now();
         let mut prev = system_times();
         // First reading after 250 ms so the card isn't blank for a full
         // interval; steady-state cadence after that.
@@ -124,9 +154,65 @@ mod imp {
                     snap.vram_used = sum_counter(p.vram).map(|v| v as u64);
                 }
             }
+            // Our own footprint.
+            let now_own = own_ticks();
+            let wall = prev_wall.elapsed().as_secs_f64();
+            prev_wall = std::time::Instant::now();
+            snap.own = Own {
+                cpu_pct: prev_own.zip(now_own).and_then(|(p, n)| own_cpu_pct(p, n, wall, cores)),
+                ram: own_working_set(),
+                vram: adapter3.as_ref().and_then(|a| unsafe {
+                    let mut info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
+                    a.QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut info).ok()?;
+                    Some(info.CurrentUsage)
+                }),
+            };
+            prev_own = now_own;
             if let Ok(mut s) = shared.lock() {
                 *s = snap;
             }
+        }
+    }
+
+    fn own_ticks() -> Option<u64> {
+        let (mut c, mut e, mut k, mut u) = (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+        unsafe { GetProcessTimes(GetCurrentProcess(), &mut c, &mut e, &mut k, &mut u) }.ok()?;
+        let t = |f: FILETIME| (u64::from(f.dwHighDateTime) << 32) | u64::from(f.dwLowDateTime);
+        Some(t(k) + t(u))
+    }
+
+    fn own_working_set() -> u64 {
+        let mut pmc = PROCESS_MEMORY_COUNTERS_EX { cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32, ..Default::default() };
+        let ok = unsafe {
+            GetProcessMemoryInfo(GetCurrentProcess(), &mut pmc as *mut _ as *mut PROCESS_MEMORY_COUNTERS, pmc.cb).is_ok()
+        };
+        if ok {
+            pmc.WorkingSetSize as u64
+        } else {
+            0
+        }
+    }
+
+    /// The adapter we render on (largest dedicated VRAM), as IDXGIAdapter3
+    /// for per-process video-memory queries.
+    fn largest_adapter3() -> Option<IDXGIAdapter3> {
+        unsafe {
+            let f: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
+            let mut best: Option<(usize, IDXGIAdapter3)> = None;
+            let mut i = 0;
+            while let Ok(a) = f.EnumAdapters1(i) {
+                i += 1;
+                let mut d = DXGI_ADAPTER_DESC1::default();
+                if a.GetDesc1(&mut d).is_err() || d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0 {
+                    continue;
+                }
+                if best.as_ref().is_none_or(|(m, _)| d.DedicatedVideoMemory > *m) {
+                    if let Ok(a3) = a.cast::<IDXGIAdapter3>() {
+                        best = Some((d.DedicatedVideoMemory, a3));
+                    }
+                }
+            }
+            best.map(|(_, a)| a)
         }
     }
 
@@ -241,6 +327,14 @@ mod tests {
         assert_eq!(cpu_pct((5, 5, 5), (5, 5, 5)), None);
         // Counter went backwards (shouldn't happen) → no reading, no panic.
         assert_eq!(cpu_pct((10, 10, 10), (5, 5, 5)), None);
+    }
+
+    #[test]
+    fn own_cpu_normalised_to_whole_machine() {
+        // 0.1 s of CPU over 1 s wall on 8 cores = 1.25 % of the machine.
+        assert!((own_cpu_pct(0, 1_000_000, 1.0, 8).unwrap() - 1.25).abs() < 1e-4);
+        assert_eq!(own_cpu_pct(5, 1, 1.0, 8), None);
+        assert_eq!(own_cpu_pct(0, 1, 0.0, 8), None);
     }
 
     #[test]

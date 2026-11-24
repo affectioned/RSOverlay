@@ -52,7 +52,7 @@ fn static_entries() -> Vec<Entry> {
         card("Run as administrator", "Settings › Administrator", "uac admin elevated permissions", Settings, "Administrator"),
         card("Reset all settings", "Settings › Reset", "defaults factory restore", Settings, "Reset"),
         card("Placement", "Settings", "position offset size curve curvature opacity anchor", Settings, "Placement"),
-        card("Stats", "Settings", "fps frame debug", Settings, "Stats"),
+        card("Performance stats", "Settings › Stats", "fps frame time cpu ram vram memory footprint light fast", Settings, "Stats"),
         card("Volume mixer", "Audio", "sound mute master app volume", Audio, "Volume"),
         card("Now playing", "Audio", "music media spotify song track play pause", Audio, "Now playing"),
         card("VRChat chatbox", "Chat", "osc message type send", Chat, "VRChat chatbox"),

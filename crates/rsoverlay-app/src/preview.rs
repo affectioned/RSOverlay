@@ -731,6 +731,7 @@ pub fn run(
                         egui_panel.resize(config.width, config.height);
                     }
                     WindowEvent::RedrawRequested => {
+                        let frame_start = Instant::now();
                         // 0a. Drain any newly-arrived notifications.
                         if let Some(n) = notify.as_mut() {
                             while let Ok(notif) = n.rx.try_recv() {
@@ -944,6 +945,7 @@ pub fn run(
                         }
 
                         frame.present();
+                        dev_view.record_frame_ms(frame_start.elapsed().as_secs_f32() * 1000.0);
 
                         // "Reset defaults" clicked: snap DevView back to
                         // pristine state. Persistence tick on the next
