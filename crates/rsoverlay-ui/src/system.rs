@@ -23,9 +23,9 @@ impl SystemCard {
         theme::card().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                ui.add(icon(icons::PULSE, 18.0, accent));
+                ui.add(icon(icons::PULSE, 18.0, crate::theme::FG_MUTED));
                 ui.add_space(6.0);
-                ui.label(theme::caption("System"));
+                ui.label(theme::card_title("System"));
                 crate::widgets::popout_button(ui, "System", accent);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(

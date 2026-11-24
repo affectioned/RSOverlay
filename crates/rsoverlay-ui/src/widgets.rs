@@ -145,7 +145,7 @@ pub fn popout_button(ui: &mut egui::Ui, caption: &str, accent: egui::Color32) {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(28.0, 22.0), egui::Sense::click());
     let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
     let p = ui.painter();
-    p.rect_filled(rect, 6.0, motion::mix(egui::Color32::from_rgb(0x16, 0x19, 0x1E), accent.gamma_multiply(0.25), hover));
+    p.rect_filled(rect, 6.0, motion::mix(crate::theme::BG_RAISED, accent.gamma_multiply(0.25), hover));
     // ↗ drawn as vectors: box corner + diagonal arrow.
     let c = rect.center();
     let s = egui::Stroke::new(1.6_f32, motion::mix(theme::FG_MUTED, accent, hover));
@@ -182,7 +182,7 @@ pub fn frame(
     let mut out = WidgetAction::default();
     egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
         let full = ui.max_rect().shrink(4.0);
-        theme::glass(ui.painter(), full.shrink(8.0), 30.0);
+        theme::surface(ui.painter(), full.shrink(8.0), 22.0);
         let inner = full.shrink2(egui::vec2(14.0, 10.0));
         let tab_r = egui::Rect::from_min_size(inner.min, egui::vec2(inner.width(), TAB_H));
         let bar_r = egui::Rect::from_min_max(egui::pos2(inner.left(), inner.bottom() - BAR_H), inner.max);
@@ -194,7 +194,7 @@ pub fn frame(
             let sel = i == active;
             let (r, resp) = tui.allocate_exact_size(egui::vec2(tab_width(&tui, k.label()), TAB_H - 6.0), egui::Sense::click());
             let hover = motion::toggle(tui.ctx(), resp.id, resp.hovered(), motion::FAST);
-            let fill = if sel { accent.gamma_multiply(0.22) } else { motion::mix(egui::Color32::from_rgb(0x16, 0x19, 0x1E), egui::Color32::from_rgb(0x27, 0x2C, 0x33), hover) };
+            let fill = if sel { accent.gamma_multiply(0.22) } else { motion::mix(crate::theme::BG_RAISED, crate::theme::BG_HOVER, hover) };
             tui.painter().rect_filled(r, 12.0, fill);
             let tint = if sel { accent } else { theme::FG_MUTED };
             icon(k.icon(), 16.0, tint).paint_at(&tui, egui::Rect::from_center_size(egui::pos2(r.left() + 18.0, r.center().y), egui::vec2(16.0, 16.0)));
@@ -267,6 +267,7 @@ mod tests {
     #[test]
     fn popout_request_roundtrip() {
         let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
         assert_eq!(take_popout_request(&ctx), None);
         ctx.data_mut(|d| d.insert_temp(egui::Id::new(POPOUT_REQ), WidgetKind::Volume));
         assert_eq!(take_popout_request(&ctx), Some(WidgetKind::Volume));

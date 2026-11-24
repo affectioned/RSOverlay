@@ -12,6 +12,7 @@ Legend: ✅ shipped · 🟡 partial · ❌ missing · ⛔ non-goal
 
 | XSO feature | RSO | Notes |
 |---|---|---|
+| Launch with SteamVR (startup overlay app) | ✅ | M58: registers a .vrmanifest via IVRApplications; auto-launch on first run, user-toggleable in SteamVR › Startup; exits on SteamVR quit |
 | Desktop mirror | ✅ | M14 (GPU path actually live since `03ad266`) |
 | Per-window capture | ✅ | M31, WGC |
 | Window previews in picker | ❌ | thumbnails in the source dropdown |

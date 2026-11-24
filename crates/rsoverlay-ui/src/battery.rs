@@ -159,9 +159,9 @@ pub fn card(
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
-            ui.add(icon(icons::BATTERY, 18.0, accent));
+            ui.add(icon(icons::BATTERY, 18.0, crate::theme::FG_MUTED));
             ui.add_space(6.0);
-            ui.label(theme::caption("Battery"));
+            ui.label(theme::card_title("Battery"));
             crate::widgets::popout_button(ui, "Battery", accent);
         });
         ui.add_space(6.0);
@@ -174,6 +174,7 @@ pub fn card(
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.label(theme::body_muted("warn below"));
+            crate::theme::fit_slider(ui);
             ui.add(egui::Slider::new(warn_pct, 5..=50).suffix("%"));
         });
         ui.checkbox(&mut osc.enabled, "send to VRChat avatar").on_hover_text(format!(

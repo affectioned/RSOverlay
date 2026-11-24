@@ -208,6 +208,9 @@ pub struct DevView {
     pub show_media: bool,
     pub show_chat: bool,
     pub show_keyboard: bool,
+    /// Dashboard quick actions the VR shell carries out (recenter,
+    /// stats pop-out), taken once per frame like a wrist action.
+    pub dash_action: crate::wrist::WristAction,
     pub show_history: bool,
     pub show_battery: bool,
     pub battery_warn_pct: u8,
@@ -313,6 +316,7 @@ impl Default for DevView {
             show_media: true,
             show_chat: true,
             show_keyboard: false,
+            dash_action: Default::default(),
             show_history: false,
             show_battery: true,
             battery_warn_pct: 20,
@@ -642,17 +646,36 @@ impl DevView {
         }
         let enter = crate::motion::progress(ctx, self.page_since, crate::motion::MEDIUM);
 
-        // VR: the dashboard is a rounded, softly bordered, slightly
-        // translucent glass slab (panels draw transparent on top of it);
-        // desktop keeps the edge-to-edge AMOLED black.
+        // VR: the dashboard is one rounded black surface with a hairline
+        // edge (panels draw transparent on top of it); desktop keeps the
+        // edge-to-edge AMOLED black.
         let root = if self.dock_layout {
-            let slab = ctx.screen_rect().shrink(4.0);
+            let slab = ctx.screen_rect().shrink(6.0);
             let bg = ctx.layer_painter(egui::LayerId::background());
-            theme::glass(&bg, slab.shrink(10.0), 36.0);
+            theme::surface(&bg, slab, 24.0);
             egui::Frame::none()
         } else {
             egui::Frame::none().fill(theme::BG_ROOT)
         };
+        // One labelled sidebar on both surfaces: in VR as on the desktop,
+        // every destination names itself.
+        egui::SidePanel::left("nav")
+            .exact_width(crate::shell::RAIL_WIDTH)
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(root.inner_margin(egui::Margin { left: 14.0, right: 0.0, top: 14.0, bottom: 16.0 }))
+            .show(ctx, |ui| {
+                let q = crate::shell::nav_rail(ui, &mut self.page, self.unread, self.show_keyboard, self.dock_layout, accent);
+                if q.toggle_keyboard {
+                    self.show_keyboard = !self.show_keyboard;
+                }
+                if q.add_window {
+                    self.page = crate::shell::Page::Desktop;
+                }
+                // VR-side actions ride the wrist's action path.
+                self.dash_action.recenter |= q.recenter;
+                self.dash_action.popout_stats |= q.stats;
+            });
         egui::TopBottomPanel::top("header")
             .frame(root.inner_margin(egui::Margin { left: 20.0, right: 20.0, top: 14.0, bottom: 10.0 }))
             .show_separator_line(false)
@@ -662,32 +685,14 @@ impl DevView {
                 if !self.search.query.is_empty() && self.sources.choices.is_empty() {
                     self.sources.wants_refresh = true;
                 }
-                let act = crate::shell::header(ui, &self.batteries, self.show_keyboard, self.unread, &mut self.search, &entries, accent);
+                let act = crate::shell::header(ui, &self.batteries, self.unread, &mut self.search, &entries, accent);
                 if let Some(t) = act.search_pick {
                     self.apply_search(ui.ctx(), t);
-                }
-                if act.toggle_keyboard {
-                    self.show_keyboard = !self.show_keyboard;
                 }
                 if act.open_notifications {
                     self.page = crate::shell::Page::Notifications;
                 }
             });
-        if self.dock_layout {
-            egui::TopBottomPanel::bottom("dock")
-                .frame(root.inner_margin(egui::Margin { left: 20.0, right: 20.0, top: 6.0, bottom: 14.0 }))
-                .show_separator_line(false)
-                .show(ctx, |ui| crate::shell::dock(ui, &mut self.page, self.unread, &mut self.show_keyboard, accent));
-        } else {
-        egui::SidePanel::left("nav")
-            .exact_width(crate::shell::RAIL_WIDTH)
-            .resizable(false)
-            .show_separator_line(false)
-            .frame(root.inner_margin(egui::Margin { left: 12.0, right: 0.0, top: 8.0, bottom: 12.0 }))
-            .show(ctx, |ui| {
-                crate::shell::nav_rail(ui, &mut self.page, self.unread, accent);
-            });
-        }
         egui::CentralPanel::default()
             .frame(root.inner_margin(egui::Margin { left: 20.0, right: 20.0, top: 8.0, bottom: 16.0 }))
             .show(ctx, |ui| {
@@ -762,7 +767,12 @@ impl DevView {
         accent: egui::Color32,
     ) {
         use crate::shell::{page_title, Page};
-        page_title(ui, self.page.label());
+        if self.page == Page::Home {
+            use chrono::Timelike;
+            page_title(ui, crate::shell::greeting(chrono::Local::now().hour()));
+        } else {
+            page_title(ui, self.page.label());
+        }
         match self.page {
             Page::Home => {
                 // Two tile columns; each tile honours its Appearance toggle.
@@ -966,11 +976,13 @@ fn accessibility_card(ui: &mut egui::Ui, scale: &mut f32, lasers: &mut bool, las
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.label(theme::body_muted("VR text size"));
+            crate::theme::fit_slider(ui);
             ui.add(egui::Slider::new(scale, 0.8..=1.6).fixed_decimals(1).suffix("×"));
         });
         ui.checkbox(lasers, "Laser beams").on_hover_text("Draw a beam from each controller while it points at a panel");
         ui.horizontal(|ui| {
             ui.label(theme::body_muted("Laser angle"));
+            crate::theme::fit_slider(ui);
             ui.add(egui::Slider::new(laser_angle, -30.0..=30.0).suffix("°").fixed_decimals(0));
         })
         .response
@@ -997,12 +1009,14 @@ fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opac
         });
         ui.horizontal(|ui| {
             ui.label(theme::body_muted("Hide beyond"));
+            crate::theme::fit_slider(ui);
             ui.add(egui::Slider::new(clip, 30.0..=90.0).suffix("°").fixed_decimals(0));
         })
         .response
         .on_hover_text("Panels fade out when you look at them from further off-axis than this");
         ui.horizontal(|ui| {
             ui.label(theme::body_muted("Wrist opacity"));
+            crate::theme::fit_slider(ui);
             ui.add(egui::Slider::new(wrist_opacity, 0.2..=1.0).fixed_decimals(2));
         });
     });
@@ -1036,12 +1050,14 @@ fn pointer_card(ui: &mut egui::Ui, smoothing: &mut f32, scroll: &mut f32, accent
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.label(theme::body_muted("Cursor smoothing"));
+            crate::theme::fit_slider(ui);
             ui.add(egui::Slider::new(smoothing, 0.0..=1.0).fixed_decimals(2));
         })
         .response
         .on_hover_text("Steadier cursor when moving slowly; stays responsive when moving fast");
         ui.horizontal(|ui| {
             ui.label(theme::body_muted("Scroll speed"));
+            crate::theme::fit_slider(ui);
             ui.add(egui::Slider::new(scroll, 0.25..=3.0).fixed_decimals(2).suffix("×"));
         });
     });
@@ -1120,9 +1136,9 @@ fn card_header(
     accent: egui::Color32,
 ) {
     ui.horizontal(|ui| {
-        ui.add(icon(source, 18.0, accent));
+        ui.add(icon(source, 18.0, crate::theme::FG_MUTED));
         ui.add_space(6.0);
-        ui.label(theme::caption(label));
+        ui.label(theme::card_title(label));
         crate::widgets::popout_button(ui, label, accent);
     });
 }
@@ -1161,7 +1177,7 @@ fn performance_card(
         ui.add_space(8.0);
         // Frame-time sparkline (last ~2 s of frames).
         let (r, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 36.0), egui::Sense::hover());
-        ui.painter().rect_filled(r, 8.0, egui::Color32::from_rgb(0x16, 0x19, 0x1E));
+        ui.painter().rect_filled(r, 8.0, crate::theme::BG_RAISED);
         if hist.len() > 1 {
             let top = hist.iter().copied().fold(1.0_f32, f32::max);
             let pts: Vec<egui::Pos2> = hist
@@ -1184,10 +1200,10 @@ fn performance_card(
             "Native Rust — no browser engine",
             "Hidden panels cost nothing — not rendered",
         ] {
-            ui.horizontal(|ui| {
+            ui.horizontal_top(|ui| {
                 ui.painter().circle_filled(ui.cursor().min + egui::vec2(4.0, 9.0), 3.0, accent);
                 ui.add_space(14.0);
-                ui.label(egui::RichText::new(badge).size(theme::SIZE_CAPTION + 2.0).color(theme::FG_PRIMARY));
+                ui.add(egui::Label::new(egui::RichText::new(badge).size(theme::SIZE_CAPTION + 2.0).color(theme::FG_PRIMARY)).wrap(true));
             });
         }
         ui.add_space(6.0);
@@ -1657,6 +1673,7 @@ mod laser_integration_tests {
     #[test]
     fn laser_click_drives_nav_rail() {
         let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
         let (mut dev, mut laser, mut t) = (view(), LaserInput::default(), 0.0);
         frame(&ctx, &mut dev, &mut laser, &mut t, None, 0.0);
         let y = settings_y(&ctx, &mut dev, &mut laser, &mut t);
@@ -1666,6 +1683,7 @@ mod laser_integration_tests {
     #[test]
     fn held_trigger_swept_onto_rail_does_not_click() {
         let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
         let (mut dev, mut laser, mut t) = (view(), LaserInput::default(), 0.0);
         frame(&ctx, &mut dev, &mut laser, &mut t, None, 0.0);
         let y = settings_y(&ctx, &mut dev, &mut laser, &mut t).expect("rail item");
@@ -1687,6 +1705,7 @@ mod search_integration_tests {
     #[test]
     fn picking_a_setting_jumps_and_flashes_its_card() {
         let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
         let mut dev = DevView { show_volume: false, show_system: false, ..Default::default() };
         let mut t = 0.0;
         let mut frame = |dev: &mut DevView| {

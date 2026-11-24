@@ -18,9 +18,9 @@ impl VolumeCard {
         theme::card().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                ui.add(icon(icons::SPEAKER, 18.0, accent));
+                ui.add(icon(icons::SPEAKER, 18.0, crate::theme::FG_MUTED));
                 ui.add_space(6.0);
-                ui.label(theme::caption("Volume"));
+                ui.label(theme::card_title("Volume"));
                 crate::widgets::popout_button(ui, "Volume", accent);
             });
             ui.add_space(6.0);

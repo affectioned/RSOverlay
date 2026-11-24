@@ -450,6 +450,24 @@ impl<'a> System<'a> {
         unsafe { &*self.table }
     }
 
+    /// Drain the system event queue; true when SteamVR asked every app
+    /// to quit (it's shutting down). The quit is acknowledged here, so
+    /// the caller just has to exit promptly.
+    pub fn quit_requested(&self) -> bool {
+        let t = self.table();
+        let mut ev = sys::VREvent_t::default();
+        let mut quit = false;
+        while unsafe { (t.PollNextEvent)(&mut ev, std::mem::size_of::<sys::VREvent_t>() as u32) } {
+            if ev.eventType == sys::VREvent_Quit {
+                quit = true;
+            }
+        }
+        if quit {
+            unsafe { (t.AcknowledgeQuit_Exiting)() };
+        }
+        quit
+    }
+
     /// Every connected device that reports battery status, in OpenVR
     /// index order (HMD is always index 0 when present). Lighthouse base
     /// stations are skipped — they're mains-powered.
@@ -648,7 +666,49 @@ pub struct Input<'a> {
     _parent: std::marker::PhantomData<&'a OpenVr>,
 }
 
+/// What registering the app manifest did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppRegistration {
+    /// First registration: auto-launch was switched on.
+    pub newly_installed: bool,
+    /// SteamVR will start RSOverlay with itself.
+    pub auto_launch: bool,
+}
+
 impl OpenVr {
+    /// Register `manifest` (absolute path to a .vrmanifest) with SteamVR
+    /// permanently, so RSOverlay shows up under SteamVR's startup
+    /// overlay apps. Auto-launch is switched on only the first time the
+    /// app is installed; after that it's the user's choice in SteamVR
+    /// (Settings → Startup / Shutdown), and we never flip it back.
+    pub fn register_app(&self, manifest: &std::path::Path, app_key: &str) -> Result<AppRegistration, OpenVrError> {
+        let mut err: sys::EVRInitError = 0;
+        let ptr = unsafe {
+            (self.fns.vr_get_generic_interface)(sys::IVRApplications_FnTable_Version.as_ptr() as *const _, &mut err)
+        };
+        if ptr.is_null() || err != sys::EVRInitError_None {
+            return Err(OpenVrError::InterfaceMissing(err));
+        }
+        let t = unsafe { &*(ptr as *const sys::IVRApplicationsFnTable) };
+        let key = CString::new(app_key).map_err(|_| OpenVrError::InvalidKey)?;
+        let path = CString::new(manifest.to_string_lossy().as_ref()).map_err(|_| OpenVrError::InvalidKey)?;
+        unsafe {
+            let was_installed = (t.IsApplicationInstalled)(key.as_ptr());
+            // Re-added every start: picks up a moved exe / changed args.
+            let r = (t.AddApplicationManifest)(path.as_ptr(), false);
+            if r != sys::EVRApplicationError_None {
+                return Err(OpenVrError::OverlayOp { op: "AddApplicationManifest", code: r as u32 });
+            }
+            if !was_installed {
+                let r = (t.SetApplicationAutoLaunch)(key.as_ptr(), true);
+                if r != sys::EVRApplicationError_None {
+                    return Err(OpenVrError::OverlayOp { op: "SetApplicationAutoLaunch", code: r as u32 });
+                }
+            }
+            Ok(AppRegistration { newly_installed: !was_installed, auto_launch: (t.GetApplicationAutoLaunch)(key.as_ptr()) })
+        }
+    }
+
     /// Register `manifest` (absolute path to actions.json) and resolve
     /// the RSOverlay action set.
     pub fn input(&self, manifest: &std::path::Path) -> Result<Input<'_>, OpenVrError> {

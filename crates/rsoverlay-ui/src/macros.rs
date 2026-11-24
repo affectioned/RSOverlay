@@ -44,9 +44,9 @@ impl MacroDeck {
         theme::card().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                ui.add(crate::icons::icon(crate::icons::PULSE, 18.0, accent));
+                ui.add(crate::icons::icon(crate::icons::PULSE, 18.0, crate::theme::FG_MUTED));
                 ui.add_space(6.0);
-                ui.label(theme::caption("Macros"));
+                ui.label(theme::card_title("Macros"));
                 crate::widgets::popout_button(ui, "Macros", accent);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let label = if self.editing { "Done" } else { "Edit" };

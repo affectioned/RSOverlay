@@ -1,15 +1,18 @@
-//! Dashboard shell: page model, navigation rail and header strip.
+//! Dashboard shell: page model, sidebar and header strip.
 //!
-//! Layout, all on AMOLED black:
+//! The same layout on the desktop and in VR, all on AMOLED black. A
+//! labelled sidebar (every destination says what it is; no guessing
+//! from icons), a quiet header, serif page titles:
 //!
 //! ```text
-//! ┌──────────────────────────────────────────────────────┐
-//! │ (R) 10:42 PM  Tuesday · Nov 24     HMD 82  L 14  ⌨ 🔔3│  header
-//! ├────────────┬─────────────────────────────────────────┤
-//! │ ▌Home      │                                         │
-//! │  Desktop   │        page content (scrolls)           │
-//! │  Audio     │                                         │
-//! │  …         │                                         │
+//! ┌────────────┬─────────────────────────────────────────┐
+//! │ ◈ RSOverlay│ 10:42 PM · Tue, Nov 24  [Search…]  82 🔔 │  header
+//! │ ⌨ Kbd ＋Add├─────────────────────────────────────────┤
+//! │ ↻ Rec ▮Stat│  Good evening                           │  quick actions
+//! │ ⌂ Home     │                                         │
+//! │ ▭ Desktop  │        page content (scrolls)           │
+//! │ ♪ Audio    │                                         │
+//! │ …          │                                         │
 //! └────────────┴─────────────────────────────────────────┘
 //! ```
 //!
@@ -23,8 +26,8 @@ use crate::motion;
 use crate::theme;
 use chrono::Local;
 
-pub const RAIL_WIDTH: f32 = 184.0;
-pub const NAV_ITEM_H: f32 = 44.0;
+pub const RAIL_WIDTH: f32 = 200.0;
+pub const NAV_ITEM_H: f32 = 42.0;
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub enum Page {
@@ -95,130 +98,144 @@ impl Page {
     }
 }
 
-/// Left navigation rail. `badge` puts a count pill on Notifications.
+/// What the sidebar's quick actions asked for this frame.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct QuickActions {
+    pub toggle_keyboard: bool,
+    pub add_window: bool,
+    /// VR only: gather panels in front of you.
+    pub recenter: bool,
+    /// VR only: pop the performance widget out (or close it).
+    pub stats: bool,
+}
+
+/// Left sidebar: wordmark, the quick actions you reach for constantly
+/// (Keyboard, Add window, and in VR Recenter + Stats) as labelled
+/// tiles, then the labelled destinations. `badge` puts a count on
+/// Notifications.
 ///
 /// The selection highlight is one shape that *slides* to the active
 /// row: a placeholder is reserved in the paint list before the rows are
 /// drawn, then filled once every row rect is known, so it sits beneath
 /// icons and labels without a second layer.
-pub fn nav_rail(ui: &mut egui::Ui, page: &mut Page, badge: usize, accent: egui::Color32) {
+pub fn nav_rail(ui: &mut egui::Ui, page: &mut Page, badge: usize, keyboard_open: bool, vr: bool, accent: egui::Color32) -> QuickActions {
+    // Hairline between sidebar and content.
+    let edge = ui.max_rect().right() + 6.0;
+    ui.painter().line_segment(
+        [egui::pos2(edge, ui.max_rect().top() - 4.0), egui::pos2(edge, ui.max_rect().bottom())],
+        egui::Stroke::new(1.0_f32, theme::STROKE_CARD),
+    );
+    ui.horizontal(|ui| {
+        ui.set_height(44.0);
+        ui.add_space(8.0);
+        ui.add(icon(icons::BRAND, 22.0, accent));
+        ui.add_space(2.0);
+        ui.label(egui::RichText::new("RSOverlay").font(theme::serif(21.0)).color(theme::FG_PRIMARY));
+    });
+    ui.add_space(10.0);
+    let quick = quick_actions(ui, keyboard_open, vr, accent);
+    ui.add_space(14.0);
     let slot = ui.painter().add(egui::Shape::Noop);
     let mut selected_rect = None;
     for p in Page::ALL {
         let count = if p == Page::Notifications { badge } else { 0 };
-        let (rect, clicked) = nav_item(ui, p, *page == p, count, accent);
+        let (rect, clicked) = nav_item(ui, p.icon(), p.label(), *page == p, count, accent);
         if clicked {
             *page = p;
         }
         if *page == p {
             selected_rect = Some(rect);
         }
-        ui.add_space(4.0);
+        ui.add_space(2.0);
     }
-    let Some(target) = selected_rect else { return };
-    let ctx = ui.ctx().clone();
-    let y = motion::value(&ctx, egui::Id::new("nav-highlight-y"), target.top(), motion::MEDIUM);
-    let rect = egui::Rect::from_min_size(egui::pos2(target.left(), y), target.size());
-    let bar = egui::Rect::from_min_size(rect.left_top() + egui::vec2(0.0, 10.0), egui::vec2(3.0, rect.height() - 20.0));
-    ui.painter().set(
-        slot,
-        egui::Shape::Vec(vec![
-            egui::Shape::rect_filled(rect, theme::RADIUS_CARD, accent.gamma_multiply(0.14)),
-            egui::Shape::rect_filled(bar, 1.5, accent),
-        ]),
-    );
+    if let Some(target) = selected_rect {
+        let ctx = ui.ctx().clone();
+        let y = motion::value(&ctx, egui::Id::new("nav-highlight-y"), target.top(), motion::MEDIUM);
+        let rect = egui::Rect::from_min_size(egui::pos2(target.left(), y), target.size());
+        ui.painter().set(slot, egui::Shape::rect_filled(rect, theme::RADIUS_CONTROL, theme::BG_RAISED));
+    }
+    quick
 }
 
-fn nav_item(ui: &mut egui::Ui, p: Page, selected: bool, badge: usize, accent: egui::Color32) -> (egui::Rect, bool) {
+/// Two-column grid of labelled action tiles.
+fn quick_actions(ui: &mut egui::Ui, keyboard_open: bool, vr: bool, accent: egui::Color32) -> QuickActions {
+    let mut out = QuickActions::default();
+    let mut tiles: Vec<(egui::ImageSource<'static>, &str, &str, bool, u8)> = vec![
+        (icons::KEYBOARD, "Keyboard", if keyboard_open { "Hide the keyboard" } else { "Show the keyboard" }, keyboard_open, 0),
+        (icons::PLUS, "Add window", "Capture a window or monitor", false, 1),
+    ];
+    if vr {
+        tiles.push((icons::RECENTER, "Recenter", "Gather panels in front of you", false, 2));
+        tiles.push((icons::CHART, "Stats", "Pop out performance stats", false, 3));
+    }
+    const GAP: f32 = 6.0;
+    let w = (ui.available_width() - GAP) / 2.0;
+    for pair in tiles.chunks(2) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = GAP;
+            for (src, label, tip, on, id) in pair.iter().cloned() {
+                let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 62.0), egui::Sense::click());
+                let resp = resp.on_hover_text(tip);
+                let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
+                let fill = motion::mix(theme::BG_CARD, theme::BG_RAISED, hover);
+                ui.painter().rect_filled(rect, theme::RADIUS_CONTROL, fill);
+                let stroke = if on { accent } else { theme::STROKE_CARD };
+                ui.painter().rect_stroke(rect, theme::RADIUS_CONTROL, egui::Stroke::new(1.0_f32, stroke));
+                let tint = if on { accent } else { motion::mix(theme::FG_MUTED, theme::FG_PRIMARY, hover) };
+                icon(src, 20.0, tint).paint_at(ui, egui::Rect::from_center_size(rect.center() - egui::vec2(0.0, 10.0), egui::vec2(20.0, 20.0)));
+                ui.painter().text(rect.center() + egui::vec2(0.0, 14.0), egui::Align2::CENTER_CENTER, label,
+                    egui::FontId::proportional(theme::SIZE_CAPTION), motion::mix(theme::FG_MUTED, theme::FG_PRIMARY, hover.max(on as u8 as f32)));
+                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    match id {
+                        0 => out.toggle_keyboard = true,
+                        1 => out.add_window = true,
+                        2 => out.recenter = true,
+                        _ => out.stats = true,
+                    }
+                }
+            }
+        });
+        ui.add_space(GAP - ui.spacing().item_spacing.y);
+    }
+    out
+}
+
+fn nav_item(
+    ui: &mut egui::Ui,
+    src: egui::ImageSource<'static>,
+    label: &str,
+    selected: bool,
+    badge: usize,
+    accent: egui::Color32,
+) -> (egui::Rect, bool) {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), NAV_ITEM_H), egui::Sense::click());
     let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered() && !selected, motion::FAST);
     if hover > 0.0 {
-        ui.painter().rect_filled(rect, theme::RADIUS_CARD, crate::theme::veil((hover * 10.0) as u8));
+        ui.painter().rect_filled(rect, theme::RADIUS_CONTROL, theme::BG_CARD.gamma_multiply(hover));
     }
-    // Icon + label tint cross-fade into the accent as the row activates.
+    // Icon + label brighten as the row activates; the accent is kept
+    // for state that needs attention (badges), not for navigation.
     let on = motion::toggle(ui.ctx(), resp.id.with("sel"), selected, motion::MEDIUM);
-    let tint = motion::mix(theme::FG_MUTED, accent, on);
-    let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + 26.0, rect.center().y), egui::vec2(20.0, 20.0));
-    icon(p.icon(), 20.0, tint).paint_at(ui, icon_rect);
+    let tint = motion::mix(theme::FG_MUTED, theme::FG_PRIMARY, on.max(hover));
+    let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + 22.0, rect.center().y), egui::vec2(18.0, 18.0));
+    icon(src, 18.0, tint).paint_at(ui, icon_rect);
     let painter = ui.painter();
-    painter.text(
-        egui::pos2(rect.left() + 48.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        p.label(),
-        egui::FontId::proportional(theme::SIZE_BODY),
-        motion::mix(theme::FG_MUTED, theme::FG_PRIMARY, on.max(hover)),
-    );
+    let font = if selected { theme::medium(theme::SIZE_BODY) } else { egui::FontId::proportional(theme::SIZE_BODY) };
+    painter.text(egui::pos2(rect.left() + 42.0, rect.center().y), egui::Align2::LEFT_CENTER, label, font, tint);
     if badge > 0 {
         let text = if badge > 99 { "99+".to_string() } else { badge.to_string() };
-        let galley = painter.layout_no_wrap(text, egui::FontId::monospace(theme::SIZE_CAPTION), theme::BG_ROOT);
-        let w = galley.size().x + 12.0;
-        let pill = egui::Rect::from_center_size(egui::pos2(rect.right() - 12.0 - w / 2.0, rect.center().y), egui::vec2(w, 18.0));
-        painter.rect_filled(pill, 9.0, accent);
+        let galley = painter.layout_no_wrap(text, egui::FontId::proportional(theme::SIZE_CAPTION), theme::BG_ROOT);
+        let w = (galley.size().x + 12.0).max(20.0);
+        let pill = egui::Rect::from_center_size(egui::pos2(rect.right() - 10.0 - w / 2.0, rect.center().y), egui::vec2(w, 20.0));
+        painter.rect_filled(pill, 10.0, accent);
         painter.galley(pill.center() - galley.size() / 2.0, galley, theme::BG_ROOT);
     }
     (rect, resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked())
 }
 
-/// SteamVR-style dock: a centred row of large icon tiles (VR dashboard).
-pub fn dock(ui: &mut egui::Ui, page: &mut Page, badge: usize, keyboard: &mut bool, accent: egui::Color32) {
-    const TILE: egui::Vec2 = egui::vec2(76.0, 70.0);
-    const GAP: f32 = 6.0;
-    // Pages + a Keyboard toggle tile at the end.
-    let n = Page::ALL.len() as f32 + 1.0;
-    let total = n * TILE.x + (n - 1.0) * GAP;
-    let left = ui.max_rect().left() + ((ui.available_width() - total) / 2.0).max(0.0);
-    let capsule = egui::Rect::from_min_size(egui::pos2(left - 10.0, ui.cursor().top() - 8.0), egui::vec2(total + 20.0, TILE.y + 16.0));
-    theme::glass(ui.painter(), capsule, 30.0);
-    ui.horizontal(|ui| {
-        ui.add_space(((ui.available_width() - total) / 2.0).max(0.0));
-        ui.spacing_mut().item_spacing.x = GAP;
-        for p in Page::ALL {
-            let (rect, resp) = ui.allocate_exact_size(TILE, egui::Sense::click());
-            let selected = *page == p;
-            let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
-            let on = motion::toggle(ui.ctx(), resp.id.with("sel"), selected, motion::MEDIUM);
-            let base = crate::theme::veil((hover * 16.0) as u8);
-            ui.painter().rect_filled(rect, 22.0, motion::mix(base, accent.gamma_multiply(0.2), on));
-            let tint = motion::mix(theme::FG_MUTED, accent, on);
-            let icon_rect = egui::Rect::from_center_size(rect.center() - egui::vec2(0.0, 10.0), egui::vec2(28.0, 28.0));
-            icon(p.icon(), 28.0, tint).paint_at(ui, icon_rect);
-            ui.painter().text(
-                rect.center_bottom() - egui::vec2(0.0, 12.0),
-                egui::Align2::CENTER_CENTER,
-                p.label(),
-                egui::FontId::proportional(theme::SIZE_CAPTION + 1.0),
-                motion::mix(theme::FG_MUTED, theme::FG_PRIMARY, on.max(hover)),
-            );
-            if p == Page::Notifications && badge > 0 {
-                let c = rect.right_top() + egui::vec2(-16.0, 14.0);
-                ui.painter().circle_filled(c, 9.0, accent);
-                ui.painter().text(c, egui::Align2::CENTER_CENTER, badge.min(99).to_string(),
-                    egui::FontId::monospace(theme::SIZE_CAPTION), theme::BG_ROOT);
-            }
-            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                *page = p;
-            }
-        }
-        // Keyboard: a toggle, lit while the keyboard is open.
-        let (rect, resp) = ui.allocate_exact_size(TILE, egui::Sense::click());
-        let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
-        let on = motion::toggle(ui.ctx(), resp.id.with("on"), *keyboard, motion::MEDIUM);
-        let base = crate::theme::veil((hover * 16.0) as u8);
-        ui.painter().rect_filled(rect, 22.0, motion::mix(base, accent.gamma_multiply(0.2), on));
-        let tint = motion::mix(theme::FG_MUTED, accent, on);
-        icon(icons::KEYBOARD, 28.0, tint).paint_at(ui, egui::Rect::from_center_size(rect.center() - egui::vec2(0.0, 10.0), egui::vec2(28.0, 28.0)));
-        ui.painter().text(rect.center_bottom() - egui::vec2(0.0, 12.0), egui::Align2::CENTER_CENTER, "Keyboard",
-            egui::FontId::proportional(theme::SIZE_CAPTION + 1.0), motion::mix(theme::FG_MUTED, theme::FG_PRIMARY, on.max(hover)));
-        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-            *keyboard = !*keyboard;
-        }
-    });
-}
-
 /// What the header asked for this frame.
 #[derive(Default)]
 pub struct HeaderActions {
-    pub toggle_keyboard: bool,
     pub open_notifications: bool,
     /// A global-search result was chosen.
     pub search_pick: Option<crate::search::Target>,
@@ -237,7 +254,8 @@ fn search_box(ui: &mut egui::Ui, st: &mut SearchState, entries: &[crate::search:
     let edit = ui.add(
         egui::TextEdit::singleline(&mut st.query)
             .hint_text("Search settings, pages, windows…")
-            .desired_width(160.0),
+            .margin(egui::vec2(12.0, 8.0))
+            .desired_width(260.0),
     );
     if edit.changed() {
         st.selected = 0;
@@ -267,8 +285,8 @@ fn search_box(ui: &mut egui::Ui, st: &mut SearchState, entries: &[crate::search:
         .show(ui.ctx(), |ui| {
             egui::Frame::none()
                 .fill(theme::BG_CARD)
-                .stroke(egui::Stroke::new(1.0_f32, accent.gamma_multiply(0.35)))
-                .rounding(12.0)
+                .stroke(egui::Stroke::new(1.0_f32, theme::STROKE_CARD))
+                .rounding(theme::RADIUS_CARD)
                 .inner_margin(egui::Margin::same(6.0))
                 .show(ui, |ui| {
                     ui.set_width(380.0);
@@ -276,7 +294,11 @@ fn search_box(ui: &mut egui::Ui, st: &mut SearchState, entries: &[crate::search:
                         let sel = i == st.selected;
                         let (r, resp) = ui.allocate_exact_size(egui::vec2(380.0, 40.0), egui::Sense::click());
                         if sel || resp.hovered() {
-                            ui.painter().rect_filled(r, 8.0, accent.gamma_multiply(if sel { 0.22 } else { 0.12 }));
+                            ui.painter().rect_filled(r, theme::RADIUS_CONTROL, if sel { theme::BG_HOVER } else { theme::BG_RAISED });
+                        }
+                        if sel {
+                            let bar = egui::Rect::from_min_size(r.left_top() + egui::vec2(0.0, 10.0), egui::vec2(2.0, r.height() - 20.0));
+                            ui.painter().rect_filled(bar, 1.0, accent);
                         }
                         ui.painter().text(r.left_center() + egui::vec2(12.0, 0.0), egui::Align2::LEFT_CENTER, &e.title,
                             egui::FontId::proportional(theme::SIZE_BODY), theme::FG_PRIMARY);
@@ -298,7 +320,6 @@ fn search_box(ui: &mut egui::Ui, st: &mut SearchState, entries: &[crate::search:
 pub fn header(
     ui: &mut egui::Ui,
     batteries: &[BatteryReading],
-    keyboard_open: bool,
     unread: usize,
     search: &mut SearchState,
     entries: &[crate::search::Entry],
@@ -311,31 +332,24 @@ pub fn header(
     } else {
         now.format("%-I:%M %p").to_string()
     };
-    let date = now.format("%A · %b %-d").to_string();
+    let date = now.format("%a, %b %-d").to_string();
     ui.horizontal(|ui| {
-        ui.set_height(56.0);
-        ui.add(icon(icons::BRAND, 40.0, accent));
-        ui.add_space(10.0);
-        ui.label(egui::RichText::new(time).size(34.0).strong().color(theme::FG_PRIMARY));
-        ui.add_space(6.0);
+        ui.set_height(44.0);
+        ui.label(egui::RichText::new(time).font(theme::medium(theme::SIZE_BODY + 1.0)).color(theme::FG_PRIMARY));
         ui.label(theme::body_muted(&date));
-        ui.add_space(16.0);
+        ui.add_space(12.0);
+        // Chips only where they fit beside search (VR is narrower); the
+        // full list lives in the Battery card and on the wrist.
+        let chips = (((ui.available_width() - 290.0 - 56.0) / 124.0).floor().max(0.0) as usize).min(3);
         out.search_pick = search_box(ui, search, entries, accent);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if icon_button(ui, icons::BELL, unread > 0, accent).on_hover_text("Notifications").clicked() {
+            let tip = if unread > 0 { format!("Notifications · {unread} unread") } else { "Notifications".to_string() };
+            if icon_button(ui, icons::BELL, unread > 0, accent).on_hover_text(tip).clicked() {
                 out.open_notifications = true;
             }
-            if icon_button(ui, icons::KEYBOARD, keyboard_open, accent)
-                .on_hover_text(if keyboard_open { "Hide keyboard" } else { "Show keyboard" })
-                .clicked()
-            {
-                out.toggle_keyboard = true;
-            }
-            ui.add_space(8.0);
+            ui.add_space(4.0);
             // Battery chips, right-to-left so the HMD ends up leftmost.
-            // At most three chips so the header never collides with
-            // search (the full list lives in the Battery card).
-            for b in batteries.iter().take(3).rev() {
+            for b in batteries.iter().take(chips).rev() {
                 battery_chip(ui, b, accent);
             }
         });
@@ -346,26 +360,29 @@ pub fn header(
 fn icon_button(ui: &mut egui::Ui, src: egui::ImageSource<'static>, active: bool, accent: egui::Color32) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(40.0, 40.0), egui::Sense::click());
     let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
-    let on = motion::toggle(ui.ctx(), resp.id.with("on"), active, motion::MEDIUM);
-    let idle = motion::mix(theme::BG_CARD, egui::Color32::from_rgb(0x1C, 0x20, 0x26), hover);
-    ui.painter().rect_filled(rect, theme::RADIUS_CARD, motion::mix(idle, accent.gamma_multiply(0.18), on));
-    let tint = motion::mix(theme::FG_MUTED, accent, on);
+    ui.painter().rect_filled(rect, theme::RADIUS_CONTROL, motion::mix(theme::BG_ROOT, theme::BG_RAISED, hover));
+    let tint = motion::mix(theme::FG_MUTED, theme::FG_PRIMARY, hover);
     icon(src, 20.0, tint).paint_at(ui, egui::Rect::from_center_size(rect.center(), egui::vec2(20.0, 20.0)));
+    if active {
+        ui.painter().circle_filled(rect.center() + egui::vec2(7.0, -8.0), 4.0, accent);
+    }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-fn battery_chip(ui: &mut egui::Ui, b: &BatteryReading, accent: egui::Color32) {
+fn battery_chip(ui: &mut egui::Ui, b: &BatteryReading, _accent: egui::Color32) {
     let short = short_device_label(&b.label);
     let pct = (b.fraction * 100.0).round() as u32;
-    let color = if !b.charging && pct < 20 { theme::DANGER } else { accent };
-    let text = if b.charging { format!("{short} ⚡{pct}") } else { format!("{short} {pct}") };
+    let low = !b.charging && pct < 20;
+    let text = if b.charging { format!("{short} ⚡{pct}%") } else { format!("{short} {pct}%") };
     // Painted rather than a Frame: a Frame in a right-to-left row
     // stretches to the full header height.
-    let font = egui::FontId::monospace(theme::SIZE_CAPTION + 1.0);
+    let font = egui::FontId::proportional(theme::SIZE_CAPTION + 1.0);
+    let color = if low { theme::DANGER } else { theme::FG_MUTED };
     let galley = ui.painter().layout_no_wrap(text, font, color);
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(galley.size().x + 16.0, 26.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, theme::RADIUS_CHIP, theme::BG_CARD);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(galley.size().x + 18.0, 28.0), egui::Sense::hover());
+    ui.painter().rect_stroke(rect, rect.height() / 2.0, egui::Stroke::new(1.0_f32, if low { theme::DANGER } else { theme::STROKE_CARD }));
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, color);
+    resp.on_hover_text(format!("{} battery", b.label));
 }
 
 /// "Left hand" → "L", "Tracker · VIVE Tracker 3.0" → "TRK". Pure, tested.
@@ -392,10 +409,7 @@ pub struct GrabHud {
 pub fn paint_grab_hud(ctx: &egui::Context, hud: GrabHud, accent: egui::Color32) {
     let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("grab-hud")));
     let r = ctx.screen_rect().shrink(5.0);
-    // Glow: a few widening, fading strokes.
-    for (w, a) in [(10.0_f32, 0.10_f32), (6.0, 0.22), (3.0, 0.9)] {
-        p.rect_stroke(r, 26.0, egui::Stroke::new(w, accent.gamma_multiply(a)));
-    }
+    p.rect_stroke(r, theme::RADIUS_CARD + 4.0, egui::Stroke::new(3.0_f32, accent));
     let text = if hud.resizing {
         format!("Resizing · {:.0} cm wide", hud.width_m * 100.0)
     } else {
@@ -424,8 +438,18 @@ pub fn paint_beam(ctx: &egui::Context) {
 
 /// Page title row used at the top of every page body.
 pub fn page_title(ui: &mut egui::Ui, title: &str) {
-    ui.label(egui::RichText::new(title).size(22.0).strong().color(theme::FG_PRIMARY));
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new(title).font(theme::serif(30.0)).color(theme::FG_PRIMARY));
     ui.add_space(theme::GUTTER);
+}
+
+/// "Good morning / afternoon / evening": the Home page's serif title.
+pub fn greeting(hour: u32) -> &'static str {
+    match hour {
+        5..=11 => "Good morning",
+        12..=17 => "Good afternoon",
+        _ => "Good evening",
+    }
 }
 
 #[cfg(test)]
@@ -438,6 +462,14 @@ mod tests {
             assert_eq!(Page::from_slug(p.slug()), Some(p));
         }
         assert_eq!(Page::from_slug("nope"), None);
+    }
+
+    #[test]
+    fn greetings_follow_the_clock() {
+        assert_eq!(greeting(8), "Good morning");
+        assert_eq!(greeting(14), "Good afternoon");
+        assert_eq!(greeting(21), "Good evening");
+        assert_eq!(greeting(2), "Good evening");
     }
 
     #[test]

@@ -170,11 +170,64 @@ pub struct IVRSystemFnTable {
     pub GetFloatTrackedDeviceProperty: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t, prop: ETrackedDeviceProperty, pError: *mut ETrackedPropertyError) -> f32, // 22
     pub _pad_01: [*const c_void; 4], // 23..=26: Int32 / Uint64 / Matrix34 / Array
     pub GetStringTrackedDeviceProperty: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t, prop: ETrackedDeviceProperty, pchValue: *mut c_char, unBufferSize: u32, pError: *mut ETrackedPropertyError) -> u32, // 27
-    pub _pad_02: [*const c_void; 5], // 28..=32: prop error name, poll events, hidden-area mesh
+    pub _pad_02: [*const c_void; 1], // 28 GetPropErrorNameFromEnum
+    pub PollNextEvent: unsafe extern "system" fn(pEvent: *mut VREvent_t, uncbVREvent: u32) -> bool, // 29
+    pub _pad_02b: [*const c_void; 3], // 30..=32: event with pose, event name, hidden-area mesh
     pub GetControllerState: unsafe extern "system" fn(unControllerDeviceIndex: TrackedDeviceIndex_t, pControllerState: *mut VRControllerState_t, unControllerStateSize: u32) -> bool, // 33
     pub _pad_03: [*const c_void; 1], // 34 GetControllerStateWithPose
     pub TriggerHapticPulse: unsafe extern "system" fn(unControllerDeviceIndex: TrackedDeviceIndex_t, unAxisId: u32, usDurationMicroSec: u16), // 35
+    pub _pad_04: [*const c_void; 7], // 36..=42: enum names, input/pause queries, firmware
+    pub AcknowledgeQuit_Exiting: unsafe extern "system" fn(), // 43
 }
+
+/// VREvent_t. Only the header is read; `data` is the 48-byte union
+/// (largest member: VREvent_Reserved_t), 8-aligned, so 64 bytes total.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct VREvent_t {
+    pub eventType: u32,
+    pub trackedDeviceIndex: TrackedDeviceIndex_t,
+    pub eventAgeSeconds: f32,
+    pub data: [u64; 6],
+}
+
+pub const VREvent_Quit: u32 = 700;
+
+const _: () = {
+    const P: usize = std::mem::size_of::<*const c_void>();
+    assert!(std::mem::offset_of!(IVRSystemFnTable, PollNextEvent) == 29 * P);
+    assert!(std::mem::offset_of!(IVRSystemFnTable, TriggerHapticPulse) == 35 * P);
+    assert!(std::mem::offset_of!(IVRSystemFnTable, AcknowledgeQuit_Exiting) == 43 * P);
+    assert!(std::mem::offset_of!(VREvent_t, data) == 16);
+    assert!(std::mem::size_of::<VREvent_t>() == 64);
+};
+
+// ---------------------------------------------------------------------------
+// IVRApplications_007: registering our app manifest so SteamVR lists
+// RSOverlay as an overlay app and can start it with SteamVR (auto-launch).
+// Slots verified against openvr_capi.h @ v2.5.1; only the prefix we call.
+// ---------------------------------------------------------------------------
+
+pub const IVRApplications_FnTable_Version: &[u8] = b"FnTable:IVRApplications_007\0";
+pub type EVRApplicationError = i32;
+pub const EVRApplicationError_None: EVRApplicationError = 0;
+
+#[repr(C)]
+pub struct IVRApplicationsFnTable {
+    pub AddApplicationManifest: unsafe extern "system" fn(pchApplicationManifestFullPath: *const c_char, bTemporary: bool) -> EVRApplicationError, // 0
+    pub _pad_00: [*const c_void; 1], // 1 RemoveApplicationManifest
+    pub IsApplicationInstalled: unsafe extern "system" fn(pchAppKey: *const c_char) -> bool, // 2
+    pub _pad_01: [*const c_void; 14], // 3..=16: enumerate, launch, properties
+    pub SetApplicationAutoLaunch: unsafe extern "system" fn(pchAppKey: *const c_char, bAutoLaunch: bool) -> EVRApplicationError, // 17
+    pub GetApplicationAutoLaunch: unsafe extern "system" fn(pchAppKey: *const c_char) -> bool, // 18
+}
+
+const _: () = {
+    const P: usize = std::mem::size_of::<*const c_void>();
+    assert!(std::mem::offset_of!(IVRApplicationsFnTable, IsApplicationInstalled) == 2 * P);
+    assert!(std::mem::offset_of!(IVRApplicationsFnTable, SetApplicationAutoLaunch) == 17 * P);
+    assert!(std::mem::offset_of!(IVRApplicationsFnTable, GetApplicationAutoLaunch) == 18 * P);
+};
 
 pub const k_unTrackedDeviceIndexInvalid: TrackedDeviceIndex_t = 0xFFFF_FFFF;
 /// Bits in VRControllerState_t::ulButtonPressed (EVRButtonId).

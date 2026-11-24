@@ -524,6 +524,48 @@ mod imp {
         ("bindings_holographic_controller.json", include_str!("../steamvr/bindings_holographic_controller.json")),
     ];
 
+    /// SteamVR app key RSOverlay registers under.
+    const APP_KEY: &str = "rsoverlay.overlay";
+
+    /// The .vrmanifest that makes RSOverlay a SteamVR overlay app (the
+    /// same mechanism XSOverlay uses): SteamVR lists it under startup
+    /// overlay apps and launches this exe with `--vr` alongside itself.
+    fn app_manifest(exe: &std::path::Path, actions: &std::path::Path) -> String {
+        let doc = serde_json::json!({
+            "source": "builtin",
+            "applications": [{
+                "app_key": APP_KEY,
+                "launch_type": "binary",
+                "binary_path_windows": exe.to_string_lossy(),
+                "arguments": "--vr",
+                "is_dashboard_overlay": true,
+                "action_manifest_path": actions.to_string_lossy(),
+                "strings": { "en_us": {
+                    "name": "RSOverlay",
+                    "description": "Open-source desktop, window and widget overlay for SteamVR"
+                } }
+            }]
+        });
+        serde_json::to_string_pretty(&doc).unwrap_or_default()
+    }
+
+    /// Write + register the app manifest. Failures only cost auto-launch.
+    fn register_with_steamvr(vr: &OpenVr, dir: &std::path::Path, actions: &std::path::Path) {
+        let exe = match std::env::current_exe() {
+            Ok(p) => p,
+            Err(e) => return warn!("auto-launch: can't locate our exe: {e}"),
+        };
+        let path = dir.join("rsoverlay.vrmanifest");
+        if let Err(e) = std::fs::write(&path, app_manifest(&exe, actions)) {
+            return warn!("auto-launch: writing {}: {e}", path.display());
+        }
+        match vr.register_app(&path, APP_KEY) {
+            Ok(r) if r.newly_installed => info!("registered with SteamVR; auto-launch {}", if r.auto_launch { "on" } else { "off" }),
+            Ok(r) => info!("SteamVR app registration refreshed; auto-launch {}", if r.auto_launch { "on" } else { "off (SteamVR › Settings › Startup)" }),
+            Err(e) => warn!("auto-launch: SteamVR registration failed: {e}"),
+        }
+    }
+
     fn write_manifest(dir: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
         std::fs::create_dir_all(dir)?;
         for (name, body) in MANIFEST {
@@ -574,8 +616,10 @@ mod imp {
         // controller API is the fallback if the manifest can't load.
         let steamvr_dir = config_path.parent().map(|p| p.join("steamvr")).unwrap_or_else(|| "steamvr".into());
         let input = match write_manifest(&steamvr_dir) {
-            Ok(path) => vr
-                .input(&path)
+            Ok(path) => {
+                register_with_steamvr(&vr, &steamvr_dir, &path);
+                vr.input(&path)
+            }
                 .map_err(|e| warn!("SteamVR Input unavailable ({e}); using legacy controller input"))
                 .ok(),
             Err(e) => {
@@ -641,6 +685,12 @@ mod imp {
 
         while running.load(Ordering::SeqCst) {
             let frame_start = Instant::now();
+            // SteamVR is shutting down: leave with it (auto-launched
+            // overlays are expected to; a straggler blocks the exit).
+            if system.as_ref().is_some_and(|s| s.quit_requested()) {
+                info!("SteamVR is quitting; exiting");
+                break;
+            }
             frame = frame.wrapping_add(1);
             dev_view.frame = frame;
             dev_view.last_fps = fps.tick();
@@ -1063,6 +1113,10 @@ mod imp {
                     laser::paint_cursor(ctx, cursor, accent);
                 });
             }
+            // Dashboard quick actions (recenter, stats) share this path.
+            let quick = std::mem::take(&mut dev_view.dash_action);
+            act.recenter |= quick.recenter;
+            act.popout_stats |= quick.popout_stats;
             toggle_dash |= act.toggle_dashboard;
             if act.toggle_keyboard {
                 dev_view.show_keyboard = !dev_view.show_keyboard;

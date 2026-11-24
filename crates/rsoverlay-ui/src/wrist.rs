@@ -1,9 +1,12 @@
 //! Wrist toolbar — the always-there VR control centre, laid out as the
-//! stacked rows XSOverlay users know (our own look and icons):
+//! stacked rows XSOverlay users know (our own look and icons). Every
+//! button carries a visible label, so nothing has to be learned by
+//! trial and error:
 //!
 //! ```text
 //! ╭─────────────────────────────────────────────────╮
 //! │  ＋   ↻   ⌨   ▦   🗀   ⚙   🗑                    │  actions
+//! │ Add Recenter Keyboard Dashboard Layouts …       │
 //! ╰─────────────────────────────────────────────────╯
 //!    ╭ ‹ Slot 1 › ──────── ★  💾  ⇥  🗑 ╮              layouts
 //!    ╭ 10:42 PM          ┃ ◈    ♫    ▮▮▮ ╮            clock + views
@@ -66,22 +69,22 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         };
 
         // 1 · Actions.
-        let r1 = row(&mut y, 64.0, 0.0);
+        let r1 = row(&mut y, 80.0, 0.0);
         slab(ui, r1, accent);
-        let actions: [(egui::ImageSource<'static>, &str, bool); 7] = [
-            (icons::PLUS, "Add a window", false),
-            (icons::RECENTER, "Recenter panels in front of you", false),
-            (icons::KEYBOARD, "Keyboard", d.keyboard_open),
-            (icons::GRID, "Dashboard", false),
-            (icons::FOLDER, "Layouts", false),
-            (icons::SETTINGS, "Settings", false),
-            (icons::TRASH, "Close all floating panels", false),
+        let actions: [(egui::ImageSource<'static>, &str, &str, bool); 7] = [
+            (icons::PLUS, "Add", "Add a window or monitor", false),
+            (icons::RECENTER, "Recenter", "Recenter panels in front of you", false),
+            (icons::KEYBOARD, "Keyboard", "Show or hide the keyboard", d.keyboard_open),
+            (icons::GRID, "Dashboard", "Open or close the dashboard", false),
+            (icons::FOLDER, "Layouts", "Saved panel layouts", false),
+            (icons::SETTINGS, "Settings", "Settings", false),
+            (icons::TRASH, "Close all", "Close all floating panels", false),
         ];
         let shown: Vec<_> = actions.into_iter().enumerate().filter(|(i, _)| d.buttons & (1 << i) != 0).collect();
         let cell = r1.width() / shown.len().max(1) as f32;
-        for (slot, (i, (src, tip, on))) in shown.into_iter().enumerate() {
+        for (slot, (i, (src, label, tip, on))) in shown.into_iter().enumerate() {
             let c = egui::Rect::from_min_size(egui::pos2(r1.left() + slot as f32 * cell, r1.top()), egui::vec2(cell, r1.height()));
-            if icon_button(ui, c.shrink(6.0), src, 26.0, on, tip, accent) {
+            if labelled_button(ui, c.shrink(6.0), src, 24.0, on, label, tip, accent) {
                 match i {
                     0 => act.open_page = Some(Page::Desktop),
                     1 => act.recenter = true,
@@ -95,11 +98,11 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         }
 
         // 2 · Layouts.
-        let r2 = row(&mut y, 48.0, full.width() * 0.12);
+        let r2 = row(&mut y, 64.0, full.width() * 0.08);
         slab(ui, r2, accent);
-        let half = r2.width() * 0.42;
-        let sel = egui::Rect::from_min_size(r2.min, egui::vec2(half, r2.height())).shrink(6.0);
-        ui.painter().rect_filled(sel, sel.height() / 2.0, crate::theme::veil(0x0E));
+        let half = r2.width() * 0.40;
+        let sel = egui::Rect::from_min_size(r2.min, egui::vec2(half, r2.height())).shrink(8.0);
+        ui.painter().rect_filled(sel, theme::RADIUS_CONTROL, theme::BG_RAISED);
         let arrow_w = 34.0;
         let prev_r = egui::Rect::from_min_size(sel.min, egui::vec2(arrow_w, sel.height()));
         let next_r = egui::Rect::from_min_size(egui::pos2(sel.right() - arrow_w, sel.top()), egui::vec2(arrow_w, sel.height()));
@@ -114,17 +117,17 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         let tools = egui::Rect::from_min_max(egui::pos2(r2.left() + half, r2.top()), r2.max).shrink(4.0);
         let tw = tools.width() / 4.0;
         let star = if d.slot_favorite { icons::STAR } else { icons::STAR_OUTLINE };
-        let tool_defs: [(egui::ImageSource<'static>, &str, bool, bool); 4] = [
-            (star, "Load this slot at startup", d.slot_favorite, d.slot_filled),
-            (icons::SAVE, "Save the current arrangement here", false, true),
-            (icons::LOAD, "Load this slot", false, d.slot_filled),
-            (icons::TRASH, "Clear this slot", false, d.slot_filled),
+        let tool_defs: [(egui::ImageSource<'static>, &str, &str, bool, bool); 4] = [
+            (star, "Startup", "Load this slot at startup", d.slot_favorite, d.slot_filled),
+            (icons::SAVE, "Save", "Save the current arrangement here", false, true),
+            (icons::LOAD, "Load", "Load this slot", false, d.slot_filled),
+            (icons::TRASH, "Clear", "Clear this slot", false, d.slot_filled),
         ];
-        for (i, (src, tip, on, enabled)) in tool_defs.into_iter().enumerate() {
+        for (i, (src, label, tip, on, enabled)) in tool_defs.into_iter().enumerate() {
             let c = egui::Rect::from_min_size(egui::pos2(tools.left() + i as f32 * tw, tools.top()), egui::vec2(tw, tools.height()));
             if !enabled {
-                icon(src, 20.0, crate::theme::veil(0x30)).paint_at(ui, egui::Rect::from_center_size(c.center(), egui::vec2(20.0, 20.0)));
-            } else if icon_button(ui, c.shrink(2.0), src, 20.0, on, tip, accent) {
+                paint_labelled(ui, c.shrink(2.0), src, 18.0, label, theme::FG_FAINT, theme::FG_FAINT);
+            } else if labelled_button(ui, c.shrink(2.0), src, 18.0, on, label, tip, accent) {
                 act.layout = Some(match i {
                     0 => LayoutAction::ToggleFavorite(d.slot),
                     1 => LayoutAction::Save(d.slot),
@@ -141,20 +144,23 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         let now = Local::now();
         let time = if locale::uses_24h_clock() { now.format("%H:%M").to_string() } else { now.format("%-I:%M %p").to_string() };
         let p = ui.painter();
-        p.text(r3.left_top() + egui::vec2(18.0, 12.0), egui::Align2::LEFT_TOP, time, egui::FontId::proportional(40.0), theme::FG_PRIMARY);
-        p.text(r3.left_top() + egui::vec2(18.0, 60.0), egui::Align2::LEFT_TOP, now.format("%a %d/%m/%Y").to_string(),
-            egui::FontId::proportional(theme::SIZE_BODY + 1.0), theme::FG_PRIMARY);
+        p.text(r3.left_top() + egui::vec2(18.0, 8.0), egui::Align2::LEFT_TOP, time, theme::serif(42.0), theme::FG_PRIMARY);
+        p.text(r3.left_top() + egui::vec2(18.0, 60.0), egui::Align2::LEFT_TOP, now.format("%a, %b %-d").to_string(),
+            egui::FontId::proportional(theme::SIZE_BODY), theme::FG_MUTED);
         let s = d.session_secs;
         p.text(r3.left_top() + egui::vec2(18.0, 82.0), egui::Align2::LEFT_TOP, format!("{:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60),
             egui::FontId::monospace(theme::SIZE_CAPTION + 2.0), theme::FG_MUTED);
         let views = egui::Rect::from_min_max(egui::pos2(r3.center().x - 6.0, r3.top() + 10.0), egui::pos2(r3.right() - 10.0, r3.top() + 98.0));
-        ui.painter().rect_filled(views, 22.0, crate::theme::veil(0x0C));
+        ui.painter().rect_filled(views, theme::RADIUS_CARD, theme::BG_CARD);
         let vw = views.width() / 3.0;
-        let view_defs: [(egui::ImageSource<'static>, &str); 3] =
-            [(icons::LAYERS, "Windows & monitors"), (icons::MUSIC, "Media & volume"), (icons::CHART, "Performance")];
-        for (i, (src, tip)) in view_defs.into_iter().enumerate() {
+        let view_defs: [(egui::ImageSource<'static>, &str, &str); 3] = [
+            (icons::LAYERS, "Windows", "Windows & monitors"),
+            (icons::MUSIC, "Media", "Media & volume"),
+            (icons::CHART, "Stats", "Pop out performance stats"),
+        ];
+        for (i, (src, label, tip)) in view_defs.into_iter().enumerate() {
             let c = egui::Rect::from_min_size(egui::pos2(views.left() + i as f32 * vw, views.top()), egui::vec2(vw, views.height()));
-            if icon_button(ui, c.shrink(6.0), src, 30.0, false, tip, accent) {
+            if labelled_button(ui, c.shrink(6.0), src, 28.0, false, label, tip, accent) {
                 match i {
                     0 => act.open_page = Some(Page::Desktop),
                     1 => act.open_page = Some(Page::Audio),
@@ -164,7 +170,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         }
         if let Some(title) = d.title {
             let m = egui::Rect::from_min_max(egui::pos2(r3.left() + 10.0, r3.top() + 108.0), egui::pos2(r3.right() - 10.0, r3.bottom() - 8.0));
-            ui.painter().rect_filled(m, 12.0, crate::theme::veil(0x0A));
+            ui.painter().rect_filled(m, theme::RADIUS_CONTROL, theme::BG_CARD);
             let text_r = egui::Rect::from_min_max(m.min + egui::vec2(14.0, 6.0), egui::pos2(m.right() - 150.0, m.bottom() - 6.0));
             let tp = ui.painter_at(text_r);
             tp.text(text_r.left_top(), egui::Align2::LEFT_TOP, title, egui::FontId::proportional(theme::SIZE_BODY), theme::FG_PRIMARY);
@@ -200,7 +206,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
                 let src = if b.label == "HMD" { icons::HEADSET } else { icons::CONTROLLER };
                 icon(src, 22.0, col).paint_at(ui, egui::Rect::from_center_size(egui::pos2(c.left() + 18.0, c.center().y - 4.0), egui::vec2(22.0, 22.0)));
                 let bar = egui::Rect::from_min_size(egui::pos2(c.left() + 6.0, c.bottom() - 7.0), egui::vec2(24.0, 4.0));
-                ui.painter().rect_filled(bar, 2.0, crate::theme::veil(0x20));
+                ui.painter().rect_filled(bar, 2.0, theme::BG_HOVER);
                 ui.painter().rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(24.0 * b.fraction.clamp(0.0, 1.0), 4.0)), 2.0, col);
                 let txt = match (b.charging, d.estimates.get(i).cloned().flatten()) {
                     (true, _) => format!("⚡{pct}%"),
@@ -216,27 +222,62 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
 }
 
 fn slab(ui: &egui::Ui, r: egui::Rect, _accent: egui::Color32) {
-    theme::glass(ui.painter(), r, r.height().min(56.0) / 2.0 + 6.0);
+    theme::surface(ui.painter(), r, 18.0);
 }
 
+/// Icon over a short label. The label is always visible; `tip` adds
+/// the longer explanation on hover.
+#[allow(clippy::too_many_arguments)]
+fn labelled_button(
+    ui: &mut egui::Ui,
+    r: egui::Rect,
+    src: egui::ImageSource<'static>,
+    size: f32,
+    on: bool,
+    label: &str,
+    tip: &str,
+    accent: egui::Color32,
+) -> bool {
+    let resp = ui.interact(r, ui.id().with(tip), egui::Sense::click()).on_hover_text(tip);
+    let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
+    if hover > 0.0 || on {
+        let fill = if on { theme::BG_RAISED } else { theme::BG_RAISED.gamma_multiply(hover) };
+        ui.painter().rect_filled(r, theme::RADIUS_CONTROL, fill);
+    }
+    let icon_tint = if on { accent } else { motion::mix(theme::FG_MUTED, theme::FG_PRIMARY, hover) };
+    let text_tint = motion::mix(theme::FG_MUTED, theme::FG_PRIMARY, hover.max(if on { 1.0 } else { 0.0 }));
+    paint_labelled(ui, r, src, size, label, icon_tint, text_tint);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+}
+
+fn paint_labelled(ui: &egui::Ui, r: egui::Rect, src: egui::ImageSource<'static>, size: f32, label: &str, icon_tint: egui::Color32, text_tint: egui::Color32) {
+    let text = (theme::SIZE_CAPTION).min(r.height() * 0.24);
+    let gap = 4.0;
+    let block = size + gap + text;
+    let top = r.center().y - block / 2.0;
+    icon(src, size, icon_tint).paint_at(ui, egui::Rect::from_center_size(egui::pos2(r.center().x, top + size / 2.0), egui::vec2(size, size)));
+    ui.painter().text(egui::pos2(r.center().x, top + size + gap), egui::Align2::CENTER_TOP, label, egui::FontId::proportional(text), text_tint);
+}
+
+/// Unlabelled icon button, for controls whose meaning is universal
+/// (play / pause). Still names itself on hover.
 fn icon_button(ui: &mut egui::Ui, r: egui::Rect, src: egui::ImageSource<'static>, size: f32, on: bool, tip: &str, accent: egui::Color32) -> bool {
     let resp = ui.interact(r, ui.id().with(tip), egui::Sense::click()).on_hover_text(tip);
     let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
     if hover > 0.0 || on {
-        let fill = if on { accent.gamma_multiply(0.22) } else { crate::theme::veil((hover * 18.0) as u8) };
-        ui.painter().rect_filled(r, r.height().min(r.width()) / 2.0, fill);
+        ui.painter().rect_filled(r, theme::RADIUS_CONTROL, theme::BG_RAISED.gamma_multiply(if on { 1.0 } else { hover }));
     }
-    let tint = if on { accent } else { motion::mix(theme::FG_PRIMARY, accent, hover) };
+    let tint = if on { accent } else { motion::mix(theme::FG_MUTED, theme::FG_PRIMARY, hover) };
     icon(src, size, tint).paint_at(ui, egui::Rect::from_center_size(r.center(), egui::vec2(size, size)));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
-fn glyph_button(ui: &mut egui::Ui, r: egui::Rect, g: crate::glyphs::Glyph, tip: &str, accent: egui::Color32) -> bool {
+fn glyph_button(ui: &mut egui::Ui, r: egui::Rect, g: crate::glyphs::Glyph, tip: &str, _accent: egui::Color32) -> bool {
     let resp = ui.interact(r, ui.id().with(tip), egui::Sense::click()).on_hover_text(tip);
     let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
     if hover > 0.0 {
-        ui.painter().rect_filled(r, 10.0, crate::theme::veil((hover * 18.0) as u8));
+        ui.painter().rect_filled(r, theme::RADIUS_CONTROL, theme::BG_HOVER.gamma_multiply(hover));
     }
-    crate::glyphs::draw(ui.painter(), g, r.center(), 14.0, motion::mix(theme::FG_PRIMARY, accent, hover));
+    crate::glyphs::draw(ui.painter(), g, r.center(), 14.0, motion::mix(theme::FG_MUTED, theme::FG_PRIMARY, hover));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }

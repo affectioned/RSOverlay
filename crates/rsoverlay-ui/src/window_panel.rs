@@ -147,7 +147,7 @@ pub fn pill(ui: &mut egui::Ui, text: &str, on: bool, accent: egui::Color32) -> e
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
     let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
     let sel = motion::toggle(ui.ctx(), resp.id.with("on"), on, motion::MEDIUM);
-    let base = motion::mix(egui::Color32::from_rgb(0x16, 0x19, 0x1E), egui::Color32::from_rgb(0x27, 0x2C, 0x33), hover);
+    let base = motion::mix(crate::theme::BG_RAISED, crate::theme::BG_HOVER, hover);
     ui.painter().rect_filled(rect, 17.0, motion::mix(base, accent.gamma_multiply(0.25), sel));
     let color = motion::mix(theme::FG_MUTED, if on { accent } else { theme::FG_PRIMARY }, sel.max(hover));
     match glyph {
@@ -198,7 +198,7 @@ pub fn source_grid(ui: &mut egui::Ui, sources: &mut SourcePicker, open: &[Captur
                 let is_open = open.contains(src);
                 let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 64.0), egui::Sense::click());
                 let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
-                let fill = motion::mix(theme::BG_CARD, egui::Color32::from_rgb(0x1C, 0x20, 0x26), hover);
+                let fill = motion::mix(theme::BG_CARD, crate::theme::BG_HOVER, hover);
                 ui.painter().rect_filled(rect, 14.0, fill);
                 if is_open {
                     ui.painter().rect_stroke(rect, 14.0, egui::Stroke::new(1.5_f32, accent));

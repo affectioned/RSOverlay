@@ -92,9 +92,9 @@ impl NightLight {
         theme::card().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                ui.add(crate::icons::icon(crate::icons::MOON, 18.0, accent));
+                ui.add(crate::icons::icon(crate::icons::MOON, 18.0, crate::theme::FG_MUTED));
                 ui.add_space(6.0);
-                ui.label(theme::caption("Night light"));
+                ui.label(theme::card_title("Night light"));
                 crate::widgets::popout_button(ui, "Night light", accent);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let (txt, col) = if self.active_at(minute_of_day) { ("active", accent) } else { ("idle", theme::FG_MUTED) };
@@ -114,15 +114,18 @@ impl NightLight {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.label(theme::body_muted("Warmth"));
+                crate::theme::fit_slider(ui);
                 ui.add(egui::Slider::new(&mut self.strength, 0.0..=1.0).show_value(false));
             });
             if self.mode == NightMode::Scheduled {
                 ui.horizontal(|ui| {
                     ui.label(theme::body_muted("From"));
+                    crate::theme::fit_slider(ui);
                     ui.add(egui::Slider::new(&mut self.start_hour, 0..=23).suffix(":00"));
                 });
                 ui.horizontal(|ui| {
                     ui.label(theme::body_muted("Until"));
+                    crate::theme::fit_slider(ui);
                     ui.add(egui::Slider::new(&mut self.end_hour, 0..=23).suffix(":00"));
                 });
             }
