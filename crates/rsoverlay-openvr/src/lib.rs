@@ -733,9 +733,13 @@ impl Input<'_> {
             let edit = self.digital(self.toggle_edit, dev);
             let mut pose = std::mem::MaybeUninit::<sys::InputPoseActionData_t>::zeroed();
             let aim = unsafe {
-                let r = (self.t().GetPoseActionDataForNextFrame)(
+                // "Now", not next-frame: the same clock as the raw device
+                // poses, so tip-vs-grip stays a constant offset (mixing
+                // clocks made the beam drift while the hand moved).
+                let r = (self.t().GetPoseActionDataRelativeToNow)(
                     self.pointer,
                     sys::ETrackingUniverseOrigin_Standing,
+                    0.0,
                     pose.as_mut_ptr(),
                     std::mem::size_of::<sys::InputPoseActionData_t>() as u32,
                     dev,

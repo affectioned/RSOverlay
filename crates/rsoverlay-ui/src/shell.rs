@@ -160,10 +160,11 @@ fn nav_item(ui: &mut egui::Ui, p: Page, selected: bool, badge: usize, accent: eg
 }
 
 /// SteamVR-style dock: a centred row of large icon tiles (VR dashboard).
-pub fn dock(ui: &mut egui::Ui, page: &mut Page, badge: usize, accent: egui::Color32) {
-    const TILE: egui::Vec2 = egui::vec2(92.0, 72.0);
-    const GAP: f32 = 10.0;
-    let n = Page::ALL.len() as f32;
+pub fn dock(ui: &mut egui::Ui, page: &mut Page, badge: usize, keyboard: &mut bool, accent: egui::Color32) {
+    const TILE: egui::Vec2 = egui::vec2(86.0, 72.0);
+    const GAP: f32 = 8.0;
+    // Pages + a Keyboard toggle tile at the end.
+    let n = Page::ALL.len() as f32 + 1.0;
     let total = n * TILE.x + (n - 1.0) * GAP;
     ui.horizontal(|ui| {
         ui.add_space(((ui.available_width() - total) / 2.0).max(0.0));
@@ -194,6 +195,19 @@ pub fn dock(ui: &mut egui::Ui, page: &mut Page, badge: usize, accent: egui::Colo
             if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 *page = p;
             }
+        }
+        // Keyboard: a toggle, lit while the keyboard is open.
+        let (rect, resp) = ui.allocate_exact_size(TILE, egui::Sense::click());
+        let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
+        let on = motion::toggle(ui.ctx(), resp.id.with("on"), *keyboard, motion::MEDIUM);
+        let base = motion::mix(theme::BG_CARD, egui::Color32::from_rgb(0x1C, 0x20, 0x26), hover);
+        ui.painter().rect_filled(rect, 14.0, motion::mix(base, accent.gamma_multiply(0.18), on));
+        let tint = motion::mix(theme::FG_MUTED, accent, on);
+        icon(icons::KEYBOARD, 28.0, tint).paint_at(ui, egui::Rect::from_center_size(rect.center() - egui::vec2(0.0, 10.0), egui::vec2(28.0, 28.0)));
+        ui.painter().text(rect.center_bottom() - egui::vec2(0.0, 12.0), egui::Align2::CENTER_CENTER, "Keyboard",
+            egui::FontId::proportional(theme::SIZE_CAPTION + 1.0), motion::mix(theme::FG_MUTED, theme::FG_PRIMARY, on.max(hover)));
+        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            *keyboard = !*keyboard;
         }
     });
 }

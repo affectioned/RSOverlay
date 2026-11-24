@@ -678,7 +678,7 @@ impl DevView {
             egui::TopBottomPanel::bottom("dock")
                 .frame(root.inner_margin(egui::Margin { left: 20.0, right: 20.0, top: 6.0, bottom: 14.0 }))
                 .show_separator_line(false)
-                .show(ctx, |ui| crate::shell::dock(ui, &mut self.page, self.unread, accent));
+                .show(ctx, |ui| crate::shell::dock(ui, &mut self.page, self.unread, &mut self.show_keyboard, accent));
         } else {
         egui::SidePanel::left("nav")
             .exact_width(crate::shell::RAIL_WIDTH)

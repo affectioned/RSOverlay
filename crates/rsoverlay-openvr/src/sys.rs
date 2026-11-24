@@ -319,7 +319,7 @@ pub struct IVRInputFnTable {
     pub UpdateActionState: unsafe extern "system" fn(pSets: *mut VRActiveActionSet_t, unSizeOfVRSelectedActionSet_t: u32, unSetCount: u32) -> EVRInputError, // 4
     pub GetDigitalActionData: unsafe extern "system" fn(action: VRActionHandle_t, pActionData: *mut InputDigitalActionData_t, unActionDataSize: u32, ulRestrictToDevice: VRInputValueHandle_t) -> EVRInputError, // 5
     pub GetAnalogActionData: unsafe extern "system" fn(action: VRActionHandle_t, pActionData: *mut InputAnalogActionData_t, unActionDataSize: u32, ulRestrictToDevice: VRInputValueHandle_t) -> EVRInputError, // 6
-    pub _pad_00: [*const c_void; 1], // 7 GetPoseActionDataRelativeToNow
+    pub GetPoseActionDataRelativeToNow: unsafe extern "system" fn(action: VRActionHandle_t, eOrigin: ETrackingUniverseOrigin, fPredictedSecondsFromNow: f32, pActionData: *mut InputPoseActionData_t, unActionDataSize: u32, ulRestrictToDevice: VRInputValueHandle_t) -> EVRInputError, // 7
     pub GetPoseActionDataForNextFrame: unsafe extern "system" fn(action: VRActionHandle_t, eOrigin: ETrackingUniverseOrigin, pActionData: *mut InputPoseActionData_t, unActionDataSize: u32, ulRestrictToDevice: VRInputValueHandle_t) -> EVRInputError, // 8
     pub _pad_00b: [*const c_void; 12], // 9..=20: skeletal, dominant hand
     pub TriggerHapticVibrationAction: unsafe extern "system" fn(action: VRActionHandle_t, fStartSecondsFromNow: f32, fDurationSeconds: f32, fFrequency: f32, fAmplitude: f32, ulRestrictToDevice: VRInputValueHandle_t) -> EVRInputError, // 21
@@ -335,6 +335,7 @@ const _: () = {
     assert!(std::mem::size_of::<InputAnalogActionData_t>() == 48);
     assert!(std::mem::offset_of!(InputAnalogActionData_t, x) == 16);
     assert!(std::mem::offset_of!(IVRInputFnTable, GetPoseActionDataForNextFrame) == 8 * P);
+    assert!(std::mem::offset_of!(IVRInputFnTable, GetPoseActionDataRelativeToNow) == 7 * P);
     assert!(std::mem::offset_of!(InputPoseActionData_t, pose) == 16);
     assert!(std::mem::size_of::<InputPoseActionData_t>() == 96);
 };

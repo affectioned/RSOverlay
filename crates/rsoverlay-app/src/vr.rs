@@ -998,7 +998,11 @@ mod imp {
                 let pose = Affine3A::from_cols(d, z.cross(d), z, mid);
                 let _ = overlay.set_width(b.handle, len);
                 let _ = overlay.set_texel_aspect(b.handle, len * BEAM_TEX.1 as f32 / (BEAM_TEX.0 as f32 * BEAM_THICKNESS_M));
-                let _ = overlay.set_transform_absolute(b.handle, &from_affine(&pose));
+                // Parent to the controller: the compositor re-poses it
+                // every frame with the freshest tracking, so the beam
+                // never trails the hand (absolute poses lagged a frame).
+                let rel = to_affine(&c.pose).inverse() * pose;
+                let _ = overlay.set_transform_device_relative(b.handle, c.index, &from_affine(&rel));
                 let a = dev_view.effective_accent();
                 let tint = [
                     a.r() as f32 / 255.0,
@@ -1064,16 +1068,31 @@ mod imp {
                 dev_view.show_keyboard = !dev_view.show_keyboard;
             }
             if let Some(p) = act.open_page {
-                dev_view.page = p;
-                if !dash.visible {
+                if dash.visible && dev_view.page == p {
+                    // Same button again: hide it (toggle, like XSO).
                     toggle_dash = true;
+                } else {
+                    dev_view.page = p;
+                    if !dash.visible {
+                        toggle_dash = true;
+                    }
                 }
             }
             if let Some(l) = act.layout {
                 dev_view.layout_request = Some(l);
             }
             if act.popout_stats {
-                rsoverlay_ui::widgets::request_popout(&dash.egui.ctx, WidgetKind::System);
+                // Toggle: close an open stats widget, else pop one out.
+                match wins.iter().position(|w| w.widgets.as_ref().is_some_and(|(t, _)| t.contains(&WidgetKind::System))) {
+                    Some(k) => {
+                        let w = wins.remove(k);
+                        if grab.as_ref().is_some_and(|g| g.panel >= WIN0) {
+                            grab = None;
+                        }
+                        w.panel.destroy(&overlay);
+                    }
+                    None => rsoverlay_ui::widgets::request_popout(&dash.egui.ctx, WidgetKind::System),
+                }
             }
             if act.close_all {
                 grab = None;
@@ -1097,6 +1116,14 @@ mod imp {
                     let p = face(pos, eye);
                     let _ = overlay.set_transform_absolute(wins[k].panel.handle, &from_affine(&p));
                     wins[k].world = p;
+                }
+                if kb.visible && !keyboard.locked_pos {
+                    let fwd = -base.matrix3.z_axis;
+                    let pos = eye + Vec3A::new(fwd.x, 0.0, fwd.z).normalize_or_zero() * KB_DISTANCE_M + Vec3A::new(0.0, KB_DROP_M, 0.0);
+                    let p = Affine3A { translation: pos, ..base } * Affine3A::from_rotation_x(KB_TILT_DEG.to_radians());
+                    let p = Affine3A { translation: pos, ..p };
+                    let _ = overlay.set_transform_absolute(kb.handle, &from_affine(&p));
+                    kb_pose = Some(p);
                 }
             }
 
