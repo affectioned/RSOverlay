@@ -35,9 +35,10 @@ mod imp {
     const CLICK_HAPTIC_US: u16 = 1200;
 
     /// Wrist watch: small texture, 2 texels/pt → 512 × 256 pt face.
-    const WRIST_TEX: (u32, u32) = (1024, 512);
+    /// Wrist toolbar stack: 600 × 410 pt at 2 texels/pt.
+    const WRIST_TEX: (u32, u32) = (1200, 820);
     const WRIST_PPP: f32 = 2.0;
-    const WRIST_WIDTH_M: f32 = 0.17;
+    const WRIST_WIDTH_M: f32 = 0.24;
     /// Wrist mount, in the left controller's frame (−Z = pointing
     /// direction, +Y = top of the controller, +Z = back toward the
     /// wrist): just above the back of the hand, face pitched 60° up
@@ -1051,10 +1052,40 @@ mod imp {
             if act.toggle_keyboard {
                 dev_view.show_keyboard = !dev_view.show_keyboard;
             }
-            if act.open_notifications {
-                dev_view.page = rsoverlay_ui::shell::Page::Notifications;
+            if let Some(p) = act.open_page {
+                dev_view.page = p;
                 if !dash.visible {
                     toggle_dash = true;
+                }
+            }
+            if let Some(l) = act.layout {
+                dev_view.layout_request = Some(l);
+            }
+            if act.popout_stats {
+                rsoverlay_ui::widgets::request_popout(&dash.egui.ctx, WidgetKind::System);
+            }
+            if act.close_all {
+                grab = None;
+                for mut w in wins.drain(..) {
+                    if let Some(m) = w.mirror.take() {
+                        m.shutdown(&mut w.panel.egui);
+                    }
+                    w.panel.destroy(&overlay);
+                }
+            }
+            if let (true, Some(h)) = (act.recenter, &hmd) {
+                // Gather every world-docked panel into an arc in front of
+                // you (XSO's recenter); hand/head-docked ones stay put.
+                let base = summon_pose(h);
+                let eye = to_affine(h).translation;
+                let world: Vec<usize> = (0..wins.len()).filter(|&k| wins[k].attach == Attach::World).collect();
+                let n = world.len() as f32;
+                for (j, &k) in world.iter().enumerate() {
+                    let t = if n > 1.0 { j as f32 / (n - 1.0) - 0.5 } else { 0.0 };
+                    let pos = base.translation - base.matrix3.z_axis * 0.25 + base.matrix3.x_axis * (t * 0.55 * n.min(4.0));
+                    let p = face(pos, eye);
+                    let _ = overlay.set_transform_absolute(wins[k].panel.handle, &from_affine(&p));
+                    wins[k].world = p;
                 }
             }
 
@@ -1099,7 +1130,7 @@ mod imp {
             if let Some(kind) = dev_view.take_widget_request(&dash.egui.ctx) {
                 if wins.len() >= MAX_FLOATING {
                     warn!("floating panel limit ({MAX_FLOATING}) reached");
-                } else if let Some(base) = dash_pose {
+                } else if let Some(base) = dash_pose.or_else(|| hmd.as_ref().map(summon_pose)) {
                     let n = wins.iter().filter(|w| w.widgets.is_some()).count() as f32;
                     let world = Affine3A {
                         translation: base.translation - base.matrix3.x_axis * (DASH_WIDTH_M * 0.5 + WID_WIDTH_M * 0.6)

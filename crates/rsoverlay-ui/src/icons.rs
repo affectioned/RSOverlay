@@ -32,6 +32,19 @@ svg_icon!(HOME,     "home.svg");
 svg_icon!(GRID,     "grid.svg");
 svg_icon!(KEYBOARD, "keyboard.svg");
 svg_icon!(MOON,     "moon.svg");
+svg_icon!(PLUS,        "plus.svg");
+svg_icon!(RECENTER,    "recenter.svg");
+svg_icon!(FOLDER,      "folder.svg");
+svg_icon!(TRASH,       "trash.svg");
+svg_icon!(LAYERS,      "layers.svg");
+svg_icon!(MUSIC,       "music.svg");
+svg_icon!(CHART,       "chart.svg");
+svg_icon!(HEADSET,     "headset.svg");
+svg_icon!(CONTROLLER,  "controller.svg");
+svg_icon!(STAR,        "star.svg");
+svg_icon!(STAR_OUTLINE, "star_outline.svg");
+svg_icon!(SAVE,        "save.svg");
+svg_icon!(LOAD,        "load.svg");
 
 /// Install the SVG loader on the egui context. Call once at startup.
 pub fn install_loaders(ctx: &egui::Context) {

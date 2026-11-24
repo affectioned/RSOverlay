@@ -269,6 +269,8 @@ pub struct DevView {
     pub layouts: rsoverlay_core::layouts::Layouts,
     /// Layout slot action requested from the Layouts page.
     pub layout_request: Option<crate::layouts_page::LayoutAction>,
+    /// Layout slot selected on the wrist toolbar.
+    pub wrist_slot: usize,
     /// XSO-style knobs: cursor smoothing 0..1, scroll speed multiplier.
     pub cursor_smoothing: f32,
     pub scroll_speed: f32,
@@ -347,6 +349,7 @@ impl Default for DevView {
             search: crate::shell::SearchState::default(),
             layouts: Default::default(),
             layout_request: None,
+            wrist_slot: 0,
             cursor_smoothing: 0.5,
             scroll_speed: 1.0,
             night_light: crate::nightlight::NightLight::default(),
@@ -466,14 +469,31 @@ impl DevView {
     /// returns what the wearer tapped.
     pub fn wrist_ui(&mut self, ctx: &egui::Context) -> crate::wrist::WristAction {
         self.tick_state(ctx);
-        let playing = self.media.as_ref().is_some_and(|m| m.playing);
-        let track = self.media.as_ref().and_then(crate::now_playing::format_line);
         let est: Vec<Option<String>> = self
             .batteries
             .iter()
             .map(|b| self.battery_est.estimate(b).filter(|e| !e.charging).map(|e| crate::battery::format_duration(e.secs)))
             .collect();
-        crate::wrist::show(ctx, &self.batteries, &est, playing, track.as_deref(), self.unread, self.accent)
+        let media = self.media.as_ref().filter(|m| !m.title.is_empty());
+        let data = crate::wrist::WristData {
+            batteries: &self.batteries,
+            estimates: &est,
+            title: media.map(|m| m.title.as_str()),
+            artist: media.map(|m| m.artist.as_str()).filter(|a| !a.is_empty()),
+            playing: media.is_some_and(|m| m.playing),
+            session_secs: self.started.elapsed().as_secs(),
+            slot: self.wrist_slot,
+            slot_filled: self.layouts.slot(self.wrist_slot).is_some(),
+            slot_favorite: self.layouts.favorite == Some(self.wrist_slot),
+            keyboard_open: self.show_keyboard,
+            accent: self.accent,
+        };
+        let act = crate::wrist::show(ctx, &data);
+        if act.slot_delta != 0 {
+            let n = rsoverlay_core::layouts::SLOTS as i32;
+            self.wrist_slot = (self.wrist_slot as i32 + act.slot_delta).rem_euclid(n) as usize;
+        }
+        act
     }
 
     /// Queue a VRChat chatbox message (e.g. from the VR keyboard).
