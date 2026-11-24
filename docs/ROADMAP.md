@@ -72,9 +72,9 @@ Ranked by cross-wishlist demand × implementation cost in a Rust + wgpu stack.
 
 - **Reset-settings tray action** (XSO #160, second-highest signal) + full
   `config.toml` hot-reload with watcher.
-- **Macros / virtual StreamDeck** — bindable actions in-overlay firing
-  arbitrary SendInput shortcuts (OBS scene switching, mute-mic, ShadowPlay).
-  *OVR top-5.*
+- ~~**Macros / virtual StreamDeck**~~ — **shipped** (M30). Editable button
+  grid firing `ctrl+shift+m`-style shortcuts (F13–F24, media keys) as one
+  atomic SendInput batch; persisted as `[[macros]]`. *OVR top-5.*
 - **Service discovery via mDNS** so companion apps autoconnect to the
   notification server (XSO #188).
 - **"Apply as new center" / HMD-anchored panels.** Already on our anchor

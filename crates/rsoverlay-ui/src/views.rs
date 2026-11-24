@@ -116,6 +116,8 @@ pub struct DevView {
     pub show_history: bool,
     pub show_battery: bool,
     pub battery_warn_pct: u8,
+    pub show_macros: bool,
+    pub macros: crate::macros::MacroDeck,
     /// Active UI language + keyboard layout. Both persist to config.
     pub language: crate::i18n::Lang,
     /// Set to true when the user clicks "Reset defaults" in the
@@ -154,6 +156,8 @@ impl Default for DevView {
             show_history: false,
             show_battery: true,
             battery_warn_pct: 20,
+            show_macros: true,
+            macros: crate::macros::MacroDeck::default(),
             language: crate::i18n::Lang::default(),
             reset_requested: false,
             placement: Placement::default(),
@@ -315,6 +319,10 @@ impl DevView {
                             }
                             ui.add_space(theme::GUTTER);
                         }
+                        if self.show_macros {
+                            self.macros.card(ui, injector, accent);
+                            ui.add_space(theme::GUTTER);
+                        }
                         if self.show_history {
                             if history_card(ui, &self.history, accent) {
                                 self.clear_all_notifications();
@@ -330,6 +338,7 @@ impl DevView {
                             &mut self.show_keyboard,
                             &mut self.show_history,
                             &mut self.show_battery,
+                            &mut self.show_macros,
                             &mut self.language,
                             &mut self.keyboard.layout,
                         ) {
@@ -634,6 +643,7 @@ fn appearance_card(
     show_keyboard: &mut bool,
     show_history: &mut bool,
     show_battery: &mut bool,
+    show_macros: &mut bool,
     language: &mut crate::i18n::Lang,
     keyboard_layout: &mut crate::keyboard_layout::LayoutId,
 ) -> bool {
@@ -690,6 +700,7 @@ fn appearance_card(
             ui.checkbox(show_keyboard, "Keyboard");
             ui.checkbox(show_history, "History");
             ui.checkbox(show_battery, "Battery");
+            ui.checkbox(show_macros, "Macros");
         });
         ui.add_space(8.0);
         // Language picker — shows the native-script name so a Russian

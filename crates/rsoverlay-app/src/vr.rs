@@ -78,6 +78,9 @@ mod imp {
             &crate::preview::TestHooks::default(),
         );
         let mut last_battery_poll: Option<Instant> = None;
+        // Macros + keyboard fire global hotkeys; the overlay never takes
+        // desktop focus, so they reach whatever app the user is in.
+        let injector = rsoverlay_input::InputInjector::new().ok();
 
         overlay.show(handle).ok();
         info!(
@@ -121,7 +124,7 @@ mod imp {
                 &gpu.queue,
                 &overlay_view,
                 raw_input,
-                |ctx| dev_view.ui(ctx),
+                |ctx| dev_view.ui_with(ctx, injector.as_ref()),
             );
 
             // 2. Hand the raw D3D12 resource + queue to OpenVR. The

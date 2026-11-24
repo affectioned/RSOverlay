@@ -108,6 +108,16 @@ pub fn seed_dev_view(
     dev.keyboard.layout = parse_layout(&cfg.appearance.keyboard_layout);
     dev.now_playing.enabled = cfg.appearance.chat_now_playing;
     dev.show_battery = cfg.appearance.show_battery;
+    dev.show_macros = cfg.appearance.show_macros;
+    dev.macros.entries = cfg
+        .macros
+        .0
+        .iter()
+        .map(|m| rsoverlay_ui::macros::MacroEntry {
+            label: m.label.clone(),
+            keys: m.keys.clone(),
+        })
+        .collect();
     dev.battery_warn_pct = cfg.appearance.battery_warn_pct.clamp(5, 50);
     if test.show_keyboard {
         dev.show_keyboard = true;
@@ -188,6 +198,17 @@ pub fn config_from_dev_view(
     out.appearance.keyboard_layout = dev.keyboard.layout.slug().to_string();
     out.appearance.chat_now_playing = dev.now_playing.enabled;
     out.appearance.show_battery = dev.show_battery;
+    out.appearance.show_macros = dev.show_macros;
+    out.macros = rsoverlay_core::config::Macros(
+        dev.macros
+            .entries
+            .iter()
+            .map(|e| rsoverlay_core::config::Macro {
+                label: e.label.clone(),
+                keys: e.keys.clone(),
+            })
+            .collect(),
+    );
     out.appearance.battery_warn_pct = dev.battery_warn_pct;
     out.placement.anchor = match dev.placement.anchor {
         UiAnchor::Wrist => PlacementAnchor::Wrist,
@@ -337,6 +358,8 @@ fn configs_equivalent(a: &rsoverlay_core::Config, b: &rsoverlay_core::Config) ->
         && a.appearance.keyboard_layout == b.appearance.keyboard_layout
         && a.appearance.chat_now_playing == b.appearance.chat_now_playing
         && a.appearance.show_battery == b.appearance.show_battery
+        && a.appearance.show_macros == b.appearance.show_macros
+        && a.macros == b.macros
         && a.appearance.battery_warn_pct == b.appearance.battery_warn_pct
         && a.placement.anchor == b.placement.anchor
         && (a.placement.offset_x - b.placement.offset_x).abs() < 0.001

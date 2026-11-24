@@ -12,6 +12,37 @@ pub struct Config {
     pub preview: Preview,
     pub appearance: Appearance,
     pub placement: Placement,
+    /// Virtual StreamDeck buttons. Serialized as `[[macros]]` tables.
+    pub macros: Macros,
+}
+
+/// One macro button: a label and a shortcut string such as
+/// `ctrl+shift+m` (grammar in `rsoverlay_input::shortcut`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Macro {
+    pub label: String,
+    pub keys: String,
+}
+
+/// Newtype so `Config::default()` ships starter macros while a file
+/// with `macros = []` still loads as empty (user deleted them all).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Macros(pub Vec<Macro>);
+
+impl Default for Macros {
+    fn default() -> Self {
+        // All global hotkeys — they fire regardless of which window has
+        // focus, which is the whole point of a VR StreamDeck.
+        let m = |label: &str, keys: &str| Macro { label: label.into(), keys: keys.into() };
+        Self(vec![
+            m("Discord mute", "ctrl+shift+m"),
+            m("Clip last 30s", "alt+f10"),
+            m("Snip", "win+shift+s"),
+            m("Task view", "win+tab"),
+            m("Play / pause", "media_play_pause"),
+        ])
+    }
 }
 
 /// User-tweakable dashboard appearance. Persisted so your accent choice
@@ -38,6 +69,7 @@ pub struct Appearance {
     /// `♪ Title — Artist`. Off by default — it speaks for the user.
     pub chat_now_playing: bool,
     pub show_battery: bool,
+    pub show_macros: bool,
     /// Low-battery toast threshold, percent. Clamped to 5..=50 in UI.
     pub battery_warn_pct: u8,
 }
@@ -56,6 +88,7 @@ impl Default for Appearance {
             keyboard_layout: "qwerty".into(),
             chat_now_playing: false,
             show_battery: true,
+            show_macros: true,
             battery_warn_pct: 20,
         }
     }
@@ -197,5 +230,27 @@ impl Config {
         std::fs::rename(&tmp, path)
             .with_context(|| format!("committing config at {}", path.display()))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn macros_roundtrip_as_array_of_tables() {
+        let cfg = Config::default();
+        let text = toml::to_string_pretty(&cfg).unwrap();
+        assert!(text.contains("[[macros]]"));
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back.macros, cfg.macros);
+    }
+
+    #[test]
+    fn missing_macros_gets_starters_but_empty_stays_empty() {
+        let missing: Config = toml::from_str("").unwrap();
+        assert_eq!(missing.macros, Macros::default());
+        let empty: Config = toml::from_str("macros = []").unwrap();
+        assert!(empty.macros.0.is_empty());
     }
 }

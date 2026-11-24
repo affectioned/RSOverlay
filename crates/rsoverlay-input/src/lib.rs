@@ -25,6 +25,10 @@ pub struct MonitorGeom {
 }
 
 /// Opaque handle to the platform input backend.
+pub mod shortcut;
+
+pub use shortcut::Shortcut;
+
 pub struct InputInjector;
 
 impl InputInjector {
@@ -65,6 +69,13 @@ impl InputInjector {
     /// of typing a literal character.
     pub fn send_chord(&self, modifiers: &[VirtualKey], ch: char) -> Result<()> {
         send_chord_impl(modifiers, ch)
+    }
+
+    /// Fire a parsed [`Shortcut`] as one atomic `SendInput` batch:
+    /// modifiers down → key tap → modifiers up (reverse). Atomic so a
+    /// physical key event can't interleave mid-chord.
+    pub fn send_shortcut(&self, s: &Shortcut) -> Result<()> {
+        send_shortcut_impl(s)
     }
 }
 
@@ -123,6 +134,16 @@ fn send_chord_impl(modifiers: &[VirtualKey], ch: char) -> Result<()> {
     win::send_chord(modifiers, ch)
 }
 
+#[cfg(windows)]
+fn send_shortcut_impl(s: &Shortcut) -> Result<()> {
+    win::send_shortcut(s)
+}
+
+#[cfg(not(windows))]
+fn send_shortcut_impl(_s: &Shortcut) -> Result<()> {
+    anyhow::bail!("input injection only implemented on Windows")
+}
+
 #[cfg(not(windows))]
 fn move_to_impl(_mon: &MonitorGeom, _px: i32, _py: i32) -> Result<()> {
     anyhow::bail!("input injection only implemented on Windows")
@@ -150,11 +171,11 @@ fn send_chord_impl(_mods: &[VirtualKey], _ch: char) -> Result<()> {
 
 #[cfg(windows)]
 mod win {
-    use super::{MonitorGeom, MouseButton, VirtualKey};
+    use super::{MonitorGeom, MouseButton, Shortcut, VirtualKey};
     use anyhow::{anyhow, Result};
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
-        KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_ABSOLUTE,
+        KEYBD_EVENT_FLAGS, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_ABSOLUTE,
         MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN,
         MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN,
         MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEINPUT, VIRTUAL_KEY, VK_BACK,
@@ -211,6 +232,30 @@ mod win {
         // last if there was also Shift, etc).
         for m in modifiers.iter().rev() {
             events.push(kb_input(0, virtual_key_code(*m).0, KEYEVENTF_KEYUP));
+        }
+        send_many(&events)
+    }
+
+    pub fn send_shortcut(s: &Shortcut) -> Result<()> {
+        let mods: Vec<u16> = s.mods.vks().collect();
+        let key = s.key.vk();
+        let ext = if s.key.is_extended() {
+            KEYEVENTF_EXTENDEDKEY
+        } else {
+            KEYBD_EVENT_FLAGS(0)
+        };
+        // LWIN is itself an extended key.
+        let mod_flags = |vk: u16| {
+            if vk == 0x5B { KEYEVENTF_EXTENDEDKEY } else { KEYBD_EVENT_FLAGS(0) }
+        };
+        let mut events: Vec<INPUT> = Vec::with_capacity(mods.len() * 2 + 2);
+        for &m in &mods {
+            events.push(kb_input(0, m, mod_flags(m)));
+        }
+        events.push(kb_input(0, key, ext));
+        events.push(kb_input(0, key, ext | KEYEVENTF_KEYUP));
+        for &m in mods.iter().rev() {
+            events.push(kb_input(0, m, mod_flags(m) | KEYEVENTF_KEYUP));
         }
         send_many(&events)
     }

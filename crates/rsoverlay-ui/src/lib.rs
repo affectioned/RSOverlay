@@ -12,6 +12,7 @@ pub mod icons;
 pub mod keyboard;
 pub mod keyboard_layout;
 pub mod locale;
+pub mod macros;
 pub mod media;
 pub mod now_playing;
 pub mod theme;
