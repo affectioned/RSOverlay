@@ -18,9 +18,11 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/aigoatsamuel/rsoverlay"
+repository = "https://github.com/affectioned/RSOverlay"
+# An app, not libraries: never published to crates.io. Also lets
+# cargo-deny accept the path-only internal dependencies.
+publish = false
 authors = ["RSOverlay Contributors"]
 
 [workspace.dependencies]

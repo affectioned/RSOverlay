@@ -5,9 +5,11 @@
 //! local IPC socket (no network, no API keys). Spawn once on startup,
 //! update periodically to refresh elapsed time, drop on shutdown.
 //!
-//! Discord application ID: the RSOverlay app registration on the
-//! Discord Developer Portal. Users without Discord running get a
-//! silent no-op — the IPC connect just fails and we log once.
+//! Opt-in: Discord only accepts presence from a registered application,
+//! and RSOverlay doesn't ship one. Whoever registers an app on the
+//! Discord Developer Portal can pass its ID (`--discord-app-id`) to turn
+//! presence on. Without Discord running it's a silent no-op: the IPC
+//! connect just fails and we log once.
 
 use anyhow::Result;
 use discord_rich_presence::activity::{Activity, Assets, Timestamps};
@@ -17,11 +19,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info, warn};
 
-/// Default Discord application ID for the RSOverlay project. Replace
-/// with a real registered app ID before public release — this one is
-/// a placeholder taken from Discord's examples so presence shows but
-/// without a custom app name.
-pub const DEFAULT_APP_ID: &str = "1300000000000000000";
 
 #[derive(Clone, Debug)]
 pub enum RuntimeMode {

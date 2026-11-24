@@ -1,7 +1,7 @@
 # RSOverlay — Roadmap
 
 Fed by two public wishlists — only user-facing feature requests were
-extracted — plus a feature-level inventory of XSOverlay's settings model
+extracted — plus a feature-level inventory of XSOverlay's user-facing options
 (see [XSO_PARITY.md](XSO_PARITY.md)). No XSOverlay / OVR Toolkit code,
 assets or strings are reused; every implementation is written from
 scratch against public Windows / OpenVR APIs.

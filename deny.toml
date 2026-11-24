@@ -8,7 +8,15 @@ targets = [
 [advisories]
 version = 2
 yanked = "deny"
-ignore = []
+ignore = [
+    # webbrowser < 1.0: BROWSER env-var argument injection in its Unix
+    # backend only. RSOverlay is Windows-only, and egui-winit 0.26 pins
+    # ^0.8. Drop this when egui is upgraded.
+    { id = "RUSTSEC-2026-0257", reason = "Unix-only code path; RSOverlay ships on Windows; pinned by egui-winit 0.26" },
+    # chrono marked unmaintained with no successor release yet. Used for
+    # clock / date formatting only. Migration target: `jiff`.
+    { id = "RUSTSEC-2026-0543", reason = "unmaintained, no fix available; local clock formatting only; migrate to jiff" },
+]
 
 [licenses]
 version = 2
@@ -26,12 +34,19 @@ allow = [
     "0BSD",
     "MPL-2.0",
     "Unicode-3.0",
+    "BSL-1.0",
 ]
-exceptions = []
+exceptions = [
+    # egui's bundled fonts: Ubuntu-Light (Ubuntu Font Licence) and
+    # Noto / emoji fonts (OFL).
+    { allow = ["OFL-1.1", "LicenseRef-UFL-1.0"], crate = "epaint" },
+]
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Internal crates are path dependencies (workspace is publish = false).
+allow-wildcard-paths = true
 highlight = "all"
 deny = []
 skip = []

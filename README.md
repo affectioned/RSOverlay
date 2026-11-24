@@ -78,7 +78,9 @@ time live, so you can check the claim yourself.
 - Batteries for HMD, controllers and trackers, with playtime estimates,
   low-battery alerts and an optional VRChat avatar parameter (OSC)
 - VRChat OSC chatbox, including "share now playing"
-- Discord Rich Presence, macros, night light, 9 UI languages
+- Macros, night light, 9 UI languages
+- Optional Discord Rich Presence with your own Discord application ID
+  (`--discord-app-id`)
 - Accessibility: VR text size, reduce motion, laser visibility, cursor
   smoothing, scroll speed
 
@@ -122,7 +124,8 @@ After the first `--vr` run, SteamVR launches RSOverlay automatically.
 --window <title>                  mirror a window instead of a monitor
 --no-mirror / --no-gpu-mirror     disable capture / force the CPU path
 --notify-bind <addr>              notification server (default 127.0.0.1:42069)
---no-notify / --no-osc / --no-discord
+--no-notify / --no-osc
+--discord-app-id <id>             opt-in Discord Rich Presence
 --osc-addr <addr>                 VRChat OSC input (default 127.0.0.1:9000)
 --scene <preset>                  --vr-preview layout preset
 --screenshot <png> --exit-after <frames>   headless render-to-PNG
@@ -178,7 +181,7 @@ crates/
 ├── rsoverlay-input/     SendInput, keyboard scan codes, elevation checks
 ├── rsoverlay-notify/    XSOverlay-compatible notification WebSocket
 ├── rsoverlay-osc/       VRChat OSC
-├── rsoverlay-discord/   Discord Rich Presence
+├── rsoverlay-discord/   opt-in Discord Rich Presence
 ├── rsoverlay-audio/     per-app volume (WASAPI)
 ├── rsoverlay-sysinfo/   CPU / GPU / RAM / VRAM sampling
 └── rsoverlay-core/      config, layouts, shared types

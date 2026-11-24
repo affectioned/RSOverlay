@@ -1,10 +1,11 @@
 # XSOverlay feature parity: gap analysis
 
-Feature inventory taken from XSOverlay Beta's user-facing settings model
-and subsystem names (2026-11-24). **Feature level only**: this lists
-*what* XSO lets users do. No XSO code, assets, layouts, sound packs or
-strings are reused in RSOverlay; every implementation here is written
-from scratch against public Windows / OpenVR APIs.
+Feature inventory of what XSOverlay lets users do: the options in its
+settings and its Steam store feature list (2026-11-24). **Feature level
+only.** Features and behaviour are compared, never implementations: no
+XSO code, assets, layouts, sound packs or strings are reused in
+RSOverlay, and every implementation here is written from scratch
+against public Windows / OpenVR APIs.
 
 Goal: **behave** like XSO (bindings, wrist, grab/scale, layouts,
 keyboard) so moving over is easy, with RSOverlay's own look.
@@ -90,7 +91,7 @@ Last reviewed: M60 (2026-11-24).
 | Notification API | ✅ | M2, XSO-compatible JSON |
 | Notification scale / offsets | ❌ | |
 | OSC device events (battery etc. → VRChat) | ✅ | M37, see [OSC.md](OSC.md) |
-| Discord Rich Presence | ✅ | M25 |
+| Discord Rich Presence | 🟡 | M25; opt-in with your own Discord application ID (`--discord-app-id`), no project app is registered |
 | Localization | 🟡 | 9 languages vs XSO's ~40 |
 | Plugin applications | ❌ | WASM-only, see ROADMAP non-goals |
 | Analytics | ⛔ | no telemetry by default, ever |
