@@ -652,6 +652,9 @@ mod imp {
             to_affine(&pose_offset_pitch(x, y, z, WRIST_PITCH_DEG))
         };
         let mut dash_pose: Option<Affine3A> = None;
+        // Dashboard docked to a device (head / hand): (device, pose in its
+        // space). The compositor carries it; `dash_pose` follows each frame.
+        let mut dash_rel: Option<(u32, Affine3A)> = None;
         let mut grab: Option<Grab> = None;
         let mut wins: Vec<WinOverlay> = Vec::new();
         let layouts_path = rsoverlay_core::layouts::Layouts::path();
@@ -775,6 +778,12 @@ mod imp {
             let mut toggle_dash = toggle_edit || (menu_now && !prev_menu);
             prev_menu = menu_now;
 
+            if let Some((d, rel)) = dash_rel {
+                if let Some(p) = device_pose(d, hmd.as_ref(), &controllers) {
+                    dash_pose = Some(p * rel);
+                }
+            }
+
             // ── View-angle auto-hide (XSO behaviour) for every panel; a
             // panel being grabbed never fades.
             if let Some(h) = hmd.as_ref().map(to_affine) {
@@ -882,6 +891,10 @@ mod imp {
                                 .and_then(|d| device_pose(d, hmd.as_ref(), &controllers))
                                 .map(|p| p * wrist_rel)
                         } else if i == 1 {
+                            // Like windows: grabbing a docked dashboard undocks it.
+                            if dash_rel.take().is_some() {
+                                dev_view.dash_attach = Attach::World;
+                            }
                             dash_pose
                         } else if i == 2 {
                             // A pinned keyboard can't be moved.
@@ -1181,12 +1194,46 @@ mod imp {
                 }
             }
 
+            // ── Dashboard bar: close + dock, the same as every window.
+            if std::mem::take(&mut dev_view.dash_close) && dash.visible {
+                toggle_dash = true;
+            }
+            if let (Some(a), Some(cur)) = (dev_view.dash_dock.take(), dash_pose) {
+                let dev = match a {
+                    Attach::World => None,
+                    Attach::Head => Some(0),
+                    Attach::LeftHand => controllers.iter().find(|c| c.hand == Hand::Left).map(|c| c.index),
+                    Attach::RightHand => controllers.iter().find(|c| c.hand == Hand::Right).map(|c| c.index),
+                };
+                match dev.and_then(|d| device_pose(d, hmd.as_ref(), &controllers).map(|p| (d, p))) {
+                    Some((d, p)) => {
+                        let rel = p.inverse() * cur;
+                        match overlay.set_transform_device_relative(dash.handle, d, &from_affine(&rel)) {
+                            Ok(()) => {
+                                dash_rel = Some((d, rel));
+                                dev_view.dash_attach = a;
+                            }
+                            Err(e) => warn!("dock dashboard: {e:#}"),
+                        }
+                    }
+                    None if a == Attach::World => match overlay.set_transform_absolute(dash.handle, &from_affine(&cur)) {
+                        Ok(()) => {
+                            dash_rel = None;
+                            dev_view.dash_attach = a;
+                        }
+                        Err(e) => warn!("dock dashboard: {e:#}"),
+                    },
+                    None => warn!("dock dashboard to {}: device not tracked", a.label()),
+                }
+            }
+
             // ── Summon / dismiss the dashboard.
             if toggle_dash {
                 let show = !dash.visible;
-                if show {
+                if show && dash_rel.is_none() {
                     // Re-summon in front of you every time, XSO-style; a
-                    // grabbed position lasts until the next dismiss.
+                    // grabbed position lasts until the next dismiss. A
+                    // docked dashboard stays where it's docked.
                     if let Some(h) = &hmd {
                         let p = summon_pose(h);
                         if let Err(e) = overlay.set_transform_absolute(dash.handle, &from_affine(&p)) {

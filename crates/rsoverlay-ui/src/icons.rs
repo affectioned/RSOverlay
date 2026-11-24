@@ -33,6 +33,7 @@ svg_icon!(GRID,     "grid.svg");
 svg_icon!(KEYBOARD, "keyboard.svg");
 svg_icon!(MOON,     "moon.svg");
 svg_icon!(PLUS,        "plus.svg");
+svg_icon!(MORE,        "more.svg");
 svg_icon!(RECENTER,    "recenter.svg");
 svg_icon!(FOLDER,      "folder.svg");
 svg_icon!(TRASH,       "trash.svg");

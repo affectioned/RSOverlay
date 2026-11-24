@@ -105,16 +105,7 @@ pub fn show(
         }
         bar_ui.add(egui::Label::new(egui::RichText::new(title).color(theme::FG_PRIMARY).size(theme::SIZE_BODY)).truncate(true));
         bar_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if pill(ui, "✕", false, theme::DANGER).on_hover_text("Close").clicked() {
-                out.close = true;
-            }
-            ui.add_space(8.0);
-            for a in Attach::ALL.into_iter().rev() {
-                if pill(ui, a.label(), attach == a, accent).on_hover_text(format!("Dock to {}", a.label())).clicked() && attach != a {
-                    out.attach = Some(a);
-                }
-            }
-            ui.label(theme::caption("dock"));
+            (out.attach, out.close) = dock_controls(ui, attach, accent);
         });
     });
     out
@@ -137,6 +128,24 @@ fn uac_banner(ui: &egui::Ui, content: egui::Rect) {
     p.text(r.center_top() + egui::vec2(0.0, 78.0), egui::Align2::CENTER_CENTER,
         "or enable Settings → Administrator → Run as administrator.",
         egui::FontId::proportional(theme::SIZE_BODY), theme::FG_MUTED);
+}
+
+/// The controls every floating panel carries (windows, widgets, the
+/// dashboard; not the keyboard): dock target + close. Call inside a
+/// right-to-left layout. Returns (dock request, close).
+pub fn dock_controls(ui: &mut egui::Ui, attach: Attach, accent: egui::Color32) -> (Option<Attach>, bool) {
+    let mut out = (None, false);
+    if pill(ui, "✕", false, theme::DANGER).on_hover_text("Close").clicked() {
+        out.1 = true;
+    }
+    ui.add_space(8.0);
+    for a in Attach::ALL.into_iter().rev() {
+        if pill(ui, a.label(), attach == a, accent).on_hover_text(format!("Dock to {}", a.label())).clicked() && attach != a {
+            out.0 = Some(a);
+        }
+    }
+    ui.label(theme::caption("Dock"));
+    out
 }
 
 pub fn pill(ui: &mut egui::Ui, text: &str, on: bool, accent: egui::Color32) -> egui::Response {

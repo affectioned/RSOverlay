@@ -222,16 +222,7 @@ pub fn frame(
 
         // Dock bar.
         let mut dui = ui.child_ui(bar_r, egui::Layout::right_to_left(egui::Align::Center));
-        if pill(&mut dui, "✕", false, theme::DANGER).on_hover_text("Close").clicked() {
-            out.close = true;
-        }
-        dui.add_space(8.0);
-        for a in Attach::ALL.into_iter().rev() {
-            if pill(&mut dui, a.label(), attach == a, accent).on_hover_text(format!("Dock to {}", a.label())).clicked() && attach != a {
-                out.attach = Some(a);
-            }
-        }
-        dui.label(theme::caption("dock"));
+        (out.attach, out.close) = crate::window_panel::dock_controls(&mut dui, attach, accent);
         dui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.label(egui::RichText::new("drop onto another widget to merge").size(theme::SIZE_CAPTION).color(theme::FG_MUTED));
         });

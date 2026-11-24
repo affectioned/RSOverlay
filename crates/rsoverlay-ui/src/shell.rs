@@ -2,13 +2,14 @@
 //!
 //! The same layout on the desktop and in VR, all on AMOLED black. A
 //! labelled sidebar (every destination says what it is; no guessing
-//! from icons), a quiet header, serif page titles:
+//! from icons), a quiet header, page titles over an accent rule:
 //!
 //! ```text
 //! ┌────────────┬─────────────────────────────────────────┐
 //! │ ◈ RSOverlay│ 10:42 PM · Tue, Nov 24  [Search…]  82 🔔 │  header
 //! │ ⌨ Kbd ＋Add├─────────────────────────────────────────┤
-//! │ ↻ Rec ▮Stat│  Good evening                           │  quick actions
+//! │ ↻ Rec ▮Stat│  Home                                   │  quick actions
+//! │            │  ──                                     │
 //! │ ⌂ Home     │                                         │
 //! │ ▭ Desktop  │        page content (scrolls)           │
 //! │ ♪ Audio    │                                         │
@@ -130,7 +131,7 @@ pub fn nav_rail(ui: &mut egui::Ui, page: &mut Page, badge: usize, keyboard_open:
         ui.add_space(8.0);
         ui.add(icon(icons::BRAND, 22.0, accent));
         ui.add_space(2.0);
-        ui.label(egui::RichText::new("RSOverlay").font(theme::serif(21.0)).color(theme::FG_PRIMARY));
+        ui.label(egui::RichText::new("RSOverlay").font(theme::display(19.0)).color(theme::FG_PRIMARY));
     });
     ui.add_space(10.0);
     let quick = quick_actions(ui, keyboard_open, vr, accent);
@@ -152,7 +153,7 @@ pub fn nav_rail(ui: &mut egui::Ui, page: &mut Page, badge: usize, keyboard_open:
         let ctx = ui.ctx().clone();
         let y = motion::value(&ctx, egui::Id::new("nav-highlight-y"), target.top(), motion::MEDIUM);
         let rect = egui::Rect::from_min_size(egui::pos2(target.left(), y), target.size());
-        ui.painter().set(slot, egui::Shape::rect_filled(rect, theme::RADIUS_CONTROL, theme::BG_RAISED));
+        ui.painter().set(slot, egui::Shape::rect_filled(rect, theme::RADIUS_CONTROL, accent.gamma_multiply(0.14)));
     }
     quick
 }
@@ -213,12 +214,11 @@ fn nav_item(
     if hover > 0.0 {
         ui.painter().rect_filled(rect, theme::RADIUS_CONTROL, theme::BG_CARD.gamma_multiply(hover));
     }
-    // Icon + label brighten as the row activates; the accent is kept
-    // for state that needs attention (badges), not for navigation.
+    // Icon takes the accent and the label brightens as the row activates.
     let on = motion::toggle(ui.ctx(), resp.id.with("sel"), selected, motion::MEDIUM);
     let tint = motion::mix(theme::FG_MUTED, theme::FG_PRIMARY, on.max(hover));
     let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + 22.0, rect.center().y), egui::vec2(18.0, 18.0));
-    icon(src, 18.0, tint).paint_at(ui, icon_rect);
+    icon(src, 18.0, motion::mix(tint, accent, on)).paint_at(ui, icon_rect);
     let painter = ui.painter();
     let font = if selected { theme::medium(theme::SIZE_BODY) } else { egui::FontId::proportional(theme::SIZE_BODY) };
     painter.text(egui::pos2(rect.left() + 42.0, rect.center().y), egui::Align2::LEFT_CENTER, label, font, tint);
@@ -437,19 +437,14 @@ pub fn paint_beam(ctx: &egui::Context) {
 }
 
 /// Page title row used at the top of every page body.
-pub fn page_title(ui: &mut egui::Ui, title: &str) {
+/// Page title: display type over a short accent rule, the product's
+/// signature mark.
+pub fn page_title(ui: &mut egui::Ui, title: &str, accent: egui::Color32) {
     ui.add_space(4.0);
-    ui.label(egui::RichText::new(title).font(theme::serif(30.0)).color(theme::FG_PRIMARY));
-    ui.add_space(theme::GUTTER);
-}
-
-/// "Good morning / afternoon / evening": the Home page's serif title.
-pub fn greeting(hour: u32) -> &'static str {
-    match hour {
-        5..=11 => "Good morning",
-        12..=17 => "Good afternoon",
-        _ => "Good evening",
-    }
+    let r = ui.label(egui::RichText::new(title).font(theme::display(26.0)).color(theme::FG_PRIMARY)).rect;
+    let rule = egui::Rect::from_min_size(r.left_bottom() + egui::vec2(1.0, 6.0), egui::vec2(28.0, 3.0));
+    ui.painter().rect_filled(rule, 1.5, accent);
+    ui.add_space(theme::GUTTER + 6.0);
 }
 
 #[cfg(test)]
@@ -462,14 +457,6 @@ mod tests {
             assert_eq!(Page::from_slug(p.slug()), Some(p));
         }
         assert_eq!(Page::from_slug("nope"), None);
-    }
-
-    #[test]
-    fn greetings_follow_the_clock() {
-        assert_eq!(greeting(8), "Good morning");
-        assert_eq!(greeting(14), "Good afternoon");
-        assert_eq!(greeting(21), "Good evening");
-        assert_eq!(greeting(2), "Good evening");
     }
 
     #[test]

@@ -211,6 +211,14 @@ pub struct DevView {
     /// Dashboard quick actions the VR shell carries out (recenter,
     /// stats pop-out), taken once per frame like a wrist action.
     pub dash_action: crate::wrist::WristAction,
+    /// VR dashboard docking, shown in its bottom bar like every other
+    /// floating panel; the VR shell owns the pose and reports back here.
+    pub dash_attach: crate::window_panel::Attach,
+    /// Requests from that bar, taken by the VR shell.
+    pub dash_dock: Option<crate::window_panel::Attach>,
+    pub dash_close: bool,
+    /// Wrist shows everything (layouts, devices, views) vs the compact set.
+    pub wrist_expanded: bool,
     pub show_history: bool,
     pub show_battery: bool,
     pub battery_warn_pct: u8,
@@ -317,6 +325,10 @@ impl Default for DevView {
             show_chat: true,
             show_keyboard: false,
             dash_action: Default::default(),
+            dash_attach: crate::window_panel::Attach::World,
+            dash_dock: None,
+            dash_close: false,
+            wrist_expanded: false,
             show_history: false,
             show_battery: true,
             battery_warn_pct: 20,
@@ -502,8 +514,12 @@ impl DevView {
             keyboard_open: self.show_keyboard,
             accent: self.effective_accent(),
             buttons: self.wrist_buttons,
+            expanded: self.wrist_expanded,
         };
         let act = crate::wrist::show(ctx, &data);
+        if act.toggle_more {
+            self.wrist_expanded = !self.wrist_expanded;
+        }
         if act.slot_delta != 0 {
             let n = rsoverlay_core::layouts::SLOTS as i32;
             self.wrist_slot = (self.wrist_slot as i32 + act.slot_delta).rem_euclid(n) as usize;
@@ -657,6 +673,28 @@ impl DevView {
         } else {
             egui::Frame::none().fill(theme::BG_ROOT)
         };
+        // VR: the same bottom bar every floating panel has (dock + close).
+        if self.dock_layout {
+            egui::TopBottomPanel::bottom("panel-bar")
+                .frame(root.inner_margin(egui::Margin { left: 20.0, right: 20.0, top: 6.0, bottom: 14.0 }))
+                .show_separator_line(false)
+                .show(ctx, |ui| {
+                    let top = ui.max_rect().top() - 4.0;
+                    ui.painter().line_segment(
+                        [egui::pos2(ui.max_rect().left(), top), egui::pos2(ui.max_rect().right(), top)],
+                        egui::Stroke::new(1.0_f32, theme::STROKE_CARD),
+                    );
+                    ui.horizontal(|ui| {
+                        ui.set_height(40.0);
+                        ui.label(egui::RichText::new(format!("RSOverlay · {}", self.page.label())).color(theme::FG_MUTED).size(theme::SIZE_BODY));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let (dock, close) = crate::window_panel::dock_controls(ui, self.dash_attach, accent);
+                            self.dash_dock = dock.or(self.dash_dock);
+                            self.dash_close |= close;
+                        });
+                    });
+                });
+        }
         // One labelled sidebar on both surfaces: in VR as on the desktop,
         // every destination names itself.
         egui::SidePanel::left("nav")
@@ -767,12 +805,7 @@ impl DevView {
         accent: egui::Color32,
     ) {
         use crate::shell::{page_title, Page};
-        if self.page == Page::Home {
-            use chrono::Timelike;
-            page_title(ui, crate::shell::greeting(chrono::Local::now().hour()));
-        } else {
-            page_title(ui, self.page.label());
-        }
+        page_title(ui, self.page.label(), accent);
         match self.page {
             Page::Home => {
                 // Two tile columns; each tile honours its Appearance toggle.

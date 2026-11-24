@@ -1,7 +1,11 @@
 //! Wrist toolbar — the always-there VR control centre, laid out as the
 //! stacked rows XSOverlay users know (our own look and icons). Every
 //! button carries a visible label, so nothing has to be learned by
-//! trial and error:
+//! trial and error.
+//!
+//! Compact by default: the four everyday actions + More, and the clock
+//! with media. More reveals the rest (all actions, layout slots, views,
+//! device batteries); the choice persists. Expanded:
 //!
 //! ```text
 //! ╭─────────────────────────────────────────────────╮
@@ -38,6 +42,8 @@ pub struct WristData<'a> {
     pub accent: egui::Color32,
     /// Which action buttons to show (bit i = actions[i]).
     pub buttons: u8,
+    /// Full set (layouts, views, devices) vs the compact default.
+    pub expanded: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +58,8 @@ pub struct WristAction {
     /// Move the selected layout slot (−1 / +1).
     pub slot_delta: i32,
     pub layout: Option<LayoutAction>,
+    /// The More / Less button.
+    pub toggle_more: bool,
 }
 
 const ROW_GAP: f32 = 8.0;
@@ -80,8 +88,16 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             (icons::SETTINGS, "Settings", "Settings", false),
             (icons::TRASH, "Close all", "Close all floating panels", false),
         ];
-        let shown: Vec<_> = actions.into_iter().enumerate().filter(|(i, _)| d.buttons & (1 << i) != 0).collect();
-        let cell = r1.width() / shown.len().max(1) as f32;
+        // Compact: the everyday four, in reach order. Expanded: every
+        // enabled action in toolbar order.
+        let order: &[usize] = if d.expanded { &[0, 1, 2, 3, 4, 5, 6] } else { &[3, 2, 0, 1] };
+        let shown: Vec<_> = order.iter().filter(|&&i| d.buttons & (1 << i) != 0).map(|&i| (i, actions[i].clone())).collect();
+        let cell = r1.width() / (shown.len() + 1) as f32;
+        let more = egui::Rect::from_min_size(egui::pos2(r1.right() - cell, r1.top()), egui::vec2(cell, r1.height()));
+        let (more_label, more_tip) = if d.expanded { ("Less", "Show fewer options") } else { ("More", "Show more options") };
+        if labelled_button(ui, more.shrink(6.0), icons::MORE, 24.0, d.expanded, more_label, more_tip, accent) {
+            act.toggle_more = true;
+        }
         for (slot, (i, (src, label, tip, on))) in shown.into_iter().enumerate() {
             let c = egui::Rect::from_min_size(egui::pos2(r1.left() + slot as f32 * cell, r1.top()), egui::vec2(cell, r1.height()));
             if labelled_button(ui, c.shrink(6.0), src, 24.0, on, label, tip, accent) {
@@ -97,7 +113,8 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             }
         }
 
-        // 2 · Layouts.
+        // 2 · Layouts (expanded only).
+        if d.expanded {
         let r2 = row(&mut y, 64.0, full.width() * 0.08);
         slab(ui, r2, accent);
         let half = r2.width() * 0.40;
@@ -136,6 +153,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
                 });
             }
         }
+        }
 
         // 3 · Clock + views (+ media inside the same slab).
         let media_h = if d.title.is_some() { 56.0 } else { 0.0 };
@@ -144,12 +162,13 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         let now = Local::now();
         let time = if locale::uses_24h_clock() { now.format("%H:%M").to_string() } else { now.format("%-I:%M %p").to_string() };
         let p = ui.painter();
-        p.text(r3.left_top() + egui::vec2(18.0, 8.0), egui::Align2::LEFT_TOP, time, theme::serif(42.0), theme::FG_PRIMARY);
+        p.text(r3.left_top() + egui::vec2(18.0, 8.0), egui::Align2::LEFT_TOP, time, theme::display(40.0), theme::FG_PRIMARY);
         p.text(r3.left_top() + egui::vec2(18.0, 60.0), egui::Align2::LEFT_TOP, now.format("%a, %b %-d").to_string(),
             egui::FontId::proportional(theme::SIZE_BODY), theme::FG_MUTED);
         let s = d.session_secs;
         p.text(r3.left_top() + egui::vec2(18.0, 82.0), egui::Align2::LEFT_TOP, format!("{:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60),
             egui::FontId::monospace(theme::SIZE_CAPTION + 2.0), theme::FG_MUTED);
+        if d.expanded {
         let views = egui::Rect::from_min_max(egui::pos2(r3.center().x - 6.0, r3.top() + 10.0), egui::pos2(r3.right() - 10.0, r3.top() + 98.0));
         ui.painter().rect_filled(views, theme::RADIUS_CARD, theme::BG_CARD);
         let vw = views.width() / 3.0;
@@ -167,6 +186,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
                     _ => act.popout_stats = true,
                 }
             }
+        }
         }
         if let Some(title) = d.title {
             let m = egui::Rect::from_min_max(egui::pos2(r3.left() + 10.0, r3.top() + 108.0), egui::pos2(r3.right() - 10.0, r3.bottom() - 8.0));
@@ -194,8 +214,8 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             }
         }
 
-        // 4 · Devices.
-        if !d.batteries.is_empty() {
+        // 4 · Devices (expanded only).
+        if d.expanded && !d.batteries.is_empty() {
             let r5 = row(&mut y, 52.0, full.width() * 0.16);
             slab(ui, r5, accent);
             let tw = r5.width() / d.batteries.len() as f32;

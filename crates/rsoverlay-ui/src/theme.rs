@@ -1,36 +1,37 @@
 //! Visual tokens. One source of truth so every card looks like it came from
 //! the same product.
 //!
-//! Direction: Anthropic's design language, on AMOLED black. Warm
-//! neutrals instead of cool blue-greys, a serif display face over a
-//! quiet sans, flat surfaces with hairline borders (no glows, sheens or
-//! shadows), sentence-case labels, and one restrained accent (the
-//! owner's rose by default). It's a work tool first: calm, legible, nothing shouting.
+//! Direction: RSOverlay's own. Calm, work-first and flat on AMOLED
+//! black: neutral graphite surfaces with hairline borders (no glows,
+//! sheens or shadows), Inter throughout with medium-weight display
+//! type, sentence-case labels, and the rose accent as the signature,
+//! marking where you are (selected item, page-title rule), never
+//! decoration.
 
 use egui::Color32;
 
 /// AMOLED-true black. Every unlit OLED pixel stays off at this value, which
 /// is the look the owner wants everywhere. Surfaces step up from it in
-/// warm greys.
+/// neutral graphite.
 pub const BG_ROOT: Color32 = Color32::from_rgb(0x00, 0x00, 0x00);
 /// Cards, sidebar, panels.
-pub const BG_CARD: Color32 = Color32::from_rgb(0x14, 0x14, 0x13);
+pub const BG_CARD: Color32 = Color32::from_rgb(0x12, 0x12, 0x14);
 /// Controls on a card (buttons, inputs, slider rails).
-pub const BG_RAISED: Color32 = Color32::from_rgb(0x1F, 0x1E, 0x1D);
-pub const BG_HOVER: Color32 = Color32::from_rgb(0x2B, 0x2A, 0x27);
-pub const BG_ACTIVE: Color32 = Color32::from_rgb(0x36, 0x35, 0x31);
+pub const BG_RAISED: Color32 = Color32::from_rgb(0x1C, 0x1C, 0x1F);
+pub const BG_HOVER: Color32 = Color32::from_rgb(0x27, 0x27, 0x2B);
+pub const BG_ACTIVE: Color32 = Color32::from_rgb(0x32, 0x32, 0x37);
 /// Hairline border on every surface.
-pub const STROKE_CARD: Color32 = Color32::from_rgb(0x2A, 0x29, 0x26);
-pub const FG_PRIMARY: Color32 = Color32::from_rgb(0xF5, 0xF4, 0xEF);
-pub const FG_MUTED: Color32 = Color32::from_rgb(0xA3, 0xA0, 0x97);
+pub const STROKE_CARD: Color32 = Color32::from_rgb(0x25, 0x25, 0x29);
+pub const FG_PRIMARY: Color32 = Color32::from_rgb(0xF2, 0xF2, 0xF4);
+pub const FG_MUTED: Color32 = Color32::from_rgb(0x9C, 0x9C, 0xA6);
 /// Quieter than muted: disabled glyphs, placeholder text.
-pub const FG_FAINT: Color32 = Color32::from_rgb(0x5E, 0x5C, 0x56);
+pub const FG_FAINT: Color32 = Color32::from_rgb(0x5A, 0x5A, 0x62);
 /// Default accent (rose), overridden at runtime by the Appearance card.
 pub const ACCENT: Color32 = Color32::from_rgb(0xE8, 0x8F, 0xA2);
 /// Warning state (low battery). A true red, apart from every accent.
 pub const DANGER: Color32 = Color32::from_rgb(0xE5, 0x53, 0x4B);
 
-/// Accent choices offered in the Appearance picker: muted, warm tones.
+/// Accent choices offered in the Appearance picker: muted tones.
 pub const ACCENT_PRESETS: &[(&str, Color32)] = &[
     ("rose",    Color32::from_rgb(0xE8, 0x8F, 0xA2)),
     ("clay",    Color32::from_rgb(0xD9, 0x77, 0x57)),
@@ -38,7 +39,7 @@ pub const ACCENT_PRESETS: &[(&str, Color32)] = &[
     ("olive",   Color32::from_rgb(0x9A, 0xAE, 0x7A)),
     ("sky",     Color32::from_rgb(0x6A, 0x9B, 0xCC)),
     ("heather", Color32::from_rgb(0xA8, 0x95, 0xD0)),
-    ("ivory",   Color32::from_rgb(0xF5, 0xF4, 0xEF)),
+    ("white",   Color32::from_rgb(0xF2, 0xF2, 0xF4)),
 ];
 
 pub const RADIUS_CARD: f32 = 14.0;
@@ -56,12 +57,12 @@ pub const SIZE_CARD_TITLE: f32 = 16.0;
 pub const SIZE_BODY: f32 = 15.0;
 pub const SIZE_CAPTION: f32 = 12.0;
 
-/// Display serif (Source Serif 4): page titles, greetings, the clock.
-pub fn serif(size: f32) -> egui::FontId {
-    egui::FontId::new(size, egui::FontFamily::Name("serif".into()))
+/// Display type: page titles, the wordmark, the clock (Inter medium).
+pub fn display(size: f32) -> egui::FontId {
+    medium(size)
 }
 
-/// Medium-weight sans (Inter): card titles, selected nav items.
+/// Medium-weight Inter: card titles, selected items, display type.
 pub fn medium(size: f32) -> egui::FontId {
     egui::FontId::new(size, egui::FontFamily::Name("medium".into()))
 }
@@ -71,18 +72,15 @@ fn install_fonts(ctx: &egui::Context) {
     for (name, bytes) in [
         ("inter", &include_bytes!("fonts/Inter-Regular.ttf")[..]),
         ("inter-medium", &include_bytes!("fonts/Inter-Medium.ttf")[..]),
-        ("source-serif", &include_bytes!("fonts/SourceSerif4-Regular.ttf")[..]),
     ] {
         fonts.font_data.insert(name.into(), egui::FontData::from_static(bytes));
     }
     // egui's bundled fonts stay on as fallbacks (symbols, emoji).
     let fallback = fonts.families[&egui::FontFamily::Proportional].clone();
     fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "inter".into());
-    for (family, first) in [("medium", "inter-medium"), ("serif", "source-serif")] {
-        let mut chain = vec![first.to_string()];
-        chain.extend(fallback.iter().cloned());
-        fonts.families.insert(egui::FontFamily::Name(family.into()), chain);
-    }
+    let mut chain = vec!["inter-medium".to_string()];
+    chain.extend(fallback.iter().cloned());
+    fonts.families.insert(egui::FontFamily::Name("medium".into()), chain);
     ctx.set_fonts(fonts);
 }
 
@@ -110,8 +108,7 @@ pub fn install(ctx: &egui::Context) {
     style.spacing.scroll.bar_inner_margin = 4.0;
     style.spacing.scroll.bar_outer_margin = 2.0;
     style.spacing.scroll.handle_min_length = 32.0;
-    // Controls: warm raised fills with a hairline edge, like Claude's
-    // secondary buttons.
+    // Controls: raised fills with a hairline edge.
     for (w, fill) in [
         (&mut style.visuals.widgets.inactive, BG_RAISED),
         (&mut style.visuals.widgets.hovered, BG_HOVER),
@@ -134,7 +131,7 @@ pub fn install(ctx: &egui::Context) {
     ctx.set_style(style);
 }
 
-/// A card frame: flat warm surface, hairline edge.
+/// A card frame: flat graphite surface, hairline edge.
 pub fn card() -> egui::Frame {
     egui::Frame::none()
         .fill(BG_CARD)
@@ -186,7 +183,7 @@ pub fn body_muted(text: &str) -> egui::RichText {
 }
 
 pub fn headline(text: &str) -> egui::RichText {
-    egui::RichText::new(text).font(serif(SIZE_HEADLINE)).color(FG_PRIMARY)
+    egui::RichText::new(text).font(display(SIZE_HEADLINE)).color(FG_PRIMARY)
 }
 
 pub fn accent_dot_for(c: Color32) -> egui::RichText {
