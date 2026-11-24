@@ -15,6 +15,7 @@ mod mirror_source;
 mod preview;
 mod preview_mock;
 mod preview_vr;
+mod snapshot;
 mod vr;
 
 use anyhow::Result;
@@ -168,6 +169,11 @@ struct Args {
     #[arg(long, value_name = "QUERY")]
     search: Option<String>,
 
+    /// Render every Settings card to `DIR/NN-name.png` offscreen and
+    /// exit (input for tools/make-settings-overview.py).
+    #[arg(long, value_name = "DIR")]
+    settings_cards: Option<std::path::PathBuf>,
+
     /// VR preview layout preset: work / gaming / social / dashboard /
     /// wrist-compact / wrist-expanded (keys 1-6 switch live).
     #[arg(long, value_name = "PRESET")]
@@ -238,6 +244,12 @@ fn main() -> Result<()> {
             rsoverlay_core::Config::default()
         }
     };
+
+    if let Some(dir) = &args.settings_cards {
+        // Default config, not the user's: the overview shows RSOverlay as
+        // shipped and stays the same on every machine.
+        return snapshot::settings_cards(dir, &rsoverlay_core::Config::default());
+    }
 
     if args.list_monitors {
         for m in rsoverlay_capture::enumerate_monitors()? {

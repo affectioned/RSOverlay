@@ -580,6 +580,85 @@ impl DevView {
         self.pending_chat.take()
     }
 
+    /// One Settings card on its own, filling the screen: `index` 0..
+    /// walks every card in page order. Returns the card's name, or None
+    /// past the last one. Used to render the settings overview image.
+    pub fn settings_card_ui(&mut self, ctx: &egui::Context, index: usize) -> Option<&'static str> {
+        self.tick_state(ctx);
+        let accent = self.effective_accent();
+        if ctx.style().visuals.selection.bg_fill != accent {
+            ctx.style_mut(|st| {
+                st.visuals.selection.bg_fill = accent;
+                st.visuals.selection.stroke.color = theme::BG_ROOT;
+            });
+        }
+        let mut name = None;
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(theme::BG_ROOT).inner_margin(egui::Margin::same(16.0)))
+            .show(ctx, |ui| {
+                name = match index {
+                    0 => {
+                        let _ = appearance_card(
+                            ui,
+                            &mut self.accent,
+                            &mut self.show_mirror,
+                            &mut self.show_media,
+                            &mut self.show_chat,
+                            &mut self.show_keyboard,
+                            &mut self.show_history,
+                            &mut self.show_battery,
+                            &mut self.show_macros,
+                            &mut self.show_volume,
+                            &mut self.show_system,
+                            &mut self.reduce_motion,
+                            &mut self.language,
+                            &mut self.keyboard.layout,
+                        );
+                        Some("appearance")
+                    }
+                    1 => {
+                        self.night_light.card(ui, minute_of_day(), accent);
+                        Some("night-light")
+                    }
+                    2 => {
+                        vr_card(ui, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, accent);
+                        Some("vr")
+                    }
+                    3 => {
+                        pointer_card(ui, &mut self.cursor_smoothing, &mut self.scroll_speed, accent);
+                        Some("pointer")
+                    }
+                    4 => {
+                        wrist_toolbar_card(ui, &mut self.wrist_buttons, &mut self.media_theme, accent);
+                        Some("wrist-toolbar")
+                    }
+                    5 => {
+                        accessibility_card(ui, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.reduce_motion, accent);
+                        Some("accessibility")
+                    }
+                    6 => {
+                        let _ = admin_card(ui, &mut self.run_as_admin, self.elevated, accent);
+                        Some("administrator")
+                    }
+                    7 => {
+                        placement_card(ui, &mut self.placement, accent);
+                        Some("placement")
+                    }
+                    8 => {
+                        let snap = self.system.snapshot();
+                        performance_card(ui, snap.as_ref(), self.frame_ms, &self.frame_ms_hist, self.last_fps, self.notifications_received, accent);
+                        Some("stats")
+                    }
+                    9 => {
+                        let _ = reset_card(ui, &mut self.reset_armed_at);
+                        Some("reset")
+                    }
+                    _ => None,
+                };
+            });
+        name
+    }
+
     /// Drop on-screen toasts (history keeps them).
     pub fn dismiss_toasts(&mut self) {
         self.toasts.clear();
