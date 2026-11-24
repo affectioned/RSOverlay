@@ -294,7 +294,7 @@ fn main() -> Result<()> {
         RuntimeMode::VrPreview => {
             preview_vr::run(notify_rx, test_cfg, config.clone(), config_path.clone())
         }
-        RuntimeMode::Vr => vr::run(notify_rx, rt_handle.clone(), config.clone()),
+        RuntimeMode::Vr => vr::run(notify_rx, rt_handle.clone(), config.clone(), osc),
     };
 
     // Give the runtime a bounded shutdown window so background tasks drain.

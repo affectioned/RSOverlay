@@ -67,14 +67,34 @@ pub struct ChatMessage {
     pub play_notification: bool,
 }
 
+/// Anything the sender task can put on the wire.
+#[derive(Clone, Debug)]
+pub enum Outbound {
+    Chat(ChatMessage),
+    /// `/avatar/parameters/<name>` with a single value.
+    Param { name: String, value: OscValue },
+}
+
 pub struct OscClient {
-    pub tx: mpsc::UnboundedSender<ChatMessage>,
+    tx: mpsc::UnboundedSender<Outbound>,
+}
+
+impl OscClient {
+    pub fn send_chat(&self, msg: ChatMessage) -> Result<()> {
+        self.tx.send(Outbound::Chat(msg)).map_err(|_| anyhow::anyhow!("OSC sender stopped"))
+    }
+
+    pub fn send_param(&self, name: impl Into<String>, value: OscValue) -> Result<()> {
+        self.tx
+            .send(Outbound::Param { name: name.into(), value })
+            .map_err(|_| anyhow::anyhow!("OSC sender stopped"))
+    }
 }
 
 /// Spawn a background sender on the given tokio runtime. Returns a sender
 /// handle; drop it to stop the task.
 pub fn spawn(rt: &tokio::runtime::Handle, addr: SocketAddr) -> OscClient {
-    let (tx, mut rx) = mpsc::unbounded_channel::<ChatMessage>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<Outbound>();
     rt.spawn(async move {
         let sock = match UdpSocket::bind("127.0.0.1:0").await {
             Ok(s) => s,
@@ -88,11 +108,17 @@ pub fn spawn(rt: &tokio::runtime::Handle, addr: SocketAddr) -> OscClient {
             return;
         }
         info!("osc chatbox sender ready → {addr}");
-        while let Some(msg) = rx.recv().await {
-            if let Err(e) = send_chatbox(&sock, &msg).await {
-                warn!("osc send: {e:#}");
-            } else {
-                debug!("osc chatbox sent: {} bytes", msg.text.len());
+        while let Some(out) = rx.recv().await {
+            let res = match &out {
+                Outbound::Chat(msg) => send_chatbox(&sock, msg).await,
+                Outbound::Param { name, value } => {
+                    let bytes = encode_message(&format!("/avatar/parameters/{name}"), std::slice::from_ref(value));
+                    sock.send(&bytes).await.map(|_| ()).context("UDP send")
+                }
+            };
+            match res {
+                Err(e) => warn!("osc send: {e:#}"),
+                Ok(()) => debug!("osc sent {out:?}"),
             }
         }
     });

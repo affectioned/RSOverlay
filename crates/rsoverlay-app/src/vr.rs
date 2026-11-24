@@ -29,6 +29,7 @@ mod imp {
         _notify: Option<NotifyChannel>,
         rt: Handle,
         config: rsoverlay_core::Config,
+        osc: Option<rsoverlay_osc::OscClient>,
     ) -> Result<()> {
         let vr = OpenVr::init().context("OpenVR init")?;
         let overlay = vr.overlay().context("acquiring IVROverlay")?;
@@ -129,6 +130,20 @@ mod imp {
                 raw_input,
                 |ctx| dev_view.ui_with(ctx, injector.as_ref()),
             );
+
+            // 1a. OSC out: chatbox + avatar parameters (battery).
+            if let Some(client) = &osc {
+                for (name, value) in dev_view.take_pending_osc() {
+                    if let Err(e) = client.send_param(name, value) {
+                        warn!("osc: {e:#}");
+                    }
+                }
+                if let Some(msg) = dev_view.take_pending_chat() {
+                    if let Err(e) = client.send_chat(msg) {
+                        warn!("osc: {e:#}");
+                    }
+                }
+            }
 
             // 1b. Night light + opacity, applied by the compositor.
             let tint = dev_view.overlay_tint();
@@ -309,6 +324,8 @@ pub use imp::run;
 pub fn run(
     _notify: Option<rsoverlay_notify::NotifyChannel>,
     _rt: tokio::runtime::Handle,
+    _config: rsoverlay_core::Config,
+    _osc: Option<rsoverlay_osc::OscClient>,
 ) -> anyhow::Result<()> {
     anyhow::bail!("VR mode is Windows-only in this milestone; Linux OpenVR support is scaffolded but not wired");
 }

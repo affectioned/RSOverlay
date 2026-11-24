@@ -196,6 +196,8 @@ pub struct DevView {
     pub now_playing: NowPlayingBridge,
     pending_hit: Option<MirrorHit>,
     batteries: Vec<BatteryReading>,
+    pub battery_osc: crate::battery::BatteryOsc,
+    pending_osc: Vec<(String, rsoverlay_osc::OscValue)>,
     low_battery: LowBatteryWatch,
     toasts: VecDeque<Toast>,
     toast_seq: u64,
@@ -249,6 +251,8 @@ impl Default for DevView {
             now_playing: NowPlayingBridge::default(),
             pending_hit: None,
             batteries: Vec::new(),
+            battery_osc: crate::battery::BatteryOsc::default(),
+            pending_osc: Vec::new(),
             low_battery: LowBatteryWatch::default(),
             toasts: VecDeque::new(),
             toast_seq: 0,
@@ -304,6 +308,8 @@ impl DevView {
         for n in self.low_battery.update(&readings, self.battery_warn_pct) {
             self.push_notification(n);
         }
+        let msgs = self.battery_osc.messages(&readings, Instant::now());
+        self.pending_osc.extend(msgs);
         self.batteries = readings;
     }
 
@@ -320,6 +326,11 @@ impl DevView {
     /// this once per frame and forward valid hits to the input injector.
     pub fn take_mirror_hit(&mut self) -> Option<MirrorHit> {
         self.pending_hit.take()
+    }
+
+    /// Drain queued avatar-parameter sends (battery -> VRChat).
+    pub fn take_pending_osc(&mut self) -> Vec<(String, rsoverlay_osc::OscValue)> {
+        std::mem::take(&mut self.pending_osc)
     }
 
     /// Take the pending VRChat chatbox message, if any.
@@ -521,7 +532,7 @@ impl DevView {
                         l.add_space(theme::GUTTER);
                     }
                     if self.show_battery {
-                        crate::battery::card(r, &self.batteries, &mut self.battery_warn_pct, accent);
+                        crate::battery::card(r, &self.batteries, &mut self.battery_warn_pct, &mut self.battery_osc, accent);
                         r.add_space(theme::GUTTER);
                     }
                     if self.show_macros {

@@ -66,6 +66,7 @@ pub fn card(
     ui: &mut egui::Ui,
     readings: &[BatteryReading],
     warn_pct: &mut u8,
+    osc: &mut BatteryOsc,
     accent: egui::Color32,
 ) {
     theme::card().show(ui, |ui| {
@@ -87,6 +88,10 @@ pub fn card(
             ui.label(theme::body_muted("warn below"));
             ui.add(egui::Slider::new(warn_pct, 5..=50).suffix("%"));
         });
+        ui.checkbox(&mut osc.enabled, "send to VRChat avatar").on_hover_text(format!(
+            "OSC /avatar/parameters/{p}/HMD, {p}/LeftHand, {p}/Charging/HMD ... (float 0-1 / bool)",
+            p = osc.prefix
+        ));
     });
 }
 
@@ -115,6 +120,70 @@ fn row(ui: &mut egui::Ui, r: &BatteryReading, warn_pct: u8, accent: egui::Color3
     filled.set_width(rect.width() * shown);
     p.rect_filled(filled, 1.5, fill);
     ui.add_space(4.0);
+}
+
+/// Publishes battery levels as VRChat avatar parameters:
+/// `<prefix>/<Device>` float 0..1 and `<prefix>/Charging/<Device>` bool.
+/// Sends a device only when its level moved >= 1 % or charging flipped,
+/// plus a full resend every [`OSC_HEARTBEAT`] so an avatar loaded
+/// mid-session picks the values up.
+pub struct BatteryOsc {
+    pub enabled: bool,
+    pub prefix: String,
+    last: std::collections::HashMap<u32, (f32, bool)>,
+    last_full: Option<std::time::Instant>,
+}
+
+pub const OSC_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(30);
+
+impl Default for BatteryOsc {
+    fn default() -> Self {
+        Self { enabled: false, prefix: "RSO/Battery".into(), last: Default::default(), last_full: None }
+    }
+}
+
+impl BatteryOsc {
+    pub fn messages(
+        &mut self,
+        readings: &[BatteryReading],
+        now: std::time::Instant,
+    ) -> Vec<(String, rsoverlay_osc::OscValue)> {
+        use rsoverlay_osc::OscValue;
+        if !self.enabled {
+            return Vec::new();
+        }
+        let full = self.last_full.is_none_or(|t| now.duration_since(t) >= OSC_HEARTBEAT);
+        if full {
+            self.last_full = Some(now);
+        }
+        let mut out = Vec::new();
+        for r in readings {
+            let changed = match self.last.get(&r.id) {
+                None => true,
+                Some(&(f, c)) => (f - r.fraction).abs() >= 0.01 || c != r.charging,
+            };
+            if !(full || changed) {
+                continue;
+            }
+            self.last.insert(r.id, (r.fraction, r.charging));
+            let dev = osc_device_name(r);
+            out.push((format!("{}/{dev}", self.prefix), OscValue::Float32(r.fraction.clamp(0.0, 1.0))));
+            out.push((format!("{}/Charging/{dev}", self.prefix), OscValue::Bool(r.charging)));
+        }
+        out
+    }
+}
+
+/// Avatar-parameter-safe device name: `HMD`, `LeftHand`, `RightHand`,
+/// `Tracker<index>`, else `Device<index>`.
+pub fn osc_device_name(r: &BatteryReading) -> String {
+    match r.label.as_str() {
+        "HMD" => "HMD".into(),
+        "Left hand" => "LeftHand".into(),
+        "Right hand" => "RightHand".into(),
+        l if l.starts_with("Tracker") => format!("Tracker{}", r.id),
+        _ => format!("Device{}", r.id),
+    }
 }
 
 #[cfg(test)]
@@ -151,6 +220,35 @@ mod tests {
         w.update(&[r(2, 0.10, false)], 20);
         assert!(w.update(&[r(2, 0.10, true)], 20).is_empty());
         assert_eq!(w.update(&[r(2, 0.10, false)], 20).len(), 1);
+    }
+
+    #[test]
+    fn osc_sends_on_change_and_heartbeat() {
+        use std::time::{Duration, Instant};
+        let mut o = BatteryOsc { enabled: true, ..Default::default() };
+        let t0 = Instant::now();
+        let hmd = |f, c| BatteryReading { label: "HMD".into(), ..r(0, f, c) };
+        let first = o.messages(&[hmd(0.80, false)], t0);
+        assert_eq!(first.len(), 2);
+        assert_eq!(first[0].0, "RSO/Battery/HMD");
+        assert_eq!(first[1].0, "RSO/Battery/Charging/HMD");
+        // < 1 % drift, before heartbeat: silent.
+        assert!(o.messages(&[hmd(0.805, false)], t0 + Duration::from_secs(5)).is_empty());
+        // Charging flip: resend.
+        assert_eq!(o.messages(&[hmd(0.805, true)], t0 + Duration::from_secs(10)).len(), 2);
+        // Heartbeat: resend even unchanged.
+        assert_eq!(o.messages(&[hmd(0.805, true)], t0 + OSC_HEARTBEAT).len(), 2);
+    }
+
+    #[test]
+    fn osc_names_and_disabled() {
+        let mut o = BatteryOsc::default();
+        assert!(o.messages(&[r(0, 0.5, false)], std::time::Instant::now()).is_empty());
+        let mut t = r(5, 0.5, false);
+        t.label = "Tracker x".into();
+        assert_eq!(osc_device_name(&t), "Tracker5");
+        t.label = "Left hand".into();
+        assert_eq!(osc_device_name(&t), "LeftHand");
     }
 
     #[test]

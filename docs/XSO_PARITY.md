@@ -20,7 +20,7 @@ Legend: ✅ shipped · 🟡 partial · ❌ missing · ⛔ non-goal
 | Gather overlays into grid + auto-recenter | ❌ | |
 | Curved overlays + curve bias | 🟡 | curvature ✅ (M24), bias ❌ |
 | Clip angle (hide when viewed edge-on) | ❌ | cheap: dot(view, normal) threshold |
-| Default overlay scale / opacity | 🟡 | size ✅, opacity ❌ |
+| Default overlay scale / opacity | ✅ | size + opacity (M35, compositor alpha) |
 | Per-overlay min/max capture FPS | ❌ | throttles capture thread |
 | Force higher-quality overlays | 🟡 | `overlay_texture_size` config |
 
@@ -65,17 +65,17 @@ Legend: ✅ shipped · 🟡 partial · ❌ missing · ⛔ non-goal
 
 | XSO feature | RSO | Notes |
 |---|---|---|
-| Master volume + mute | ❌ | WASAPI `IAudioEndpointVolume` |
-| **Per-app volume / mute mixer** | ❌ | WASAPI session enumeration |
-| CPU / GPU load + temp, RAM, frametime | 🟡 | fps only; temps need a kernel driver → skip, load/RAM via PDH |
-| Night light (scheduled warm tint, intensity) | ❌ | cheap: final-pass tint |
+| Master volume + mute | ✅ | M32 |
+| **Per-app volume / mute mixer** | ✅ | M32 |
+| CPU / GPU load + temp, RAM, frametime | ✅ | M36: CPU/GPU/RAM/VRAM + fps; temps ⛔ (ring-0 driver) |
+| Night light (scheduled warm tint, intensity) | ✅ | M35, compositor colour multiply |
 | Media auto-detect + controls | ✅ | M5 / M20 |
 | Media-derived theming / adaptive accent | ❌ | album-art palette → accent |
 | Dark theme + accent color | ✅ | AMOLED + accent picker |
 | Themes folder | ❌ | |
 | Notification API | ✅ | M2 |
 | Notification scale / offsets | ❌ | |
-| OSC device events (battery etc. → VRChat) | ❌ | builds on M29 + rsoverlay-osc |
+| OSC device events (battery etc. → VRChat) | ✅ | M37 — see [OSC.md](OSC.md) |
 | Discord Rich Presence | ✅ | M25 |
 | Localization | 🟡 | 9 languages vs XSO's ~40 |
 | Plugin applications | ❌ | WASM-only per ROADMAP non-goals |
@@ -88,9 +88,13 @@ VRChat chatbox composer (M8), AMOLED true-black theme, no Chromium.
 
 ## Suggested order (value ÷ cost)
 
-1. **Volume mixer** — master + per-app, pure WASAPI, high daily use.
-2. **Night light** — scheduled tint pass, very cheap.
-3. **System stats** — CPU/GPU load + RAM via PDH, no driver.
-4. **Clip angle + overlay opacity** — small shader/placement work.
-5. **OSC device events** — battery → VRChat avatar params, reuses M29.
-6. **Multiple window overlays** — biggest UX jump after M31.
+Done: volume mixer (M32), night light + opacity (M35), system stats
+(M36), battery OSC (M37). Also shipped outside the list: dashboard
+redesign (M33) and motion system (M34).
+
+Next:
+1. **Clip angle** — hide overlays viewed edge-on; needs HMD pose.
+2. **Multiple window overlays** — biggest UX jump after M31.
+3. **VR controller input** (laser click/drag, grab/scale) — unlocks
+   the whole Input section; the real foundation still missing.
+4. **Keyboard sound packs + opacity.**

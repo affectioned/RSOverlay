@@ -113,6 +113,8 @@ pub fn seed_dev_view(
     dev.show_macros = cfg.appearance.show_macros;
     dev.show_volume = cfg.appearance.show_volume;
     dev.show_system = cfg.appearance.show_system;
+    dev.battery_osc.enabled = cfg.osc.battery_params;
+    dev.battery_osc.prefix = cfg.osc.battery_prefix.trim_matches('/').to_string();
     dev.reduce_motion = cfg.appearance.reduce_motion;
     dev.macros.entries = cfg
         .macros
@@ -218,6 +220,7 @@ pub fn config_from_dev_view(
     out.appearance.show_macros = dev.show_macros;
     out.appearance.show_volume = dev.show_volume;
     out.appearance.show_system = dev.show_system;
+    out.osc.battery_params = dev.battery_osc.enabled;
     out.appearance.reduce_motion = dev.reduce_motion;
     out.macros = rsoverlay_core::config::Macros(
         dev.macros
@@ -400,6 +403,7 @@ fn configs_equivalent(a: &rsoverlay_core::Config, b: &rsoverlay_core::Config) ->
         && (a.placement.curvature - b.placement.curvature).abs() < 0.001
         && (a.placement.opacity - b.placement.opacity).abs() < 0.001
         && a.night_light == b.night_light
+        && a.osc == b.osc
 }
 
 /// Save the given surface frame to a PNG. BGRA → RGBA swizzle, then
@@ -812,12 +816,21 @@ pub fn run(
                             }
                         }
 
+                        // 0d'. Avatar parameters (battery -> VRChat).
+                        for (name, value) in dev_view.take_pending_osc() {
+                            if let Some(client) = &osc {
+                                if let Err(e) = client.send_param(name, value) {
+                                    warn!("osc: {e:#}");
+                                }
+                            }
+                        }
+
                         // 0d. Forward any pending chatbox send.
                         if let Some(msg) = dev_view.take_pending_chat() {
                             match &osc {
                                 Some(client) => {
-                                    if let Err(e) = client.tx.send(msg) {
-                                        warn!("osc channel closed: {e:#}");
+                                    if let Err(e) = client.send_chat(msg) {
+                                        warn!("osc: {e:#}");
                                     }
                                 }
                                 None => warn!("chatbox send ignored: OSC disabled via --no-osc"),

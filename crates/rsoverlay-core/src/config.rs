@@ -13,10 +13,27 @@ pub struct Config {
     pub appearance: Appearance,
     pub placement: Placement,
     pub night_light: NightLightCfg,
+    pub osc: OscCfg,
     /// Virtual StreamDeck buttons. Serialized as `[[macros]]` tables.
     /// Must stay the last field: TOML arrays of tables have to follow
     /// every plain table in the document.
     pub macros: Macros,
+}
+
+/// VRChat OSC output beyond the chatbox.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OscCfg {
+    /// Publish battery levels as avatar parameters. Off by default.
+    pub battery_params: bool,
+    /// Parameter path prefix under /avatar/parameters/.
+    pub battery_prefix: String,
+}
+
+impl Default for OscCfg {
+    fn default() -> Self {
+        Self { battery_params: false, battery_prefix: "RSO/Battery".into() }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
