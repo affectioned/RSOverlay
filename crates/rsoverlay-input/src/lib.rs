@@ -48,6 +48,18 @@ impl InputInjector {
         click_at_impl(mon, px, py, btn)
     }
 
+    /// Press or release one mouse button at a pixel (no implicit click),
+    /// so lasers can drag, select text and hold buttons in real windows.
+    pub fn button(&self, mon: &MonitorGeom, px: i32, py: i32, btn: MouseButton, down: bool) -> Result<()> {
+        button_impl(mon, px, py, btn, down)
+    }
+
+    /// Vertical mouse wheel; `delta` in WHEEL_DELTA units (120 = one
+    /// notch, positive = away from the user / scroll up).
+    pub fn wheel(&self, delta: i32) -> Result<()> {
+        wheel_impl(delta)
+    }
+
     /// Send a Unicode character to whatever has keyboard focus on the
     /// host. Uses `KEYEVENTF_UNICODE` so the OS maps the character to
     /// the current keyboard layout — no key-code lookups, no layout
@@ -146,6 +158,26 @@ fn send_shortcut_impl(_s: &Shortcut) -> Result<()> {
     anyhow::bail!("input injection only implemented on Windows")
 }
 
+#[cfg(windows)]
+fn button_impl(mon: &MonitorGeom, px: i32, py: i32, btn: MouseButton, down: bool) -> Result<()> {
+    win::send_button(mon, px, py, btn, down)
+}
+
+#[cfg(windows)]
+fn wheel_impl(delta: i32) -> Result<()> {
+    win::send_wheel(delta)
+}
+
+#[cfg(not(windows))]
+fn button_impl(_mon: &MonitorGeom, _px: i32, _py: i32, _btn: MouseButton, _down: bool) -> Result<()> {
+    anyhow::bail!("input injection only implemented on Windows")
+}
+
+#[cfg(not(windows))]
+fn wheel_impl(_delta: i32) -> Result<()> {
+    anyhow::bail!("input injection only implemented on Windows")
+}
+
 #[cfg(not(windows))]
 fn move_to_impl(_mon: &MonitorGeom, _px: i32, _py: i32) -> Result<()> {
     anyhow::bail!("input injection only implemented on Windows")
@@ -180,7 +212,7 @@ mod win {
         KEYBD_EVENT_FLAGS, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_ABSOLUTE,
         MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN,
         MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN,
-        MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEINPUT, VIRTUAL_KEY, VK_BACK,
+        MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEINPUT, VIRTUAL_KEY, VK_BACK,
         VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LCONTROL, VK_LEFT,
         VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RETURN, VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
     };
@@ -365,6 +397,34 @@ mod win {
         };
         if (n as usize) != events.len() {
             return Err(anyhow!("SendInput accepted {}/{} events", n, events.len()));
+        }
+        Ok(())
+    }
+
+    pub fn send_button(mon: &MonitorGeom, px: i32, py: i32, btn: MouseButton, down: bool) -> Result<()> {
+        // Move first (absolute), then the single down-or-up transition.
+        send_mouse(mon, px, py, None)?;
+        let flag = match (btn, down) {
+            (MouseButton::Left, true) => MOUSEEVENTF_LEFTDOWN,
+            (MouseButton::Left, false) => MOUSEEVENTF_LEFTUP,
+            (MouseButton::Right, true) => MOUSEEVENTF_RIGHTDOWN,
+            (MouseButton::Right, false) => MOUSEEVENTF_RIGHTUP,
+            (MouseButton::Middle, true) => MOUSEEVENTF_MIDDLEDOWN,
+            (MouseButton::Middle, false) => MOUSEEVENTF_MIDDLEUP,
+        };
+        let ev = [mouse_input(0, 0, flag)];
+        if unsafe { SendInput(&ev, std::mem::size_of::<INPUT>() as i32) } != 1 {
+            return Err(anyhow!("SendInput rejected mouse button event"));
+        }
+        Ok(())
+    }
+
+    pub fn send_wheel(delta: i32) -> Result<()> {
+        let mut ev = mouse_input(0, 0, MOUSEEVENTF_WHEEL);
+        // mouseData carries the signed wheel delta.
+        ev.Anonymous.mi.mouseData = delta as u32;
+        if unsafe { SendInput(&[ev], std::mem::size_of::<INPUT>() as i32) } != 1 {
+            return Err(anyhow!("SendInput rejected wheel event"));
         }
         Ok(())
     }

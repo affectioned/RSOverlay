@@ -1,0 +1,120 @@
+{
+  "controller_type": "oculus_touch",
+  "name": "RSOverlay defaults",
+  "description": "XSOverlay-compatible layout: trigger click, grip grab, stick scroll/push/scale, click modifiers, double-press to show the dashboard",
+  "bindings": {
+    "/actions/rsoverlay": {
+      "sources": [
+        {
+          "path": "/user/hand/left/input/trigger",
+          "mode": "trigger",
+          "inputs": {
+            "click": {
+              "output": "/actions/rsoverlay/in/click"
+            },
+            "pull": {
+              "output": "/actions/rsoverlay/in/triggerpull"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/trigger",
+          "mode": "trigger",
+          "inputs": {
+            "click": {
+              "output": "/actions/rsoverlay/in/click"
+            },
+            "pull": {
+              "output": "/actions/rsoverlay/in/triggerpull"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/grip",
+          "mode": "trigger",
+          "inputs": {
+            "click": {
+              "output": "/actions/rsoverlay/in/grab"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/grip",
+          "mode": "trigger",
+          "inputs": {
+            "click": {
+              "output": "/actions/rsoverlay/in/grab"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/joystick",
+          "mode": "joystick",
+          "inputs": {
+            "position": {
+              "output": "/actions/rsoverlay/in/stick"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/joystick",
+          "mode": "joystick",
+          "inputs": {
+            "position": {
+              "output": "/actions/rsoverlay/in/stick"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/a",
+          "mode": "button",
+          "inputs": {
+            "touch": {
+              "output": "/actions/rsoverlay/in/rightclickmodifier"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/b",
+          "mode": "button",
+          "inputs": {
+            "touch": {
+              "output": "/actions/rsoverlay/in/middleclickmodifier"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/x",
+          "mode": "button",
+          "inputs": {
+            "touch": {
+              "output": "/actions/rsoverlay/in/rightclickmodifier"
+            },
+            "double": {
+              "output": "/actions/rsoverlay/in/toggleeditmode"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/y",
+          "mode": "button",
+          "inputs": {
+            "touch": {
+              "output": "/actions/rsoverlay/in/middleclickmodifier"
+            }
+          }
+        }
+      ],
+      "haptics": [
+        {
+          "output": "/actions/rsoverlay/out/haptic",
+          "path": "/user/hand/left/output/haptic"
+        },
+        {
+          "output": "/actions/rsoverlay/out/haptic",
+          "path": "/user/hand/right/output/haptic"
+        }
+      ]
+    }
+  }
+}

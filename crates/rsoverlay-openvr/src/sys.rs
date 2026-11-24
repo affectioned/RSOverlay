@@ -73,7 +73,11 @@ pub struct IVROverlayFnTable {
     pub SetOverlayColor: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fRed: f32, fGreen: f32, fBlue: f32) -> EVROverlayError, // 13
     pub _pad_01b: [*const c_void; 1], // 14 GetOverlayColor
     pub SetOverlayAlpha: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fAlpha: f32) -> EVROverlayError, // 15
-    pub _pad_01c: [*const c_void; 5], // 16..=20
+    pub _pad_01c: [*const c_void; 1], // 16 GetOverlayAlpha
+    pub SetOverlayTexelAspect: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fTexelAspect: f32) -> EVROverlayError, // 17
+    pub _pad_01d: [*const c_void; 1], // 18 GetOverlayTexelAspect
+    pub SetOverlaySortOrder: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, unSortOrder: u32) -> EVROverlayError, // 19
+    pub _pad_01e: [*const c_void; 1], // 20 GetOverlaySortOrder
     pub SetOverlayWidthInMeters: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fWidthInMeters: f32) -> EVROverlayError,
     pub _pad_02: [*const c_void; 1], // 22 GetOverlayWidthInMeters
     pub SetOverlayCurvature: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fCurvature: f32) -> EVROverlayError, // 23
@@ -99,6 +103,8 @@ const _: () = {
     assert!(std::mem::offset_of!(IVROverlayFnTable, DestroyOverlay) == 2 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayColor) == 13 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayAlpha) == 15 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayTexelAspect) == 17 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlaySortOrder) == 19 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayCurvature) == 23 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayTransformTrackedDeviceRelative) == 32 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, ComputeOverlayIntersection) == 49 * P);
@@ -247,3 +253,75 @@ const _: () = assert!(
     std::mem::offset_of!(IVRSystemFnTable, GetStringTrackedDeviceProperty)
         == 27 * std::mem::size_of::<*const c_void>()
 );
+
+// ---------------------------------------------------------------------------
+// IVRInput_010 — SteamVR Input (action manifest + per-controller bindings,
+// user-rebindable in SteamVR). Slots verified against openvr_capi.h @ v2.5.1.
+// Struct layouts use Windows natural packing (asserted below).
+// ---------------------------------------------------------------------------
+
+pub const IVRInput_FnTable_Version: &[u8] = b"FnTable:IVRInput_010\0";
+
+pub type VRActionHandle_t = u64;
+pub type VRActionSetHandle_t = u64;
+pub type VRInputValueHandle_t = u64;
+pub type EVRInputError = i32;
+pub const EVRInputError_None: EVRInputError = 0;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct VRActiveActionSet_t {
+    pub ulActionSet: VRActionSetHandle_t,
+    pub ulRestrictedToDevice: VRInputValueHandle_t,
+    pub ulSecondaryActionSet: VRActionSetHandle_t,
+    pub unPadding: u32,
+    pub nPriority: i32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct InputDigitalActionData_t {
+    pub bActive: bool,
+    pub activeOrigin: VRInputValueHandle_t,
+    pub bState: bool,
+    pub bChanged: bool,
+    pub fUpdateTime: f32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct InputAnalogActionData_t {
+    pub bActive: bool,
+    pub activeOrigin: VRInputValueHandle_t,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub deltaX: f32,
+    pub deltaY: f32,
+    pub deltaZ: f32,
+    pub fUpdateTime: f32,
+}
+
+#[repr(C)]
+pub struct IVRInputFnTable {
+    pub SetActionManifestPath: unsafe extern "system" fn(pchActionManifestPath: *const c_char) -> EVRInputError, // 0
+    pub GetActionSetHandle: unsafe extern "system" fn(pchActionSetName: *const c_char, pHandle: *mut VRActionSetHandle_t) -> EVRInputError, // 1
+    pub GetActionHandle: unsafe extern "system" fn(pchActionName: *const c_char, pHandle: *mut VRActionHandle_t) -> EVRInputError, // 2
+    pub GetInputSourceHandle: unsafe extern "system" fn(pchInputSourcePath: *const c_char, pHandle: *mut VRInputValueHandle_t) -> EVRInputError, // 3
+    pub UpdateActionState: unsafe extern "system" fn(pSets: *mut VRActiveActionSet_t, unSizeOfVRSelectedActionSet_t: u32, unSetCount: u32) -> EVRInputError, // 4
+    pub GetDigitalActionData: unsafe extern "system" fn(action: VRActionHandle_t, pActionData: *mut InputDigitalActionData_t, unActionDataSize: u32, ulRestrictToDevice: VRInputValueHandle_t) -> EVRInputError, // 5
+    pub GetAnalogActionData: unsafe extern "system" fn(action: VRActionHandle_t, pActionData: *mut InputAnalogActionData_t, unActionDataSize: u32, ulRestrictToDevice: VRInputValueHandle_t) -> EVRInputError, // 6
+    pub _pad_00: [*const c_void; 14], // 7..=20: poses, skeletal, dominant hand
+    pub TriggerHapticVibrationAction: unsafe extern "system" fn(action: VRActionHandle_t, fStartSecondsFromNow: f32, fDurationSeconds: f32, fFrequency: f32, fAmplitude: f32, ulRestrictToDevice: VRInputValueHandle_t) -> EVRInputError, // 21
+}
+
+const _: () = {
+    const P: usize = std::mem::size_of::<*const c_void>();
+    assert!(std::mem::offset_of!(IVRInputFnTable, GetAnalogActionData) == 6 * P);
+    assert!(std::mem::offset_of!(IVRInputFnTable, TriggerHapticVibrationAction) == 21 * P);
+    assert!(std::mem::size_of::<VRActiveActionSet_t>() == 32);
+    assert!(std::mem::size_of::<InputDigitalActionData_t>() == 24);
+    assert!(std::mem::offset_of!(InputDigitalActionData_t, bState) == 16);
+    assert!(std::mem::size_of::<InputAnalogActionData_t>() == 48);
+    assert!(std::mem::offset_of!(InputAnalogActionData_t, x) == 16);
+};

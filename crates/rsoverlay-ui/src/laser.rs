@@ -41,6 +41,9 @@ pub struct HandSample {
     pub hit: Option<egui::Pos2>,
     pub trigger: f32,
     pub stick_y: f32,
+    /// Which button a trigger press means this frame — Primary, or
+    /// Secondary / Middle while an XSO-style click modifier is held.
+    pub button: egui::PointerButton,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -63,6 +66,8 @@ pub struct LaserInput {
     press_anchor: Option<egui::Pos2>,
     /// The press has escaped DRAG_SLOP — report real positions.
     dragging: bool,
+    /// Button of the current press (release must match it).
+    press_button: Option<egui::PointerButton>,
 }
 
 fn slot(h: Hand) -> usize {
@@ -141,8 +146,9 @@ impl LaserInput {
                 self.pressed = true;
                 self.press_anchor = self.last_pos;
                 self.dragging = false;
+                self.press_button = Some(s.button);
                 out.haptic = Some(s.hand);
-                out.events.push(button(self.last_pos.unwrap_or_default(), true));
+                out.events.push(button(self.last_pos.unwrap_or_default(), s.button, true));
             } else if !latched && self.pressed {
                 self.release(&mut out);
             }
@@ -164,12 +170,13 @@ impl LaserInput {
         self.pressed = false;
         self.press_anchor = None;
         self.dragging = false;
-        out.events.push(button(self.last_pos.unwrap_or_default(), false));
+        let b = self.press_button.take().unwrap_or(egui::PointerButton::Primary);
+        out.events.push(button(self.last_pos.unwrap_or_default(), b, false));
     }
 }
 
-fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
-    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }
+fn button(pos: egui::Pos2, button: egui::PointerButton, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton { pos, button, pressed, modifiers: egui::Modifiers::NONE }
 }
 
 /// Paint the laser cursor: accent ring, filled while pressed.
@@ -191,7 +198,7 @@ mod tests {
     use super::*;
 
     fn s(hand: Hand, hit: Option<(f32, f32)>, trigger: f32) -> HandSample {
-        HandSample { hand, hit: hit.map(|(x, y)| egui::pos2(x, y)), trigger, stick_y: 0.0 }
+        HandSample { hand, hit: hit.map(|(x, y)| egui::pos2(x, y)), trigger, stick_y: 0.0, button: egui::PointerButton::Primary }
     }
 
     fn buttons(f: &LaserFrame) -> Vec<bool> {
@@ -288,6 +295,22 @@ mod tests {
         // Once dragging, small moves pass straight through.
         let f = l.update(&[s(Hand::Right, Some((162.0, 101.0)), 0.9)], 0.011);
         assert!(f.events.contains(&egui::Event::PointerMoved(egui::pos2(162.0, 101.0))));
+    }
+
+    #[test]
+    fn modifier_makes_a_right_click_and_release_matches() {
+        let mut l = LaserInput::default();
+        let mut smp = s(Hand::Right, Some((5.0, 5.0)), 0.0);
+        l.update(&[smp], 0.011);
+        smp.trigger = 0.9;
+        smp.button = egui::PointerButton::Secondary;
+        let f = l.update(&[smp], 0.011);
+        assert!(f.events.iter().any(|e| matches!(e, egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: true, .. })));
+        // Modifier let go before the trigger: release is still Secondary.
+        smp.trigger = 0.0;
+        smp.button = egui::PointerButton::Primary;
+        let f = l.update(&[smp], 0.011);
+        assert!(f.events.iter().any(|e| matches!(e, egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: false, .. })));
     }
 
     #[test]

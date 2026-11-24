@@ -1,0 +1,81 @@
+{
+  "default_bindings": [
+    {
+      "controller_type": "knuckles",
+      "binding_url": "bindings_knuckles.json"
+    },
+    {
+      "controller_type": "oculus_touch",
+      "binding_url": "bindings_oculus_touch.json"
+    },
+    {
+      "controller_type": "vive_controller",
+      "binding_url": "bindings_vive_controller.json"
+    },
+    {
+      "controller_type": "holographic_controller",
+      "binding_url": "bindings_holographic_controller.json"
+    }
+  ],
+  "actions": [
+    {
+      "name": "/actions/rsoverlay/in/Click",
+      "type": "boolean",
+      "requirement": "suggested"
+    },
+    {
+      "name": "/actions/rsoverlay/in/TriggerPull",
+      "type": "vector1",
+      "requirement": "suggested"
+    },
+    {
+      "name": "/actions/rsoverlay/in/Grab",
+      "type": "boolean",
+      "requirement": "suggested"
+    },
+    {
+      "name": "/actions/rsoverlay/in/Stick",
+      "type": "vector2",
+      "requirement": "suggested"
+    },
+    {
+      "name": "/actions/rsoverlay/in/RightClickModifier",
+      "type": "boolean",
+      "requirement": "optional"
+    },
+    {
+      "name": "/actions/rsoverlay/in/MiddleClickModifier",
+      "type": "boolean",
+      "requirement": "optional"
+    },
+    {
+      "name": "/actions/rsoverlay/in/ToggleEditMode",
+      "type": "boolean",
+      "requirement": "suggested"
+    },
+    {
+      "name": "/actions/rsoverlay/out/Haptic",
+      "type": "vibration"
+    }
+  ],
+  "action_sets": [
+    {
+      "name": "/actions/rsoverlay",
+      "usage": "leftright"
+    }
+  ],
+  "localization": [
+    {
+      "language_tag": "en_US",
+      "/actions/rsoverlay": "RSOverlay",
+      "/actions/rsoverlay/in/Click": "Click (laser)",
+      "/actions/rsoverlay/in/TriggerPull": "Trigger pull",
+      "/actions/rsoverlay/in/Grab": "Grab / move panel",
+      "/actions/rsoverlay/in/Stick": "Scroll \u00b7 push/pull \u00b7 scale",
+      "/actions/rsoverlay/in/RightClickModifier": "Right-click modifier (hold while clicking)",
+      "/actions/rsoverlay/in/MiddleClickModifier": "Middle-click modifier (hold while clicking)",
+      "/actions/rsoverlay/in/ToggleEditMode": "Show / hide dashboard",
+      "/actions/rsoverlay/out/Haptic": "Haptic feedback"
+    }
+  ]
+}

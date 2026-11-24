@@ -89,6 +89,12 @@ mod imp {
     /// Pose smoothing time constant — kills hand tremor on big panels
     /// without feeling laggy.
     const GRAB_TAU: f32 = 0.05;
+    /// Laser beam strip: 256 × 16 texels, 3.5 mm thick at any length.
+    const BEAM_TEX: (u32, u32) = (256, 16);
+    const BEAM_THICKNESS_M: f32 = 0.0035;
+    /// Grab / release haptic: a firmer tick than a click.
+    const GRAB_HAPTIC_S: f32 = 0.025;
+
     /// View-angle fade time constant (XSO-style auto-hide).
     const FADE_TAU: f32 = 0.08;
 
@@ -117,6 +123,9 @@ mod imp {
         width_m: f32,
         /// 0..1 view-angle fade (multiplies alpha).
         fade: f32,
+        tex: (u32, u32),
+        base_ppp: f32,
+        scale: f32,
     }
 
     impl VrPanel {
@@ -154,7 +163,20 @@ mod imp {
                 applied_tint: [f32::NAN; 4],
                 width_m,
                 fade: 1.0,
+                tex,
+                base_ppp: ppp,
+                scale: 1.0,
             })
+        }
+
+        /// Accessibility text size: fewer, bigger egui points per texel.
+        fn apply_scale(&mut self, scale: f32) {
+            if (scale - self.scale).abs() > 1e-3 {
+                self.scale = scale;
+                let ppp = self.base_ppp * scale;
+                self.egui.set_pixels_per_point(ppp);
+                self.points = egui::vec2(self.tex.0 as f32 / ppp, self.tex.1 as f32 / ppp);
+            }
         }
 
         fn set_width(&mut self, overlay: &rsoverlay_openvr::Overlay<'_>, w: f32) {
@@ -284,6 +306,10 @@ mod imp {
         blocked_checked: Option<Instant>,
         /// App icon, uploaded into this panel's own egui context.
         icon: Option<egui::TextureHandle>,
+        /// Mouse button held down in the real window (press → drag → up).
+        down: Option<rsoverlay_input::MouseButton>,
+        /// Fractional wheel delta not yet sent (WHEEL_DELTA units).
+        wheel_acc: f32,
     }
 
     /// An in-progress grab (XSO model): the panel rides the laser at
@@ -357,6 +383,8 @@ mod imp {
             input_blocked: false,
             blocked_checked: None,
             icon: None,
+            down: None,
+            wheel_acc: 0.0,
         })
     }
 
@@ -374,6 +402,25 @@ mod imp {
             None => w.world,
             Some((dev, rel)) => device_pose(dev, hmd, controllers).map_or(w.world, |d| d * rel),
         }
+    }
+
+    /// SteamVR Input manifest + default bindings (XSOverlay-compatible
+    /// layout), written next to config.toml so SteamVR can read them and
+    /// users can rebind in SteamVR's controller-binding UI.
+    const MANIFEST: &[(&str, &str)] = &[
+        ("actions.json", include_str!("../steamvr/actions.json")),
+        ("bindings_knuckles.json", include_str!("../steamvr/bindings_knuckles.json")),
+        ("bindings_oculus_touch.json", include_str!("../steamvr/bindings_oculus_touch.json")),
+        ("bindings_vive_controller.json", include_str!("../steamvr/bindings_vive_controller.json")),
+        ("bindings_holographic_controller.json", include_str!("../steamvr/bindings_holographic_controller.json")),
+    ];
+
+    fn write_manifest(dir: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+        std::fs::create_dir_all(dir)?;
+        for (name, body) in MANIFEST {
+            std::fs::write(dir.join(name), body)?;
+        }
+        Ok(dir.join("actions.json"))
     }
 
     pub fn run(
@@ -411,9 +458,25 @@ mod imp {
         dev_view.dock_layout = true;
         // VR mode persists like the desktop modes: edits in the headset
         // survive a restart, hand-edits to config.toml hot-reload.
-        let mut persister = crate::preview::ConfigPersister::new(config_path, config.clone());
+        let mut persister = crate::preview::ConfigPersister::new(config_path.clone(), config.clone());
         let config_base = config.clone();
         let injector = rsoverlay_input::InputInjector::new().ok();
+        // SteamVR Input with XSO-style default bindings; the legacy
+        // controller API is the fallback if the manifest can't load.
+        let steamvr_dir = config_path.parent().map(|p| p.join("steamvr")).unwrap_or_else(|| "steamvr".into());
+        let input = match write_manifest(&steamvr_dir) {
+            Ok(path) => vr
+                .input(&path)
+                .map_err(|e| warn!("SteamVR Input unavailable ({e}); using legacy controller input"))
+                .ok(),
+            Err(e) => {
+                warn!("writing SteamVR action manifest: {e}");
+                None
+            }
+        };
+        if input.is_some() {
+            info!("SteamVR Input active — bindings rebindable in SteamVR › Controller Settings › RSOverlay");
+        }
 
         let running = Arc::new(AtomicBool::new(true));
         let r = running.clone();
@@ -439,13 +502,23 @@ mod imp {
         let mut grab: Option<Grab> = None;
         let mut wins: Vec<WinOverlay> = Vec::new();
         let mut kb = VrPanel::new(&overlay, &gpu, "rsoverlay.keyboard", "RSOverlay Keyboard", KB_TEX, KB_PPP, KB_WIDTH_M, 0.0)?;
+        // Laser beams: static white strip textures rendered once, tinted
+        // and stretched per frame. Sorted above every panel.
+        let mut beams = Vec::with_capacity(2);
+        for side in ["left", "right"] {
+            let mut b = VrPanel::new(&overlay, &gpu, &format!("rsoverlay.beam.{side}"), "RSOverlay Laser", BEAM_TEX, 1.0, 1.0, 0.0)?;
+            b.render(&gpu, &overlay, 0.0, 0.016, Vec::new(), rsoverlay_ui::shell::paint_beam);
+            let _ = overlay.set_sort_order(b.handle, 100);
+            beams.push(b);
+        }
+        let mut beam_tint = [[f32::NAN; 4]; 2];
         let mut keyboard = rsoverlay_ui::vrkeyboard::VrKeyboard::default();
         let mut kb_pose: Option<Affine3A> = None;
         let mut win_seq = 0u32;
         let mut prev_menu = false;
         let mut prev_grip = [false; 2];
         let mut frame = 0u64;
-        info!("VR shell up — wrist on left hand; B/menu or the wrist Menu button summons the dashboard");
+        info!("VR shell up — wrist on the off hand; double-press left A/X (or the wrist Menu button) shows the dashboard");
 
         while running.load(Ordering::SeqCst) {
             frame = frame.wrapping_add(1);
@@ -487,11 +560,30 @@ mod imp {
                 wrist.set_visible(&overlay, wrist_parent.is_some());
             }
 
-            let (hmd, controllers) = system.as_ref().map(|s| s.tracking()).unwrap_or_default();
+            let (hmd, mut controllers) = system.as_ref().map(|s| s.tracking()).unwrap_or_default();
+            // Buttons/axes from SteamVR Input (user's bindings), poses
+            // from the tracking API. [left, right].
+            let actions = input.as_ref().map(|i| i.poll());
+            let mut mods = [(false, false); 2];
+            let mut toggle_edit = false;
+            if let Some(a) = &actions {
+                for c in controllers.iter_mut() {
+                    let h = &a[hand_slot(c.hand)];
+                    // The binding's click threshold is authoritative.
+                    c.trigger = if h.click { 1.0 } else { 0.0 };
+                    c.grip = h.grab;
+                    c.stick = h.stick;
+                    c.menu = false;
+                    mods[hand_slot(c.hand)] = (h.right_mod, h.middle_mod);
+                }
+                toggle_edit = a.iter().any(|h| h.toggle_edit);
+            }
 
             // ── Summon / dismiss: left B / menu button edge.
+            // Show/hide the dashboard: XSO's double-press left A / X via
+            // SteamVR Input; legacy fallback = off-hand menu button.
             let menu_now = controllers.iter().any(|c| c.hand == wrist_on && c.menu);
-            let mut toggle_dash = menu_now && !prev_menu;
+            let mut toggle_dash = toggle_edit || (menu_now && !prev_menu);
             prev_menu = menu_now;
 
             // ── View-angle auto-hide (XSO behaviour) for every panel; a
@@ -548,7 +640,15 @@ mod imp {
                 for (i, list) in samples.iter_mut().enumerate() {
                     let hit = best.filter(|b| b.0 == i).map(|b| LaserInput::uv_to_points(b.1, target(i).2));
                     hit_by[i][hand_slot(c.hand)] = hit.is_some();
-                    list.push(HandSample { hand, hit, trigger: c.trigger, stick_y: c.stick[1] });
+                    let (rm, mm) = mods[hand_slot(c.hand)];
+                    let button = if rm {
+                        egui::PointerButton::Secondary
+                    } else if mm {
+                        egui::PointerButton::Middle
+                    } else {
+                        egui::PointerButton::Primary
+                    };
+                    list.push(HandSample { hand, hit, trigger: c.trigger, stick_y: c.stick[1], button });
                 }
             }
             let mut samples = samples.into_iter();
@@ -563,6 +663,9 @@ mod imp {
             // scales by hand separation.
             let eye = hmd.as_ref().map(|h| to_affine(h).translation);
             let mut released: Option<usize> = None;
+            let mut released_hand: Option<Hand> = None;
+            let mut grabbed_hand: Option<Hand> = None;
+            let mut hud: Option<(usize, rsoverlay_ui::shell::GrabHud)> = None;
             for c in &controllers {
                 let s = hand_slot(c.hand);
                 let pressed = c.grip && !prev_grip[s];
@@ -613,6 +716,7 @@ mod imp {
                             };
                             let offset = p.matrix3.transpose() * (p.translation - hit) / width;
                             grab = Some(Grab { hand: c.hand, panel: i, dist, offset, second: None, smoothed: p });
+                            grabbed_hand = Some(c.hand);
                         }
                     }
                     _ => {}
@@ -636,6 +740,7 @@ mod imp {
                                 w0 * sep / sep0
                             })
                         });
+                        let resizing = two.is_some() || stick(c.stick[0]) != 0.0;
                         match two {
                             Some(w) => width = w,
                             None => {
@@ -645,6 +750,7 @@ mod imp {
                             }
                         }
                         let width = width.clamp(PANEL_WIDTH.0, PANEL_WIDTH.1);
+                        hud = Some((g.panel, rsoverlay_ui::shell::GrabHud { width_m: width, dist_m: g.dist, resizing }));
                         let hit = Vec3A::from(c.origin) + Vec3A::from(c.dir) * g.dist;
                         // Orient first (from the grab point), then hang the
                         // panel off it by the scaled grab offset.
@@ -689,7 +795,11 @@ mod imp {
                             wins[g.panel - WIN0].panel.set_width(&overlay, width);
                         }
                     }
-                    _ => released = grab.take().map(|g| g.panel),
+                    _ => {
+                        let g = grab.take();
+                        released = g.as_ref().map(|g| g.panel);
+                        released_hand = g.map(|g| g.hand);
+                    }
                 }
             }
             // Dropped a widget onto another widget → merge into one tab group.
@@ -731,6 +841,65 @@ mod imp {
                 }
             }
 
+            // ── Laser beams: drawn while a hand points at any panel; bright
+            // while the trigger is held. Billboarded around their own axis
+            // so they never go edge-on.
+            for c in &controllers {
+                let s = hand_slot(c.hand);
+                let b = &mut beams[s];
+                let hit = hand_hit[s].filter(|_| dev_view.vr_show_lasers);
+                b.set_visible(&overlay, hit.is_some());
+                let (Some((_, len)), Some(e)) = (hit, eye) else { continue };
+                let o = Vec3A::from(c.origin);
+                let d = Vec3A::from(c.dir);
+                let len = len.max(0.05);
+                let mid = o + d * (len * 0.5);
+                let to_eye = e - mid;
+                let z = (to_eye - d * to_eye.dot(d)).try_normalize().unwrap_or(Vec3A::Y);
+                let pose = Affine3A::from_cols(d, z.cross(d), z, mid);
+                let _ = overlay.set_width(b.handle, len);
+                let _ = overlay.set_texel_aspect(b.handle, len * BEAM_TEX.1 as f32 / (BEAM_TEX.0 as f32 * BEAM_THICKNESS_M));
+                let _ = overlay.set_transform_absolute(b.handle, &from_affine(&pose));
+                let a = dev_view.accent;
+                let tint = [
+                    a.r() as f32 / 255.0,
+                    a.g() as f32 / 255.0,
+                    a.b() as f32 / 255.0,
+                    if c.trigger > 0.5 { 0.95 } else { 0.55 },
+                ];
+                if tint != beam_tint[s] {
+                    let _ = overlay.set_color(b.handle, [tint[0], tint[1], tint[2]]);
+                    let _ = overlay.set_alpha(b.handle, tint[3]);
+                    beam_tint[s] = tint;
+                }
+            }
+            for (i, b) in beams.iter_mut().enumerate() {
+                if !controllers.iter().any(|c| hand_slot(c.hand) == i) {
+                    b.set_visible(&overlay, false);
+                }
+            }
+
+            // Grab / release: a firmer haptic tick than a click.
+            for h in grabbed_hand.into_iter().chain(released_hand) {
+                match &input {
+                    Some(i) => i.haptic(h, GRAB_HAPTIC_S, 0.6),
+                    None => {
+                        if let (Some(sys), Some(c)) = (&system, controllers.iter().find(|c| c.hand == h)) {
+                            sys.haptic(c.index, 2500);
+                        }
+                    }
+                }
+            }
+
+            // Accessibility text size.
+            let scale = dev_view.vr_ui_scale.clamp(0.8, 1.6);
+            wrist.apply_scale(scale);
+            dash.apply_scale(scale);
+            kb.apply_scale(scale);
+            for w in &mut wins {
+                w.panel.apply_scale(scale);
+            }
+
             // ── Wrist frame.
             let wf = wrist.laser.update(&wrist_samples, dt);
             let mut act = rsoverlay_ui::wrist::WristAction::default();
@@ -739,6 +908,9 @@ mod imp {
                 let cursor = wf.cursor;
                 wrist.render(&gpu, &overlay, time, dt, wf.events, |ctx| {
                     act = dev_view.wrist_ui(ctx);
+                    if let Some((0, h)) = hud {
+                        rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
+                    }
                     laser::paint_cursor(ctx, cursor, accent);
                 });
             }
@@ -780,6 +952,9 @@ mod imp {
                 let inj = injector.as_ref();
                 dash.render(&gpu, &overlay, time, dt, df.events, |ctx| {
                     dev_view.ui_with(ctx, inj);
+                    if let Some((1, h)) = hud {
+                        rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
+                    }
                     laser::paint_cursor(ctx, cursor, accent);
                 });
             }
@@ -838,6 +1013,9 @@ mod imp {
                 let mut kf = rsoverlay_ui::vrkeyboard::KbFrame::default();
                 kb.render(&gpu, &overlay, time, dt, Vec::new(), |ctx| {
                     kf = keyboard.frame(ctx, &hands, time, accent);
+                    if let Some((2, h)) = hud {
+                        rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
+                    }
                 });
                 kb_haptics = kf.haptic;
                 if kf.close {
@@ -887,6 +1065,8 @@ mod imp {
                                     input_blocked: false,
                                     blocked_checked: None,
                                     icon: icon_tex,
+                                    down: None,
+                                    wheel_acc: 0.0,
                                 });
                             }
                             Err(e) => {
@@ -915,6 +1095,9 @@ mod imp {
                     let mut wa = rsoverlay_ui::widgets::WidgetAction::default();
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
                         wa = dev_view.widget_ui(ctx, &tabs, active, attach, inj);
+                        if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
+                            rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
+                        }
                         laser::paint_cursor(ctx, cursor, accent);
                     });
                     if let Some(i) = wa.select {
@@ -933,25 +1116,66 @@ mod imp {
                     let (title, handle_m, attach, cursor, blocked) =
                         (mirror.source.label(), mirror.handle(), w.attach, lf.cursor, w.input_blocked);
                     let icon = w.icon.as_ref().map(|t| t.id());
+                    let events = lf.events.clone();
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
                         act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, accent);
+                        if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
+                            rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
+                        }
                         laser::paint_cursor(ctx, cursor, accent);
                     });
-                    // Laser over the content drives the real window.
-                    if let (Some(hit), Some(inj), Some(geom)) = (act.hit, injector.as_ref(), mirror.geom()) {
-                        if hit.clicked {
-                            if let Some(hwnd) = mirror.window_hwnd() {
-                                rsoverlay_capture::window::focus_window(hwnd);
+                    // The laser is the real mouse on this window: moves,
+                    // separate down/up (drag, select, hold), right/middle
+                    // via the click modifiers, stick → wheel.
+                    if let (Some(rect), Some(inj), Some(geom), false) = (act.image_rect, injector.as_ref(), mirror.geom(), blocked) {
+                        let (cw, ch) = (handle_m.width as f32, handle_m.height as f32);
+                        let to_px = |p: egui::Pos2| {
+                            let u = ((p.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                            let v = ((p.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
+                            ((u * cw) as i32, (v * ch) as i32)
+                        };
+                        for ev in &events {
+                            match ev {
+                                egui::Event::PointerMoved(p) if rect.contains(*p) || w.down.is_some() => {
+                                    let (x, y) = to_px(*p);
+                                    if w.last_hit != Some((x, y)) {
+                                        let _ = inj.move_to(&geom, x, y);
+                                        w.last_hit = Some((x, y));
+                                    }
+                                }
+                                egui::Event::PointerButton { pos, button, pressed, .. } => {
+                                    let btn = match button {
+                                        egui::PointerButton::Secondary => rsoverlay_input::MouseButton::Right,
+                                        egui::PointerButton::Middle => rsoverlay_input::MouseButton::Middle,
+                                        _ => rsoverlay_input::MouseButton::Left,
+                                    };
+                                    let (x, y) = to_px(*pos);
+                                    if *pressed && rect.contains(*pos) {
+                                        if let Some(hwnd) = mirror.window_hwnd() {
+                                            rsoverlay_capture::window::focus_window(hwnd);
+                                        }
+                                        let _ = inj.button(&geom, x, y, btn, true);
+                                        w.down = Some(btn);
+                                    } else if !*pressed {
+                                        if let Some(held) = w.down.take() {
+                                            let _ = inj.button(&geom, x, y, held, false);
+                                        }
+                                    }
+                                }
+                                egui::Event::Scroll(v) if w.last_hit.is_some() => {
+                                    // ~2 wheel units per point: smooth in
+                                    // modern apps, one notch per ~60 pt.
+                                    w.wheel_acc += v.y * 2.0;
+                                    let send = (w.wheel_acc / 30.0).trunc() * 30.0;
+                                    if send != 0.0 {
+                                        let _ = inj.wheel(send as i32);
+                                        w.wheel_acc -= send;
+                                    }
+                                }
+                                egui::Event::PointerGone => w.last_hit = None,
+                                _ => {}
                             }
-                            if let Err(e) = inj.click_at(&geom, hit.x, hit.y, rsoverlay_input::MouseButton::Left) {
-                                warn!("window click: {e:#}");
-                            }
-                        } else if w.last_hit != Some((hit.x, hit.y)) {
-                            let _ = inj.move_to(&geom, hit.x, hit.y);
                         }
-                        w.last_hit = Some((hit.x, hit.y));
-                    } else {
-                        w.last_hit = None;
                     }
                 }
                 if let Some(a) = act.attach {
@@ -1022,8 +1246,13 @@ mod imp {
                         laser::Hand::Left => Hand::Left,
                         laser::Hand::Right => Hand::Right,
                     };
-                    if let Some(c) = controllers.iter().find(|c| c.hand == want) {
-                        sys.haptic(c.index, CLICK_HAPTIC_US);
+                    match &input {
+                        Some(i) => i.haptic(want, 0.012, 0.35),
+                        None => {
+                            if let Some(c) = controllers.iter().find(|c| c.hand == want) {
+                                sys.haptic(c.index, CLICK_HAPTIC_US);
+                            }
+                        }
                     }
                 }
             }
@@ -1083,6 +1312,9 @@ mod imp {
         }
         keyboard.release_all();
         kb.destroy(&overlay);
+        for b in &beams {
+            b.destroy(&overlay);
+        }
         wrist.destroy(&overlay);
         dash.destroy(&overlay);
         info!("clean shutdown");

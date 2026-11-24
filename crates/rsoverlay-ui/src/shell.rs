@@ -278,6 +278,49 @@ pub fn short_device_label(label: &str) -> &'static str {
     }
 }
 
+/// Live feedback while a panel is grabbed (accessibility: you always
+/// see *that* you're moving/resizing and *by how much*).
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct GrabHud {
+    pub width_m: f32,
+    pub dist_m: f32,
+    /// Size is changing this frame (stick X or two-hand).
+    pub resizing: bool,
+}
+
+pub fn paint_grab_hud(ctx: &egui::Context, hud: GrabHud, accent: egui::Color32) {
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("grab-hud")));
+    let r = ctx.screen_rect().shrink(5.0);
+    // Glow: a few widening, fading strokes.
+    for (w, a) in [(10.0_f32, 0.10_f32), (6.0, 0.22), (3.0, 0.9)] {
+        p.rect_stroke(r, 26.0, egui::Stroke::new(w, accent.gamma_multiply(a)));
+    }
+    let text = if hud.resizing {
+        format!("Resizing · {:.0} cm wide", hud.width_m * 100.0)
+    } else {
+        format!("Moving · {:.0} cm wide · {:.1} m away", hud.width_m * 100.0, hud.dist_m)
+    };
+    let galley = p.layout_no_wrap(text, egui::FontId::proportional(theme::SIZE_BODY + 1.0), theme::BG_ROOT);
+    let pill = egui::Rect::from_center_size(egui::pos2(r.center().x, r.top() + 26.0), galley.size() + egui::vec2(28.0, 14.0));
+    p.rect_filled(pill, pill.height() / 2.0, accent);
+    p.galley(pill.center() - galley.size() / 2.0, galley, theme::BG_ROOT);
+}
+
+/// Laser-beam strip texture: white, fading in from the controller end
+/// (left) so the beam reads as emitted, not a stick. Tinted at runtime.
+pub fn paint_beam(ctx: &egui::Context) {
+    let p = ctx.layer_painter(egui::LayerId::background());
+    let r = ctx.screen_rect();
+    let n = 48;
+    for i in 0..n {
+        let t0 = i as f32 / n as f32;
+        let t1 = (i + 1) as f32 / n as f32;
+        let a = ((t0 / 0.35).min(1.0) * 255.0) as u8;
+        let seg = egui::Rect::from_min_max(egui::pos2(r.left() + t0 * r.width(), r.top()), egui::pos2(r.left() + t1 * r.width(), r.bottom()));
+        p.rect_filled(seg, 0.0, egui::Color32::from_white_alpha(a));
+    }
+}
+
 /// Page title row used at the top of every page body.
 pub fn page_title(ui: &mut egui::Ui, title: &str) {
     ui.label(egui::RichText::new(title).size(22.0).strong().color(theme::FG_PRIMARY));

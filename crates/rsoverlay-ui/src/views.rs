@@ -247,6 +247,9 @@ pub struct DevView {
     /// VR: panels fade out beyond this off-axis view angle (degrees).
     pub vr_clip_angle: f32,
     pub vr_wrist_opacity: f32,
+    /// Accessibility: VR UI size multiplier.
+    pub vr_ui_scale: f32,
+    pub vr_show_lasers: bool,
     pub run_as_admin: bool,
     /// Set by the app: is this process elevated right now?
     pub elevated: bool,
@@ -313,6 +316,8 @@ impl Default for DevView {
             vr_left_handed: false,
             vr_clip_angle: 60.0,
             vr_wrist_opacity: 1.0,
+            vr_ui_scale: 1.0,
+            vr_show_lasers: true,
             run_as_admin: false,
             elevated: false,
             restart_elevated_requested: false,
@@ -748,6 +753,8 @@ impl DevView {
                     l.add_space(theme::GUTTER);
                     vr_card(l, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, accent);
                     l.add_space(theme::GUTTER);
+                    accessibility_card(l, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.reduce_motion, accent);
+                    l.add_space(theme::GUTTER);
                     if admin_card(l, &mut self.run_as_admin, self.elevated, accent) {
                         self.restart_elevated_requested = true;
                     }
@@ -819,6 +826,22 @@ fn reset_card(ui: &mut egui::Ui, armed_at: &mut Option<f64>) -> bool {
         }
     });
     confirmed
+}
+
+fn accessibility_card(ui: &mut egui::Ui, scale: &mut f32, lasers: &mut bool, reduce_motion: &mut bool, accent: egui::Color32) {
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::SETTINGS, "Accessibility", accent);
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("VR text size"));
+            ui.add(egui::Slider::new(scale, 0.8..=1.6).fixed_decimals(1).suffix("×"));
+        });
+        ui.checkbox(lasers, "Laser beams").on_hover_text("Draw a beam from each controller while it points at a panel");
+        ui.checkbox(reduce_motion, "Reduce motion").on_hover_text("Make page, toast and highlight transitions instant");
+        ui.label(egui::RichText::new("Moving/resizing a panel always shows a glowing outline + size readout, with a haptic tick on grab and release.")
+            .size(theme::SIZE_CAPTION + 1.0).color(theme::FG_MUTED));
+    });
 }
 
 fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opacity: &mut f32, accent: egui::Color32) {
@@ -1355,7 +1378,7 @@ mod laser_integration_tests {
 
     /// Run one frame fed only by laser samples.
     fn frame(ctx: &egui::Context, dev: &mut DevView, laser: &mut LaserInput, t: &mut f64, hit: Option<egui::Pos2>, trigger: f32) {
-        let lf = laser.update(&[HandSample { hand: Hand::Right, hit, trigger, stick_y: 0.0 }], 1.0 / 90.0);
+        let lf = laser.update(&[HandSample { hand: Hand::Right, hit, trigger, stick_y: 0.0, button: egui::PointerButton::Primary }], 1.0 / 90.0);
         *t += 1.0 / 90.0;
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, PANEL)),

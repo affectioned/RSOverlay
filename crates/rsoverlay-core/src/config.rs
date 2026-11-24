@@ -33,11 +33,15 @@ pub struct VrCfg {
     /// Relaunch elevated at startup so laser/keyboard input can reach
     /// "Run as administrator" windows (Windows UIPI blocks it otherwise).
     pub run_as_admin: bool,
+    /// Accessibility: VR text/UI size multiplier (0.8–1.6).
+    pub ui_scale: f32,
+    /// Accessibility: draw laser beams from the controllers.
+    pub show_lasers: bool,
 }
 
 impl Default for VrCfg {
     fn default() -> Self {
-        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false }
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true }
     }
 }
 

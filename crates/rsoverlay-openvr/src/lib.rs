@@ -277,6 +277,19 @@ impl<'a> Overlay<'a> {
         check(r, "SetOverlayTransformTrackedDeviceRelative")
     }
 
+    /// Texel width:height. Lets a strip overlay keep a constant
+    /// thickness while its width (length) changes every frame.
+    pub fn set_texel_aspect(&self, handle: VROverlayHandle_t, aspect: f32) -> Result<(), OpenVrError> {
+        let r = unsafe { (self.table().SetOverlayTexelAspect)(handle, aspect) };
+        check(r, "SetOverlayTexelAspect")
+    }
+
+    /// Higher draws on top among overlapping overlays.
+    pub fn set_sort_order(&self, handle: VROverlayHandle_t, order: u32) -> Result<(), OpenVrError> {
+        let r = unsafe { (self.table().SetOverlaySortOrder)(handle, order) };
+        check(r, "SetOverlaySortOrder")
+    }
+
     pub fn set_curvature(&self, handle: VROverlayHandle_t, curvature: f32) -> Result<(), OpenVrError> {
         let r = unsafe { (self.table().SetOverlayCurvature)(handle, curvature.clamp(0.0, 1.0)) };
         check(r, "SetOverlayCurvature")
@@ -594,6 +607,141 @@ fn check(code: sys::EVROverlayError, op: &'static str) -> Result<(), OpenVrError
         Ok(())
     } else {
         Err(OpenVrError::OverlayOp { op, code })
+    }
+}
+
+/// One hand's SteamVR Input state for this frame.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct HandInput {
+    /// Trigger pull 0..=1.
+    pub trigger: f32,
+    /// Trigger click (the binding's threshold).
+    pub click: bool,
+    pub grab: bool,
+    /// Thumbstick / trackpad (x, y).
+    pub stick: [f32; 2],
+    /// XSO-style click modifiers (Index trackpad S/N, Touch A·X / B·Y touch).
+    pub right_mod: bool,
+    pub middle_mod: bool,
+    /// Rising edge of the edit-mode toggle (double-press left A / X).
+    pub toggle_edit: bool,
+}
+
+/// SteamVR Input: action manifest + per-controller default bindings,
+/// rebindable by the user in SteamVR's controller-binding UI.
+pub struct Input<'a> {
+    table: *const sys::IVRInputFnTable,
+    set: sys::VRActionSetHandle_t,
+    click: sys::VRActionHandle_t,
+    trigger: sys::VRActionHandle_t,
+    grab: sys::VRActionHandle_t,
+    stick: sys::VRActionHandle_t,
+    right_mod: sys::VRActionHandle_t,
+    middle_mod: sys::VRActionHandle_t,
+    toggle_edit: sys::VRActionHandle_t,
+    haptic: sys::VRActionHandle_t,
+    hands: [sys::VRInputValueHandle_t; 2],
+    _parent: std::marker::PhantomData<&'a OpenVr>,
+}
+
+impl OpenVr {
+    /// Register `manifest` (absolute path to actions.json) and resolve
+    /// the RSOverlay action set.
+    pub fn input(&self, manifest: &std::path::Path) -> Result<Input<'_>, OpenVrError> {
+        let mut err: sys::EVRInitError = 0;
+        let ptr = unsafe {
+            (self.fns.vr_get_generic_interface)(sys::IVRInput_FnTable_Version.as_ptr() as *const _, &mut err)
+        };
+        if ptr.is_null() || err != sys::EVRInitError_None {
+            return Err(OpenVrError::InterfaceMissing(err));
+        }
+        let t = ptr as *const sys::IVRInputFnTable;
+        let cstr = |s: &str| CString::new(s).map_err(|_| OpenVrError::InvalidKey);
+        unsafe {
+            let path = cstr(&manifest.to_string_lossy())?;
+            let r = ((*t).SetActionManifestPath)(path.as_ptr());
+            if r != sys::EVRInputError_None {
+                return Err(OpenVrError::OverlayOp { op: "SetActionManifestPath", code: r as u32 });
+            }
+            let handle = |name: &str| -> Result<u64, OpenVrError> {
+                let n = cstr(name)?;
+                let mut h = 0u64;
+                let r = ((*t).GetActionHandle)(n.as_ptr(), &mut h);
+                if r != sys::EVRInputError_None {
+                    return Err(OpenVrError::OverlayOp { op: "GetActionHandle", code: r as u32 });
+                }
+                Ok(h)
+            };
+            let mut set = 0u64;
+            let n = cstr("/actions/rsoverlay")?;
+            ((*t).GetActionSetHandle)(n.as_ptr(), &mut set);
+            let mut hands = [0u64; 2];
+            for (i, p) in ["/user/hand/left", "/user/hand/right"].iter().enumerate() {
+                let n = cstr(p)?;
+                ((*t).GetInputSourceHandle)(n.as_ptr(), &mut hands[i]);
+            }
+            Ok(Input {
+                table: t,
+                set,
+                click: handle("/actions/rsoverlay/in/Click")?,
+                trigger: handle("/actions/rsoverlay/in/TriggerPull")?,
+                grab: handle("/actions/rsoverlay/in/Grab")?,
+                stick: handle("/actions/rsoverlay/in/Stick")?,
+                right_mod: handle("/actions/rsoverlay/in/RightClickModifier")?,
+                middle_mod: handle("/actions/rsoverlay/in/MiddleClickModifier")?,
+                toggle_edit: handle("/actions/rsoverlay/in/ToggleEditMode")?,
+                haptic: handle("/actions/rsoverlay/out/Haptic")?,
+                hands,
+                _parent: std::marker::PhantomData,
+            })
+        }
+    }
+}
+
+impl Input<'_> {
+    fn t(&self) -> &sys::IVRInputFnTable {
+        unsafe { &*self.table }
+    }
+
+    fn digital(&self, a: u64, dev: u64) -> sys::InputDigitalActionData_t {
+        let mut d = sys::InputDigitalActionData_t::default();
+        unsafe { (self.t().GetDigitalActionData)(a, &mut d, std::mem::size_of_val(&d) as u32, dev) };
+        d
+    }
+
+    fn analog(&self, a: u64, dev: u64) -> sys::InputAnalogActionData_t {
+        let mut d = sys::InputAnalogActionData_t::default();
+        unsafe { (self.t().GetAnalogActionData)(a, &mut d, std::mem::size_of_val(&d) as u32, dev) };
+        d
+    }
+
+    /// Pump SteamVR Input and read both hands. [left, right].
+    pub fn poll(&self) -> [HandInput; 2] {
+        let mut set = sys::VRActiveActionSet_t { ulActionSet: self.set, ..Default::default() };
+        unsafe { (self.t().UpdateActionState)(&mut set, std::mem::size_of_val(&set) as u32, 1) };
+        self.hands.map(|dev| {
+            let on = |a| {
+                let d = self.digital(a, dev);
+                d.bActive && d.bState
+            };
+            let stick = self.analog(self.stick, dev);
+            let edit = self.digital(self.toggle_edit, dev);
+            HandInput {
+                trigger: self.analog(self.trigger, dev).x,
+                click: on(self.click),
+                grab: on(self.grab),
+                stick: [stick.x, stick.y],
+                right_mod: on(self.right_mod),
+                middle_mod: on(self.middle_mod),
+                toggle_edit: edit.bActive && edit.bState && edit.bChanged,
+            }
+        })
+    }
+
+    /// Short vibration on one hand (0 = left, 1 = right).
+    pub fn haptic(&self, hand: Hand, seconds: f32, amplitude: f32) {
+        let dev = self.hands[if hand == Hand::Left { 0 } else { 1 }];
+        unsafe { (self.t().TriggerHapticVibrationAction)(self.haptic, 0.0, seconds, 160.0, amplitude.clamp(0.0, 1.0), dev) };
     }
 }
 

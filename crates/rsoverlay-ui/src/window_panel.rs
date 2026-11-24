@@ -41,6 +41,9 @@ impl Attach {
 pub struct WindowPanelAction {
     /// Laser over the content: move (and maybe click) the real window.
     pub hit: Option<MirrorHit>,
+    /// Where the capture was drawn this frame (panel points) — the app
+    /// maps raw laser events through it to drive the real window.
+    pub image_rect: Option<egui::Rect>,
     pub attach: Option<Attach>,
     pub close: bool,
 }
@@ -74,6 +77,7 @@ pub fn show(
                     egui::Image::new((m.id, rect.size())).uv(m.uv).rounding(8.0).sense(egui::Sense::click()),
                 );
                 crate::views::paint_mirror_cursor(ui, rect, m.cursor);
+                out.image_rect = Some(rect);
                 if input_blocked {
                     uac_banner(ui, rect);
                 } else if let Some(pos) = resp.hover_pos().or_else(|| resp.interact_pointer_pos()) {
