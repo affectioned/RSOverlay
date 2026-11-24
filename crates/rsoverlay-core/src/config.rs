@@ -70,6 +70,7 @@ pub struct Appearance {
     pub chat_now_playing: bool,
     pub show_battery: bool,
     pub show_macros: bool,
+    pub show_volume: bool,
     /// Low-battery toast threshold, percent. Clamped to 5..=50 in UI.
     pub battery_warn_pct: u8,
 }
@@ -89,6 +90,7 @@ impl Default for Appearance {
             chat_now_playing: false,
             show_battery: true,
             show_macros: true,
+            show_volume: true,
             battery_warn_pct: 20,
         }
     }

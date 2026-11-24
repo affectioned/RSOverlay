@@ -162,6 +162,8 @@ pub struct DevView {
     pub battery_warn_pct: u8,
     pub show_macros: bool,
     pub macros: crate::macros::MacroDeck,
+    pub show_volume: bool,
+    volume: crate::volume::VolumeCard,
     /// Active UI language + keyboard layout. Both persist to config.
     pub language: crate::i18n::Lang,
     /// Set to true when the user clicks "Reset defaults" in the
@@ -203,6 +205,8 @@ impl Default for DevView {
             battery_warn_pct: 20,
             show_macros: true,
             macros: crate::macros::MacroDeck::default(),
+            show_volume: true,
+            volume: crate::volume::VolumeCard::default(),
             language: crate::i18n::Lang::default(),
             reset_requested: false,
             placement: Placement::default(),
@@ -314,6 +318,14 @@ impl DevView {
         }
 
         let accent = self.accent;
+        // Slider fills, checkbox ticks and text selection follow the
+        // user accent instead of egui's stock blue.
+        if ctx.style().visuals.selection.bg_fill != accent {
+            ctx.style_mut(|st| {
+                st.visuals.selection.bg_fill = accent;
+                st.visuals.selection.stroke.color = theme::BG_ROOT;
+            });
+        }
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(&ctx.style()).fill(theme::BG_ROOT))
             .show(ctx, |ui| {
@@ -340,6 +352,10 @@ impl DevView {
                             accent,
                         );
                         ui.add_space(theme::GUTTER);
+                        if self.show_volume {
+                            self.volume.show(ui, accent);
+                            ui.add_space(theme::GUTTER);
+                        }
                         if self.show_battery {
                             crate::battery::card(
                                 ui,
@@ -384,6 +400,7 @@ impl DevView {
                             &mut self.show_history,
                             &mut self.show_battery,
                             &mut self.show_macros,
+                            &mut self.show_volume,
                             &mut self.language,
                             &mut self.keyboard.layout,
                         ) {
@@ -689,6 +706,7 @@ fn appearance_card(
     show_history: &mut bool,
     show_battery: &mut bool,
     show_macros: &mut bool,
+    show_volume: &mut bool,
     language: &mut crate::i18n::Lang,
     keyboard_layout: &mut crate::keyboard_layout::LayoutId,
 ) -> bool {
@@ -746,6 +764,7 @@ fn appearance_card(
             ui.checkbox(show_history, "History");
             ui.checkbox(show_battery, "Battery");
             ui.checkbox(show_macros, "Macros");
+            ui.checkbox(show_volume, "Volume");
         });
         ui.add_space(8.0);
         // Language picker — shows the native-script name so a Russian

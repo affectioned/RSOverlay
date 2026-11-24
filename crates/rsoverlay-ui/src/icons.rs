@@ -27,6 +27,7 @@ svg_icon!(PULSE,    "pulse.svg");
 svg_icon!(CLOCK,    "clock.svg");
 svg_icon!(SETTINGS, "settings.svg");
 svg_icon!(BATTERY,  "battery.svg");
+svg_icon!(SPEAKER,  "speaker.svg");
 
 /// Install the SVG loader on the egui context. Call once at startup.
 pub fn install_loaders(ctx: &egui::Context) {

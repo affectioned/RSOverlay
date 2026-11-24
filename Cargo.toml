@@ -6,6 +6,7 @@ members = [
     "crates/rsoverlay-capture",
     "crates/rsoverlay-notify",
     "crates/rsoverlay-osc",
+    "crates/rsoverlay-audio",
     "crates/rsoverlay-discord",
     "crates/rsoverlay-render",
     "crates/rsoverlay-input",
@@ -68,6 +69,7 @@ rsoverlay-openvr  = { path = "crates/rsoverlay-openvr" }
 rsoverlay-capture = { path = "crates/rsoverlay-capture" }
 rsoverlay-notify = { path = "crates/rsoverlay-notify" }
 rsoverlay-osc    = { path = "crates/rsoverlay-osc" }
+rsoverlay-audio  = { path = "crates/rsoverlay-audio" }
 rsoverlay-discord = { path = "crates/rsoverlay-discord" }
 rsoverlay-render = { path = "crates/rsoverlay-render" }
 rsoverlay-input   = { path = "crates/rsoverlay-input" }

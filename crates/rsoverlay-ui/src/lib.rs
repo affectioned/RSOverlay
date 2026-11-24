@@ -17,6 +17,7 @@ pub mod media;
 pub mod now_playing;
 pub mod theme;
 pub mod views;
+pub mod volume;
 
 pub struct EguiPanel {
     pub ctx: egui::Context,

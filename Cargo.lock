@@ -2180,6 +2180,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rsoverlay-audio"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+ "windows",
+]
+
+[[package]]
 name = "rsoverlay-capture"
 version = "0.1.0"
 dependencies = [
@@ -2286,6 +2294,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui_extras",
+ "rsoverlay-audio",
  "rsoverlay-core",
  "rsoverlay-input",
  "rsoverlay-notify",
