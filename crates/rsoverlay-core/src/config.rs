@@ -44,11 +44,15 @@ pub struct VrCfg {
     pub cursor_smoothing: f32,
     /// Stick scroll speed multiplier.
     pub scroll_speed: f32,
+    /// Wrist toolbar buttons shown (bit mask over the 7 actions).
+    pub wrist_buttons: u8,
+    /// Accent follows album art while music plays.
+    pub media_theme: bool,
 }
 
 impl Default for VrCfg {
     fn default() -> Self {
-        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0 }
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0x7F, media_theme: false }
     }
 }
 

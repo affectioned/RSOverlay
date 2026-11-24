@@ -51,6 +51,8 @@ fn static_entries() -> Vec<Entry> {
         card("Reduce motion", "Settings › Accessibility", "animation transitions", Settings, "Accessibility"),
         card("Run as administrator", "Settings › Administrator", "uac admin elevated permissions", Settings, "Administrator"),
         card("Reset all settings", "Settings › Reset", "defaults factory restore", Settings, "Reset"),
+        card("Wrist toolbar buttons", "Settings › Wrist toolbar", "customize customise wrist buttons", Settings, "Wrist toolbar"),
+        card("Media theme", "Settings › Wrist toolbar", "album art colour color accent", Settings, "Wrist toolbar"),
         card("Cursor smoothing", "Settings › Pointer", "jitter steady laser", Settings, "Pointer"),
         card("Scroll speed", "Settings › Pointer", "wheel scrolling", Settings, "Pointer"),
         card("Placement", "Settings", "position offset size curve curvature opacity anchor", Settings, "Placement"),
@@ -154,7 +156,7 @@ mod tests {
         for e in static_entries() {
             if let Target::Card(_, cap) = e.target {
                 assert!(
-                    ["Appearance", "Night light", "VR", "Pointer", "Accessibility", "Administrator", "Reset", "Placement", "Stats",
+                    ["Appearance", "Night light", "VR", "Pointer", "Wrist toolbar", "Accessibility", "Administrator", "Reset", "Placement", "Stats",
                         "Volume", "Now playing", "VRChat chatbox", "Macros", "Notifications", "Battery", "System"]
                         .contains(&cap),
                     "{cap}"

@@ -57,6 +57,27 @@ const ISO_KEY: ScanKey = ScanKey::new(0x56);
 
 /// 60 % ANSI-ish matrix, 15 units wide. The ISO extra key (0x56) is
 /// spliced in next to left Shift when the active layout defines it.
+/// Full layout: an F-key row (Esc · F1–F12 · PrtSc · Del) on top.
+fn f_row() -> Vec<Key> {
+    let mut r = vec![named(ScanKey::new(0x01), 1.0, "Esc")];
+    let fk = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"];
+    let sc = [0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x57, 0x58];
+    for (l, s) in fk.iter().zip(sc) {
+        r.push(named(ScanKey::new(s), 1.0, l));
+    }
+    r.push(named(ScanKey::ext(0x37), 1.0, "PrtSc"));
+    r.push(named(ScanKey::ext(0x53), 1.0, "Del"));
+    r
+}
+
+fn rows_for(iso: bool, full: bool) -> Vec<Vec<Key>> {
+    let mut v: Vec<Vec<Key>> = rows(iso).into_iter().collect();
+    if full {
+        v.insert(0, f_row());
+    }
+    v
+}
+
 fn rows(iso: bool) -> [Vec<Key>; 5] {
     let mut r3 = vec![modk(ScanKey::new(0x2A), if iso { 1.25 } else { 2.25 }, Mod::Shift, "Shift")];
     if iso {
@@ -123,6 +144,11 @@ pub struct VrKeyboard {
     pub locked_pos: bool,
     /// Opt-in typematic repeat for typing. Off = real hold (games).
     pub auto_repeat: bool,
+    /// Full layout (F-key row) vs compact.
+    pub full: bool,
+    /// Labels under the *opposite* Shift state — drawn small in the
+    /// key's corner as the secondary legend.
+    alt_labels: HashMap<ScanKey, String>,
     /// VRChat mode: keys build a message here; Enter sends it to the
     /// chatbox (OSC) instead of typing into the desktop.
     pub vrchat: bool,
@@ -172,10 +198,15 @@ impl VrKeyboard {
         let iso_label = physical::key_label(ISO_KEY, LabelMods::default(), hkl);
         self.iso = iso_label.is_some() && iso_label != physical::key_label(ScanKey::new(0x2B), LabelMods::default(), hkl);
         self.labels.clear();
+        self.alt_labels.clear();
+        let alt = LabelMods { shift: !mods.shift, ..mods };
         for row in rows(self.iso) {
             for k in row.into_iter().filter(|k| k.kind == Kind::Char) {
                 if let Some(l) = physical::key_label(k.k, mods, hkl) {
                     self.labels.insert(k.k, l);
+                }
+                if let Some(l) = physical::key_label(k.k, alt, hkl) {
+                    self.alt_labels.insert(k.k, l);
                 }
             }
         }
@@ -308,15 +339,17 @@ impl VrKeyboard {
         let vrc_r = egui::Rect::from_center_size(repeat_r.center() - egui::vec2(112.0, 0.0), egui::vec2(96.0, 32.0));
         let paste_r = egui::Rect::from_center_size(vrc_r.center() - egui::vec2(88.0, 0.0), egui::vec2(72.0, 32.0));
         let copy_r = egui::Rect::from_center_size(paste_r.center() - egui::vec2(80.0, 0.0), egui::vec2(72.0, 32.0));
+        let size_r = egui::Rect::from_center_size(copy_r.center() - egui::vec2(88.0, 0.0), egui::vec2(88.0, 32.0));
 
         let area = egui::Rect::from_min_max(egui::pos2(card.left() + 12.0, bar.bottom() + 4.0), card.max - egui::vec2(12.0, 12.0));
+        let all_rows = rows_for(self.iso, self.full);
         let unit = area.width() / 15.0;
-        let row_h = area.height() / 5.0;
+        let row_h = area.height() / all_rows.len() as f32;
         let gap = (unit * 0.08).max(3.0);
 
         // Geometry this frame.
         let mut keys: Vec<(egui::Rect, Key)> = Vec::with_capacity(70);
-        for (r, row) in rows(self.iso).iter().enumerate() {
+        for (r, row) in all_rows.iter().enumerate() {
             let mut x = area.left();
             for k in row {
                 let rect = egui::Rect::from_min_size(egui::pos2(x, area.top() + r as f32 * row_h), egui::vec2(k.w * unit, row_h)).shrink(gap / 2.0);
@@ -346,6 +379,11 @@ impl VrKeyboard {
                 }
                 if repeat_r.contains(p) {
                     self.auto_repeat = !self.auto_repeat;
+                    out.haptic.push(hand);
+                    continue;
+                }
+                if size_r.contains(p) {
+                    self.full = !self.full;
                     out.haptic.push(hand);
                     continue;
                 }
@@ -453,6 +491,16 @@ impl VrKeyboard {
             };
             let caps_on = k.k == ScanKey::new(0x3A) && physical::caps_lock_on();
             let color = if caps_on { accent } else { theme::FG_PRIMARY };
+            // Secondary legend (the other Shift state), small, top-right —
+            // skipped for letters, whose shifted form is just the capital.
+            if k.kind == Kind::Char {
+                if let (Some(alt), Some(main)) = (self.alt_labels.get(&k.k), self.labels.get(&k.k)) {
+                    if alt != main && alt.to_lowercase() != main.to_lowercase() {
+                        painter.text(rect.right_top() + egui::vec2(-8.0, 6.0), egui::Align2::RIGHT_TOP, alt,
+                            egui::FontId::proportional(em * 0.22), theme::FG_MUTED);
+                    }
+                }
+            }
             match crate::glyphs::Glyph::from_label(&text) {
                 Some(g) => crate::glyphs::draw(&painter, g, rect.center(), row_h.min(unit) * 0.34, color),
                 None => {
@@ -462,7 +510,7 @@ impl VrKeyboard {
         }
 
         // Bar buttons — vector-drawn so they never depend on font coverage.
-        for (r, on) in [(lock_r, self.locked_pos), (close_r, false), (repeat_r, self.auto_repeat), (vrc_r, self.vrchat), (copy_r, false), (paste_r, false)] {
+        for (r, on) in [(lock_r, self.locked_pos), (close_r, false), (repeat_r, self.auto_repeat), (vrc_r, self.vrchat), (copy_r, false), (paste_r, false), (size_r, self.full)] {
             let hover = hovered.iter().any(|p| r.contains(*p));
             let fill = if on { accent.gamma_multiply(0.3) } else if hover { egui::Color32::from_rgb(0x2A, 0x2F, 0x37) } else { egui::Color32::from_rgb(0x16, 0x19, 0x1E) };
             painter.rect_filled(r, 10.0, fill);
@@ -470,7 +518,7 @@ impl VrKeyboard {
         let stroke = egui::Stroke::new(2.0_f32, theme::FG_PRIMARY);
         draw_lock(&painter, lock_r.center(), self.locked_pos, if self.locked_pos { egui::Stroke::new(2.0_f32, accent) } else { stroke });
         draw_close(&painter, close_r.center(), stroke);
-        for (r, t, on) in [(vrc_r, "VRChat", self.vrchat), (copy_r, "Copy", false), (paste_r, "Paste", false)] {
+        for (r, t, on) in [(vrc_r, "VRChat", self.vrchat), (copy_r, "Copy", false), (paste_r, "Paste", false), (size_r, if self.full { "Full" } else { "Compact" }, self.full)] {
             painter.text(r.center(), egui::Align2::CENTER_CENTER, t,
                 egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), if on { accent } else { theme::FG_PRIMARY });
         }
@@ -538,6 +586,14 @@ mod tests {
                 assert!((w - 15.0).abs() < 1e-4, "row {i} iso={iso} is {w} units");
             }
         }
+    }
+
+    #[test]
+    fn full_layout_adds_a_fifteen_unit_f_row() {
+        let r = rows_for(false, true);
+        assert_eq!(r.len(), 6);
+        assert!((r[0].iter().map(|k| k.w).sum::<f32>() - 15.0).abs() < 1e-4);
+        assert_eq!(rows_for(false, false).len(), 5);
     }
 
     #[test]

@@ -271,6 +271,12 @@ pub struct DevView {
     pub layout_request: Option<crate::layouts_page::LayoutAction>,
     /// Layout slot selected on the wrist toolbar.
     pub wrist_slot: usize,
+    /// Media theme: accent follows the album art while something plays.
+    pub media_theme: bool,
+    art_accent: Option<egui::Color32>,
+    art_for: String,
+    /// Wrist toolbar: which of the 7 action buttons show (bit i).
+    pub wrist_buttons: u8,
     /// XSO-style knobs: cursor smoothing 0..1, scroll speed multiplier.
     pub cursor_smoothing: f32,
     pub scroll_speed: f32,
@@ -350,6 +356,10 @@ impl Default for DevView {
             layouts: Default::default(),
             layout_request: None,
             wrist_slot: 0,
+            media_theme: false,
+            art_accent: None,
+            art_for: String::new(),
+            wrist_buttons: 0x7F,
             cursor_smoothing: 0.5,
             scroll_speed: 1.0,
             night_light: crate::nightlight::NightLight::default(),
@@ -442,7 +452,7 @@ impl DevView {
         use crate::widgets::WidgetKind as K;
         self.tick_state(ctx);
         crate::widgets::set_popout_enabled(ctx, false);
-        let accent = self.accent;
+        let accent = self.effective_accent();
         if ctx.style().visuals.selection.bg_fill != accent {
             ctx.style_mut(|st| st.visuals.selection.bg_fill = accent);
         }
@@ -486,7 +496,8 @@ impl DevView {
             slot_filled: self.layouts.slot(self.wrist_slot).is_some(),
             slot_favorite: self.layouts.favorite == Some(self.wrist_slot),
             keyboard_open: self.show_keyboard,
-            accent: self.accent,
+            accent: self.effective_accent(),
+            buttons: self.wrist_buttons,
         };
         let act = crate::wrist::show(ctx, &data);
         if act.slot_delta != 0 {
@@ -494,6 +505,15 @@ impl DevView {
             self.wrist_slot = (self.wrist_slot as i32 + act.slot_delta).rem_euclid(n) as usize;
         }
         act
+    }
+
+    /// Accent in effect: the album-art colour while Media theme is on
+    /// and something with art is playing, else the user's accent.
+    pub fn effective_accent(&self) -> egui::Color32 {
+        match (self.media_theme, self.art_accent) {
+            (true, Some(c)) if self.media.as_ref().is_some_and(|m| !m.title.is_empty()) => c,
+            _ => self.accent,
+        }
     }
 
     /// Queue a VRChat chatbox message (e.g. from the VR keyboard).
@@ -544,6 +564,12 @@ impl DevView {
         }
         self.last_media_poll = Instant::now();
         self.media = media::poll();
+        // Media theme: recompute only when the track changes.
+        let title = self.media.as_ref().map(|m| m.title.clone()).unwrap_or_default();
+        if self.media_theme && title != self.art_for {
+            self.art_for = title;
+            self.art_accent = if self.art_for.is_empty() { None } else { media::art_color() };
+        }
     }
 
     pub fn ui(&mut self, ctx: &egui::Context) {
@@ -598,7 +624,7 @@ impl DevView {
         self.tick_state(ctx);
         crate::widgets::set_popout_enabled(ctx, self.dock_layout);
         let now = Instant::now();
-        let accent = self.accent;
+        let accent = self.effective_accent();
         // Slider fills, checkbox ticks and text selection follow the
         // user accent instead of egui's stock blue.
         if ctx.style().visuals.selection.bg_fill != accent {
@@ -856,6 +882,8 @@ impl DevView {
                     l.add_space(theme::GUTTER);
                     pointer_card(l, &mut self.cursor_smoothing, &mut self.scroll_speed, accent);
                     l.add_space(theme::GUTTER);
+                    wrist_toolbar_card(l, &mut self.wrist_buttons, &mut self.media_theme, accent);
+                    l.add_space(theme::GUTTER);
                     accessibility_card(l, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.reduce_motion, accent);
                     l.add_space(theme::GUTTER);
                     if admin_card(l, &mut self.run_as_admin, self.elevated, accent) {
@@ -978,6 +1006,27 @@ fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opac
             ui.label(theme::body_muted("Wrist opacity"));
             ui.add(egui::Slider::new(wrist_opacity, 0.2..=1.0).fixed_decimals(2));
         });
+    });
+}
+
+fn wrist_toolbar_card(ui: &mut egui::Ui, mask: &mut u8, media_theme: &mut bool, accent: egui::Color32) {
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::GRID, "Wrist toolbar", accent);
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            for (i, name) in ["Add", "Recenter", "Keyboard", "Dashboard", "Layouts", "Settings", "Close all"].iter().enumerate() {
+                let mut on = *mask & (1 << i) != 0;
+                if ui.checkbox(&mut on, *name).changed() {
+                    *mask ^= 1 << i;
+                    if *mask & 0x7F == 0 {
+                        *mask |= 1 << 3; // keep at least the dashboard button
+                    }
+                }
+            }
+        });
+        ui.add_space(4.0);
+        ui.checkbox(media_theme, "Media theme").on_hover_text("Accent colour follows the album art while music plays");
     });
 }
 

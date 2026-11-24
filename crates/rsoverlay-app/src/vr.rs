@@ -90,6 +90,10 @@ mod imp {
     /// Pose smoothing time constant — kills hand tremor on big panels
     /// without feeling laggy.
     const GRAB_TAU: f32 = 0.05;
+    /// Panels outside your view cone re-render at this interval instead
+    /// of every frame (XSO: "active" overlays are the ones you look at).
+    const BACKGROUND_FRAME_S: f64 = 0.2;
+
     /// Laser beam strip: 256 × 16 texels, 3.5 mm thick at any length.
     const BEAM_TEX: (u32, u32) = (256, 16);
     const BEAM_THICKNESS_M: f32 = 0.0035;
@@ -127,6 +131,9 @@ mod imp {
         tex: (u32, u32),
         base_ppp: f32,
         scale: f32,
+        /// Inside the view-angle cone this frame.
+        in_view: bool,
+        last_render: f64,
     }
 
     impl VrPanel {
@@ -167,6 +174,8 @@ mod imp {
                 tex,
                 base_ppp: ppp,
                 scale: 1.0,
+                in_view: true,
+                last_render: f64::NEG_INFINITY,
             })
         }
 
@@ -210,6 +219,7 @@ mod imp {
             events: Vec<egui::Event>,
             build: impl FnOnce(&egui::Context),
         ) {
+            self.last_render = time;
             let raw = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.points)),
                 // Explicit clock: motion + toast timers read ctx time.
@@ -228,6 +238,7 @@ mod imp {
 
         /// Ease the view-angle fade toward shown/hidden.
         fn update_fade(&mut self, shown: bool, dt: f32) {
+            self.in_view = shown;
             let target = if shown { 1.0 } else { 0.0 };
             let k = 1.0 - (-dt.max(0.0) / FADE_TAU).exp();
             self.fade += (target - self.fade) * k;
@@ -988,7 +999,7 @@ mod imp {
                 let _ = overlay.set_width(b.handle, len);
                 let _ = overlay.set_texel_aspect(b.handle, len * BEAM_TEX.1 as f32 / (BEAM_TEX.0 as f32 * BEAM_THICKNESS_M));
                 let _ = overlay.set_transform_absolute(b.handle, &from_affine(&pose));
-                let a = dev_view.accent;
+                let a = dev_view.effective_accent();
                 let tint = [
                     a.r() as f32 / 255.0,
                     a.g() as f32 / 255.0,
@@ -1038,7 +1049,7 @@ mod imp {
             let wf = wrist.laser.update(&wrist_samples, dt);
             let mut act = rsoverlay_ui::wrist::WristAction::default();
             if wrist.visible {
-                let accent = dev_view.accent;
+                let accent = dev_view.effective_accent();
                 let cursor = wf.cursor;
                 wrist.render(&gpu, &overlay, time, dt, wf.events, |ctx| {
                     act = dev_view.wrist_ui(ctx);
@@ -1114,7 +1125,7 @@ mod imp {
                 df.events.append(&mut typed);
             }
             if dash.visible {
-                let accent = dev_view.accent;
+                let accent = dev_view.effective_accent();
                 let cursor = df.cursor;
                 let inj = injector.as_ref();
                 dash.render(&gpu, &overlay, time, dt, df.events, |ctx| {
@@ -1188,7 +1199,7 @@ mod imp {
             if kb.visible {
                 let hands: Vec<(laser::Hand, Option<egui::Pos2>, f32)> =
                     kb_samples.iter().map(|s| (s.hand, s.hit, s.trigger)).collect();
-                let accent = dev_view.accent;
+                let accent = dev_view.effective_accent();
                 let mut kf = rsoverlay_ui::vrkeyboard::KbFrame::default();
                 kb.render(&gpu, &overlay, time, dt, Vec::new(), |ctx| {
                     kf = keyboard.frame(ctx, &hands, time, accent, internal);
@@ -1242,7 +1253,12 @@ mod imp {
                     lf.events.append(&mut typed);
                 }
                 win_haptics.extend(lf.haptic);
-                let accent = dev_view.accent;
+                // Looked-away panels refresh ~5×/s: the GPU only works
+                // hard for what you're looking at.
+                if !w.panel.in_view && time - w.panel.last_render < BACKGROUND_FRAME_S && lf.events.is_empty() {
+                    continue;
+                }
+                let accent = dev_view.effective_accent();
                 let mut act = window_panel::WindowPanelAction::default();
                 if let Some((tabs, active)) = w.widgets.clone() {
                     // Widget group: tabs + live card + dock bar.

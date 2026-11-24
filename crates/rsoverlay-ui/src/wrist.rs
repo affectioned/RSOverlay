@@ -33,6 +33,8 @@ pub struct WristData<'a> {
     pub slot_favorite: bool,
     pub keyboard_open: bool,
     pub accent: egui::Color32,
+    /// Which action buttons to show (bit i = actions[i]).
+    pub buttons: u8,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -75,10 +77,11 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             (icons::SETTINGS, "Settings", false),
             (icons::TRASH, "Close all floating panels", false),
         ];
-        let cell = r1.width() / actions.len() as f32;
-        for (i, (src, tip, on)) in actions.into_iter().enumerate() {
-            let c = egui::Rect::from_min_size(egui::pos2(r1.left() + i as f32 * cell, r1.top()), egui::vec2(cell, r1.height()));
-            if i > 0 {
+        let shown: Vec<_> = actions.into_iter().enumerate().filter(|(i, _)| d.buttons & (1 << i) != 0).collect();
+        let cell = r1.width() / shown.len().max(1) as f32;
+        for (slot, (i, (src, tip, on))) in shown.into_iter().enumerate() {
+            let c = egui::Rect::from_min_size(egui::pos2(r1.left() + slot as f32 * cell, r1.top()), egui::vec2(cell, r1.height()));
+            if slot > 0 {
                 ui.painter().line_segment(
                     [egui::pos2(c.left(), c.top() + 16.0), egui::pos2(c.left(), c.bottom() - 16.0)],
                     egui::Stroke::new(1.0_f32, egui::Color32::from_white_alpha(0x14)),

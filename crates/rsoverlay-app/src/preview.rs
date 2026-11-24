@@ -127,6 +127,8 @@ pub fn seed_dev_view(
     dev.vr_laser_angle = cfg.vr.laser_angle.clamp(-30.0, 30.0);
     dev.cursor_smoothing = cfg.vr.cursor_smoothing.clamp(0.0, 1.0);
     dev.scroll_speed = cfg.vr.scroll_speed.clamp(0.25, 3.0);
+    dev.wrist_buttons = if cfg.vr.wrist_buttons & 0x7F == 0 { 0x7F } else { cfg.vr.wrist_buttons };
+    dev.media_theme = cfg.vr.media_theme;
     dev.elevated = rsoverlay_input::elevation::current_process_elevated();
     dev.battery_osc.enabled = cfg.osc.battery_params;
     dev.battery_osc.prefix = cfg.osc.battery_prefix.trim_matches('/').to_string();
@@ -252,6 +254,8 @@ pub fn config_from_dev_view(
         laser_angle: dev.vr_laser_angle,
         cursor_smoothing: dev.cursor_smoothing,
         scroll_speed: dev.scroll_speed,
+        wrist_buttons: dev.wrist_buttons,
+        media_theme: dev.media_theme,
     };
     out.appearance.reduce_motion = dev.reduce_motion;
     out.macros = rsoverlay_core::config::Macros(
