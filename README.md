@@ -24,7 +24,7 @@ with mock window contents. See [docs/store](docs/store/README.md).</sub>
 > notification API matches XSOverlay's public JSON shape so existing
 > clients (VRCX etc.) keep working.
 
-> **Repo status: private.** Steam release and a public repo come later.
+> **Status:** in active development; Steam release planned.
 
 ## Why
 
@@ -189,4 +189,6 @@ docs/
 
 ## License
 
-Dual-licensed under MIT or Apache-2.0, at your option (see `Cargo.toml`).
+Dual-licensed under either of [MIT](LICENSE-MIT) or
+[Apache-2.0](LICENSE-APACHE), at your option. Bundled fonts (Inter) are
+under the SIL Open Font License, see `crates/rsoverlay-ui/src/fonts/`.
