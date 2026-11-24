@@ -648,8 +648,7 @@ impl DevView {
         let root = if self.dock_layout {
             let slab = ctx.screen_rect().shrink(4.0);
             let bg = ctx.layer_painter(egui::LayerId::background());
-            bg.rect_filled(slab, 30.0, egui::Color32::from_black_alpha(236));
-            bg.rect_stroke(slab, 30.0, egui::Stroke::new(1.5_f32, accent.gamma_multiply(0.28)));
+            theme::glass(&bg, slab.shrink(10.0), 36.0);
             egui::Frame::none()
         } else {
             egui::Frame::none().fill(theme::BG_ROOT)

@@ -315,8 +315,7 @@ impl VrKeyboard {
 
         // Card + top bar.
         let card = screen.shrink(4.0);
-        painter.rect_filled(card, 24.0, theme::BG_ROOT);
-        painter.rect_stroke(card, 24.0, egui::Stroke::new(1.5_f32, accent.gamma_multiply(0.3)));
+        theme::glass(&painter, card.shrink(6.0), 30.0);
         let bar = egui::Rect::from_min_size(card.min + egui::vec2(16.0, 6.0), egui::vec2(card.width() - 32.0, TOP_BAR));
         if self.vrchat {
             let shown = if self.vrc_buf.is_empty() { "VRChat message… (Enter sends)".to_string() } else { format!("{}|", self.vrc_buf) };
@@ -475,11 +474,11 @@ impl VrKeyboard {
             let fill = if held || mod_on || mod_locked {
                 accent.gamma_multiply(if mod_locked { 0.55 } else { 0.32 })
             } else if hover {
-                egui::Color32::from_rgb(0x2A, 0x2F, 0x37)
+                crate::theme::veil(0x24)
             } else {
-                egui::Color32::from_rgb(0x16, 0x19, 0x1E)
+                crate::theme::veil(0x10)
             };
-            painter.rect_filled(*rect, 10.0, fill);
+            painter.rect_filled(*rect, rect.height().min(rect.width()) * 0.28, fill);
             if mod_locked {
                 painter.rect_stroke(*rect, 10.0, egui::Stroke::new(2.0_f32, accent));
             }

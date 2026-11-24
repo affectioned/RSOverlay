@@ -59,7 +59,7 @@ fn meter(ui: &mut egui::Ui, label: &str, pct: Option<f32>, detail: Option<String
         let bar_w = (ui.available_width() - VALUE_W - ui.spacing().item_spacing.x).max(40.0);
         let (rect, _) = ui.allocate_exact_size(egui::vec2(bar_w, 6.0), egui::Sense::hover());
         let p = ui.painter();
-        p.rect_filled(rect, 3.0, egui::Color32::from_white_alpha(0x18));
+        p.rect_filled(rect, 3.0, crate::theme::veil(0x18));
         let target = pct.unwrap_or(0.0).clamp(0.0, 100.0) / 100.0;
         // 1 Hz samples would make bars step; glide between them instead.
         let shown = motion::value(ui.ctx(), egui::Id::new(("sys-meter", label)), target, motion::SLOW);

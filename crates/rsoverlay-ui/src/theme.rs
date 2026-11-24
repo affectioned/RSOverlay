@@ -38,7 +38,7 @@ pub const ACCENT_PRESETS: &[(&str, Color32)] = &[
     ("white",  Color32::from_rgb(0xF2, 0xF3, 0xF5)),
 ];
 
-pub const RADIUS_CARD: f32 = 10.0;
+pub const RADIUS_CARD: f32 = 20.0;
 pub const RADIUS_PILL: f32 = 14.0;
 pub const RADIUS_CHIP: f32 = 6.0;
 
@@ -79,7 +79,7 @@ pub fn install(ctx: &egui::Context) {
         w.bg_fill = fill;
         w.weak_bg_fill = fill;
         w.bg_stroke = egui::Stroke::NONE;
-        w.rounding = egui::Rounding::same(8.0);
+        w.rounding = egui::Rounding::same(14.0);
     }
     style.visuals.widgets.inactive.fg_stroke.color = FG_PRIMARY;
     // VR hit targets: lasers jitter, so every control gets real height.
@@ -91,13 +91,56 @@ pub fn install(ctx: &egui::Context) {
     // family for numerics only (done at the call site via `ui.monospace`).
 }
 
-/// A card frame with the standard fill + stroke + padding.
+/// A card frame: frosted glass tile — a faint white veil over whatever
+/// is behind (black on AMOLED, the glass slab in VR), hairline edge.
 pub fn card() -> egui::Frame {
     egui::Frame::none()
-        .fill(BG_CARD)
-        .stroke(egui::Stroke::new(1.0_f32, STROKE_CARD))
+        .fill(veil(0x08))
+        .stroke(egui::Stroke::new(1.0_f32, veil(0x16)))
         .rounding(RADIUS_CARD)
         .inner_margin(egui::Margin::symmetric(PAD_CARD_H, PAD_CARD_V))
+}
+
+/// A faint white veil, as a premultiplied colour built directly.
+/// `Color32::from_white_alpha` builds in *linear* light and gamma-encodes
+/// it, so a "3 %" veil lands near 20 % grey — far too bright on AMOLED
+/// black. `veil(8)` really is ~3 %.
+pub fn veil(level: u8) -> egui::Color32 {
+    egui::Color32::from_rgba_premultiplied(level, level, level, level)
+}
+
+/// Liquid-glass material, painted directly: a dark translucent body
+/// (keeps true-black AMOLED depth), a soft vertical sheen, a specular
+/// highlight along the top edge, a hairline rim and a faint drop
+/// shadow. Overlays can't blur what's behind them (SteamVR never gives
+/// us those pixels), so depth comes from light, not blur.
+pub fn glass(p: &egui::Painter, r: egui::Rect, radius: f32) {
+    // Shadow: a few widening, fading rings below the slab.
+    for (grow, a) in [(10.0_f32, 0x0C_u8), (5.0, 0x18), (2.0, 0x26)] {
+        p.rect_filled(r.translate(egui::vec2(0.0, 4.0)).expand(grow), radius + grow, egui::Color32::from_black_alpha(a));
+    }
+    // Near-opaque black body: true black on OLED, the world only just
+    // breathing through in VR.
+    p.rect_filled(r, radius, egui::Color32::from_black_alpha(236));
+    // Sheen: brighter at the top, fading down (stacked bands).
+    let bands = 8;
+    for i in 0..bands {
+        let t0 = i as f32 / bands as f32;
+        let band = egui::Rect::from_min_max(
+            egui::pos2(r.left(), r.top() + r.height() * t0 * 0.6),
+            egui::pos2(r.right(), r.top() + r.height() * (t0 + 1.0 / bands as f32) * 0.6),
+        );
+        let a = ((1.0 - t0) * 5.0) as u8;
+        let rr = if i == 0 { egui::Rounding { nw: radius, ne: radius, sw: 0.0, se: 0.0 } } else { egui::Rounding::ZERO };
+        p.rect_filled(band, rr, veil(a));
+    }
+    // Specular rim light along the top edge.
+    let inset = radius * 0.9;
+    p.line_segment(
+        [egui::pos2(r.left() + inset, r.top() + 1.0), egui::pos2(r.right() - inset, r.top() + 1.0)],
+        egui::Stroke::new(1.2_f32, veil(0x50)),
+    );
+    p.rect_stroke(r, radius, egui::Stroke::new(1.0_f32, veil(0x1E)));
 }
 
 /// A card frame with the pill radius — used for toasts.

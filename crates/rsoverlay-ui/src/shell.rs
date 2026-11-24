@@ -133,7 +133,7 @@ fn nav_item(ui: &mut egui::Ui, p: Page, selected: bool, badge: usize, accent: eg
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), NAV_ITEM_H), egui::Sense::click());
     let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered() && !selected, motion::FAST);
     if hover > 0.0 {
-        ui.painter().rect_filled(rect, theme::RADIUS_CARD, egui::Color32::from_white_alpha((hover * 10.0) as u8));
+        ui.painter().rect_filled(rect, theme::RADIUS_CARD, crate::theme::veil((hover * 10.0) as u8));
     }
     // Icon + label tint cross-fade into the accent as the row activates.
     let on = motion::toggle(ui.ctx(), resp.id.with("sel"), selected, motion::MEDIUM);
@@ -161,11 +161,14 @@ fn nav_item(ui: &mut egui::Ui, p: Page, selected: bool, badge: usize, accent: eg
 
 /// SteamVR-style dock: a centred row of large icon tiles (VR dashboard).
 pub fn dock(ui: &mut egui::Ui, page: &mut Page, badge: usize, keyboard: &mut bool, accent: egui::Color32) {
-    const TILE: egui::Vec2 = egui::vec2(86.0, 72.0);
-    const GAP: f32 = 8.0;
+    const TILE: egui::Vec2 = egui::vec2(76.0, 70.0);
+    const GAP: f32 = 6.0;
     // Pages + a Keyboard toggle tile at the end.
     let n = Page::ALL.len() as f32 + 1.0;
     let total = n * TILE.x + (n - 1.0) * GAP;
+    let left = ui.max_rect().left() + ((ui.available_width() - total) / 2.0).max(0.0);
+    let capsule = egui::Rect::from_min_size(egui::pos2(left - 10.0, ui.cursor().top() - 8.0), egui::vec2(total + 20.0, TILE.y + 16.0));
+    theme::glass(ui.painter(), capsule, 30.0);
     ui.horizontal(|ui| {
         ui.add_space(((ui.available_width() - total) / 2.0).max(0.0));
         ui.spacing_mut().item_spacing.x = GAP;
@@ -174,8 +177,8 @@ pub fn dock(ui: &mut egui::Ui, page: &mut Page, badge: usize, keyboard: &mut boo
             let selected = *page == p;
             let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
             let on = motion::toggle(ui.ctx(), resp.id.with("sel"), selected, motion::MEDIUM);
-            let base = motion::mix(theme::BG_CARD, egui::Color32::from_rgb(0x1C, 0x20, 0x26), hover);
-            ui.painter().rect_filled(rect, 14.0, motion::mix(base, accent.gamma_multiply(0.18), on));
+            let base = crate::theme::veil((hover * 16.0) as u8);
+            ui.painter().rect_filled(rect, 22.0, motion::mix(base, accent.gamma_multiply(0.2), on));
             let tint = motion::mix(theme::FG_MUTED, accent, on);
             let icon_rect = egui::Rect::from_center_size(rect.center() - egui::vec2(0.0, 10.0), egui::vec2(28.0, 28.0));
             icon(p.icon(), 28.0, tint).paint_at(ui, icon_rect);
@@ -200,8 +203,8 @@ pub fn dock(ui: &mut egui::Ui, page: &mut Page, badge: usize, keyboard: &mut boo
         let (rect, resp) = ui.allocate_exact_size(TILE, egui::Sense::click());
         let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
         let on = motion::toggle(ui.ctx(), resp.id.with("on"), *keyboard, motion::MEDIUM);
-        let base = motion::mix(theme::BG_CARD, egui::Color32::from_rgb(0x1C, 0x20, 0x26), hover);
-        ui.painter().rect_filled(rect, 14.0, motion::mix(base, accent.gamma_multiply(0.18), on));
+        let base = crate::theme::veil((hover * 16.0) as u8);
+        ui.painter().rect_filled(rect, 22.0, motion::mix(base, accent.gamma_multiply(0.2), on));
         let tint = motion::mix(theme::FG_MUTED, accent, on);
         icon(icons::KEYBOARD, 28.0, tint).paint_at(ui, egui::Rect::from_center_size(rect.center() - egui::vec2(0.0, 10.0), egui::vec2(28.0, 28.0)));
         ui.painter().text(rect.center_bottom() - egui::vec2(0.0, 12.0), egui::Align2::CENTER_CENTER, "Keyboard",
@@ -234,7 +237,7 @@ fn search_box(ui: &mut egui::Ui, st: &mut SearchState, entries: &[crate::search:
     let edit = ui.add(
         egui::TextEdit::singleline(&mut st.query)
             .hint_text("Search settings, pages, windows…")
-            .desired_width(260.0),
+            .desired_width(160.0),
     );
     if edit.changed() {
         st.selected = 0;
@@ -330,7 +333,9 @@ pub fn header(
             }
             ui.add_space(8.0);
             // Battery chips, right-to-left so the HMD ends up leftmost.
-            for b in batteries.iter().rev() {
+            // At most three chips so the header never collides with
+            // search (the full list lives in the Battery card).
+            for b in batteries.iter().take(3).rev() {
                 battery_chip(ui, b, accent);
             }
         });
@@ -413,7 +418,7 @@ pub fn paint_beam(ctx: &egui::Context) {
         let t1 = (i + 1) as f32 / n as f32;
         let a = ((t0 / 0.35).min(1.0) * 255.0) as u8;
         let seg = egui::Rect::from_min_max(egui::pos2(r.left() + t0 * r.width(), r.top()), egui::pos2(r.left() + t1 * r.width(), r.bottom()));
-        p.rect_filled(seg, 0.0, egui::Color32::from_white_alpha(a));
+        p.rect_filled(seg, 0.0, crate::theme::veil(a));
     }
 }
 

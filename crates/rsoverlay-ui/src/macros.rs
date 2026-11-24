@@ -105,7 +105,7 @@ impl MacroDeck {
                         if enabled {
                             accent.gamma_multiply(0.5)
                         } else {
-                            egui::Color32::from_white_alpha(0x18)
+                            crate::theme::veil(0x18)
                         },
                     ));
                     let hover = hover_text(&parsed, injector, &e.keys);

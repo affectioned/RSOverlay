@@ -182,8 +182,7 @@ pub fn frame(
     let mut out = WidgetAction::default();
     egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
         let full = ui.max_rect().shrink(4.0);
-        ui.painter().rect_filled(full, 22.0, theme::BG_ROOT);
-        ui.painter().rect_stroke(full, 22.0, egui::Stroke::new(1.5_f32, accent.gamma_multiply(0.3)));
+        theme::glass(ui.painter(), full.shrink(8.0), 30.0);
         let inner = full.shrink2(egui::vec2(14.0, 10.0));
         let tab_r = egui::Rect::from_min_size(inner.min, egui::vec2(inner.width(), TAB_H));
         let bar_r = egui::Rect::from_min_max(egui::pos2(inner.left(), inner.bottom() - BAR_H), inner.max);

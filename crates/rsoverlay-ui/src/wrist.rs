@@ -81,12 +81,6 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         let cell = r1.width() / shown.len().max(1) as f32;
         for (slot, (i, (src, tip, on))) in shown.into_iter().enumerate() {
             let c = egui::Rect::from_min_size(egui::pos2(r1.left() + slot as f32 * cell, r1.top()), egui::vec2(cell, r1.height()));
-            if slot > 0 {
-                ui.painter().line_segment(
-                    [egui::pos2(c.left(), c.top() + 16.0), egui::pos2(c.left(), c.bottom() - 16.0)],
-                    egui::Stroke::new(1.0_f32, egui::Color32::from_white_alpha(0x14)),
-                );
-            }
             if icon_button(ui, c.shrink(6.0), src, 26.0, on, tip, accent) {
                 match i {
                     0 => act.open_page = Some(Page::Desktop),
@@ -105,7 +99,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         slab(ui, r2, accent);
         let half = r2.width() * 0.42;
         let sel = egui::Rect::from_min_size(r2.min, egui::vec2(half, r2.height())).shrink(6.0);
-        ui.painter().rect_filled(sel, 10.0, egui::Color32::from_rgb(0x16, 0x19, 0x1E));
+        ui.painter().rect_filled(sel, sel.height() / 2.0, crate::theme::veil(0x0E));
         let arrow_w = 34.0;
         let prev_r = egui::Rect::from_min_size(sel.min, egui::vec2(arrow_w, sel.height()));
         let next_r = egui::Rect::from_min_size(egui::pos2(sel.right() - arrow_w, sel.top()), egui::vec2(arrow_w, sel.height()));
@@ -129,7 +123,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         for (i, (src, tip, on, enabled)) in tool_defs.into_iter().enumerate() {
             let c = egui::Rect::from_min_size(egui::pos2(tools.left() + i as f32 * tw, tools.top()), egui::vec2(tw, tools.height()));
             if !enabled {
-                icon(src, 20.0, egui::Color32::from_white_alpha(0x30)).paint_at(ui, egui::Rect::from_center_size(c.center(), egui::vec2(20.0, 20.0)));
+                icon(src, 20.0, crate::theme::veil(0x30)).paint_at(ui, egui::Rect::from_center_size(c.center(), egui::vec2(20.0, 20.0)));
             } else if icon_button(ui, c.shrink(2.0), src, 20.0, on, tip, accent) {
                 act.layout = Some(match i {
                     0 => LayoutAction::ToggleFavorite(d.slot),
@@ -154,7 +148,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         p.text(r3.left_top() + egui::vec2(18.0, 82.0), egui::Align2::LEFT_TOP, format!("{:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60),
             egui::FontId::monospace(theme::SIZE_CAPTION + 2.0), theme::FG_MUTED);
         let views = egui::Rect::from_min_max(egui::pos2(r3.center().x - 6.0, r3.top() + 10.0), egui::pos2(r3.right() - 10.0, r3.top() + 98.0));
-        ui.painter().rect_filled(views, 14.0, egui::Color32::from_white_alpha(0x0A));
+        ui.painter().rect_filled(views, 22.0, crate::theme::veil(0x0C));
         let vw = views.width() / 3.0;
         let view_defs: [(egui::ImageSource<'static>, &str); 3] =
             [(icons::LAYERS, "Windows & monitors"), (icons::MUSIC, "Media & volume"), (icons::CHART, "Performance")];
@@ -170,7 +164,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         }
         if let Some(title) = d.title {
             let m = egui::Rect::from_min_max(egui::pos2(r3.left() + 10.0, r3.top() + 108.0), egui::pos2(r3.right() - 10.0, r3.bottom() - 8.0));
-            ui.painter().rect_filled(m, 12.0, egui::Color32::from_white_alpha(0x0A));
+            ui.painter().rect_filled(m, 12.0, crate::theme::veil(0x0A));
             let text_r = egui::Rect::from_min_max(m.min + egui::vec2(14.0, 6.0), egui::pos2(m.right() - 150.0, m.bottom() - 6.0));
             let tp = ui.painter_at(text_r);
             tp.text(text_r.left_top(), egui::Align2::LEFT_TOP, title, egui::FontId::proportional(theme::SIZE_BODY), theme::FG_PRIMARY);
@@ -206,7 +200,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
                 let src = if b.label == "HMD" { icons::HEADSET } else { icons::CONTROLLER };
                 icon(src, 22.0, col).paint_at(ui, egui::Rect::from_center_size(egui::pos2(c.left() + 18.0, c.center().y - 4.0), egui::vec2(22.0, 22.0)));
                 let bar = egui::Rect::from_min_size(egui::pos2(c.left() + 6.0, c.bottom() - 7.0), egui::vec2(24.0, 4.0));
-                ui.painter().rect_filled(bar, 2.0, egui::Color32::from_white_alpha(0x20));
+                ui.painter().rect_filled(bar, 2.0, crate::theme::veil(0x20));
                 ui.painter().rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(24.0 * b.fraction.clamp(0.0, 1.0), 4.0)), 2.0, col);
                 let txt = match (b.charging, d.estimates.get(i).cloned().flatten()) {
                     (true, _) => format!("⚡{pct}%"),
@@ -221,17 +215,16 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
     act
 }
 
-fn slab(ui: &egui::Ui, r: egui::Rect, accent: egui::Color32) {
-    ui.painter().rect_filled(r, 22.0, egui::Color32::from_black_alpha(242));
-    ui.painter().rect_stroke(r, 22.0, egui::Stroke::new(1.2_f32, accent.gamma_multiply(0.22)));
+fn slab(ui: &egui::Ui, r: egui::Rect, _accent: egui::Color32) {
+    theme::glass(ui.painter(), r, r.height().min(56.0) / 2.0 + 6.0);
 }
 
 fn icon_button(ui: &mut egui::Ui, r: egui::Rect, src: egui::ImageSource<'static>, size: f32, on: bool, tip: &str, accent: egui::Color32) -> bool {
     let resp = ui.interact(r, ui.id().with(tip), egui::Sense::click()).on_hover_text(tip);
     let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
     if hover > 0.0 || on {
-        let fill = if on { accent.gamma_multiply(0.22) } else { egui::Color32::from_white_alpha((hover * 18.0) as u8) };
-        ui.painter().rect_filled(r, 12.0, fill);
+        let fill = if on { accent.gamma_multiply(0.22) } else { crate::theme::veil((hover * 18.0) as u8) };
+        ui.painter().rect_filled(r, r.height().min(r.width()) / 2.0, fill);
     }
     let tint = if on { accent } else { motion::mix(theme::FG_PRIMARY, accent, hover) };
     icon(src, size, tint).paint_at(ui, egui::Rect::from_center_size(r.center(), egui::vec2(size, size)));
@@ -242,7 +235,7 @@ fn glyph_button(ui: &mut egui::Ui, r: egui::Rect, g: crate::glyphs::Glyph, tip: 
     let resp = ui.interact(r, ui.id().with(tip), egui::Sense::click()).on_hover_text(tip);
     let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
     if hover > 0.0 {
-        ui.painter().rect_filled(r, 10.0, egui::Color32::from_white_alpha((hover * 18.0) as u8));
+        ui.painter().rect_filled(r, 10.0, crate::theme::veil((hover * 18.0) as u8));
     }
     crate::glyphs::draw(ui.painter(), g, r.center(), 14.0, motion::mix(theme::FG_PRIMARY, accent, hover));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
