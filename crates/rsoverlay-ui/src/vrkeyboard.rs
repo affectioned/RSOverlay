@@ -116,6 +116,9 @@ pub struct VrKeyboard {
     iso: bool,
     /// Pinned: can't be grabbed/moved.
     pub locked_pos: bool,
+    /// Focused window is elevated and we aren't (cached, 0.5 s).
+    blocked: bool,
+    blocked_at: f64,
 }
 
 #[derive(Debug, Default)]
@@ -198,6 +201,10 @@ impl VrKeyboard {
         accent: egui::Color32,
     ) -> KbFrame {
         self.refresh_labels(time);
+        if time - self.blocked_at > 0.5 {
+            self.blocked_at = time;
+            self.blocked = rsoverlay_input::elevation::foreground_input_blocked();
+        }
         let mut out = KbFrame::default();
         let screen = ctx.screen_rect();
         let painter = ctx.layer_painter(egui::LayerId::background());
@@ -207,8 +214,14 @@ impl VrKeyboard {
         painter.rect_filled(card, 24.0, theme::BG_ROOT);
         painter.rect_stroke(card, 24.0, egui::Stroke::new(1.5_f32, accent.gamma_multiply(0.3)));
         let bar = egui::Rect::from_min_size(card.min + egui::vec2(16.0, 6.0), egui::vec2(card.width() - 32.0, TOP_BAR));
-        painter.text(bar.left_center(), egui::Align2::LEFT_CENTER, "KEYBOARD",
-            egui::FontId::proportional(theme::SIZE_CAPTION + 1.0), theme::FG_MUTED);
+        if self.blocked {
+            painter.text(bar.left_center(), egui::Align2::LEFT_CENTER,
+                "Focused window runs as administrator — Windows (UAC) blocks VR typing; use your PC keyboard",
+                egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), theme::DANGER);
+        } else {
+            painter.text(bar.left_center(), egui::Align2::LEFT_CENTER, "KEYBOARD",
+                egui::FontId::proportional(theme::SIZE_CAPTION + 1.0), theme::FG_MUTED);
+        }
         let close_r = egui::Rect::from_center_size(bar.right_center() - egui::vec2(18.0, 0.0), egui::vec2(36.0, 32.0));
         let lock_r = close_r.translate(egui::vec2(-46.0, 0.0));
 

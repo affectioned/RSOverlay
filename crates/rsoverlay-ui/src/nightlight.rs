@@ -104,7 +104,7 @@ impl NightLight {
             ui.horizontal(|ui| {
                 for m in NightMode::ALL {
                     let sel = self.mode == m;
-                    let text = egui::RichText::new(m.label()).color(if sel { accent } else { theme::FG_MUTED });
+                    let text = egui::RichText::new(m.label()).color(if sel { theme::BG_ROOT } else { theme::FG_MUTED });
                     if ui.selectable_label(sel, text).clicked() {
                         self.mode = m;
                     }

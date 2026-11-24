@@ -226,6 +226,17 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Opt-in elevation (Settings → Administrator). Relaunch through the
+    // UAC prompt; if the user declines, carry on unelevated.
+    if config.vr.run_as_admin && !rsoverlay_input::elevation::current_process_elevated() {
+        let argv: Vec<String> = std::env::args().skip(1).collect();
+        if rsoverlay_input::elevation::relaunch_elevated(&argv) {
+            info!("relaunched elevated; exiting this instance");
+            return Ok(());
+        }
+        tracing::warn!("elevation declined — admin windows will be view-only");
+    }
+
     let mode = args.mode();
     info!("starting RSOverlay in {:?} mode", mode);
 
@@ -304,7 +315,7 @@ fn main() -> Result<()> {
         RuntimeMode::VrPreview => {
             preview_vr::run(notify_rx, test_cfg, config.clone(), config_path.clone())
         }
-        RuntimeMode::Vr => vr::run(notify_rx, rt_handle.clone(), config.clone(), osc),
+        RuntimeMode::Vr => vr::run(notify_rx, rt_handle.clone(), config.clone(), config_path.clone(), osc),
     };
 
     // Give the runtime a bounded shutdown window so background tasks drain.

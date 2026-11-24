@@ -30,11 +30,14 @@ pub struct VrCfg {
     /// Panels fade out when viewed more than this many degrees off-axis.
     pub clip_angle: f32,
     pub wrist_opacity: f32,
+    /// Relaunch elevated at startup so laser/keyboard input can reach
+    /// "Run as administrator" windows (Windows UIPI blocks it otherwise).
+    pub run_as_admin: bool,
 }
 
 impl Default for VrCfg {
     fn default() -> Self {
-        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0 }
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false }
     }
 }
 

@@ -218,6 +218,14 @@ pub struct DevView {
     /// VR: panels fade out beyond this off-axis view angle (degrees).
     pub vr_clip_angle: f32,
     pub vr_wrist_opacity: f32,
+    pub run_as_admin: bool,
+    /// Set by the app: is this process elevated right now?
+    pub elevated: bool,
+    /// "Restart as admin now" clicked; the app relaunches via UAC.
+    pub restart_elevated_requested: bool,
+    /// Reset button armed at this egui time (two-step confirm — VR has
+    /// no dialogs).
+    reset_armed_at: Option<f64>,
     pub night_light: crate::nightlight::NightLight,
     /// Overlay colour multiplier (rgb) + opacity (a) for this frame;
     /// the app hands it to the compositor / preview shaders.
@@ -276,6 +284,10 @@ impl Default for DevView {
             vr_left_handed: false,
             vr_clip_angle: 60.0,
             vr_wrist_opacity: 1.0,
+            run_as_admin: false,
+            elevated: false,
+            restart_elevated_requested: false,
+            reset_armed_at: None,
             night_light: crate::nightlight::NightLight::default(),
             tint: [1.0; 4],
             last_frame_time: None,
@@ -654,15 +666,78 @@ impl DevView {
                     self.night_light.card(l, minute_of_day(), accent);
                     l.add_space(theme::GUTTER);
                     vr_card(l, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, accent);
+                    l.add_space(theme::GUTTER);
+                    if admin_card(l, &mut self.run_as_admin, self.elevated, accent) {
+                        self.restart_elevated_requested = true;
+                    }
                     placement_card(r, &mut self.placement, accent);
                     r.add_space(theme::GUTTER);
                     stats_card(r, self.frame, self.last_fps, self.notifications_received, accent);
+                    r.add_space(theme::GUTTER);
+                    if reset_card(r, &mut self.reset_armed_at) {
+                        self.reset_requested = true;
+                    }
                     lp.allocate_rect(l.min_rect(), egui::Sense::hover());
                     rp.allocate_rect(r.min_rect(), egui::Sense::hover());
                 });
             }
         }
     }
+}
+
+/// Returns true when "Restart as admin now" is clicked.
+fn admin_card(ui: &mut egui::Ui, run_as_admin: &mut bool, elevated: bool, accent: egui::Color32) -> bool {
+    let mut restart = false;
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::SETTINGS, "Administrator", accent);
+        ui.add_space(6.0);
+        ui.checkbox(run_as_admin, "Run as administrator")
+            .on_hover_text("Windows blocks VR input to apps running as administrator unless RSOverlay is elevated too. Applies at next launch.");
+        ui.add_space(4.0);
+        if elevated {
+            ui.label(egui::RichText::new("running elevated — input reaches admin windows").color(accent).size(theme::SIZE_CAPTION + 1.0));
+        } else {
+            ui.label(theme::body_muted("not elevated — admin windows are view-only"));
+            if *run_as_admin && ui.button(egui::RichText::new("Restart as admin now").color(accent)).clicked() {
+                restart = true;
+            }
+        }
+    });
+    restart
+}
+
+/// Two-step "Reset all settings": first click arms for 4 s, second
+/// confirms. Returns true on confirm.
+fn reset_card(ui: &mut egui::Ui, armed_at: &mut Option<f64>) -> bool {
+    let now = ui.input(|i| i.time);
+    if armed_at.is_some_and(|t| now - t > 4.0) {
+        *armed_at = None;
+    }
+    let mut confirmed = false;
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::SETTINGS, "Reset", theme::DANGER);
+        ui.add_space(6.0);
+        let (label, color) = if armed_at.is_some() {
+            ("Tap again to reset everything", theme::DANGER)
+        } else {
+            ("Reset all settings", theme::FG_PRIMARY)
+        };
+        let btn = egui::Button::new(egui::RichText::new(label).color(color)).min_size(egui::vec2(ui.available_width(), 36.0));
+        if ui.add(btn).on_hover_text("Accent, cards, placement, night light, VR, macros — back to defaults").clicked() {
+            if armed_at.is_some() {
+                *armed_at = None;
+                confirmed = true;
+            } else {
+                *armed_at = Some(now);
+            }
+        }
+        if armed_at.is_some() {
+            ui.ctx().request_repaint();
+        }
+    });
+    confirmed
 }
 
 fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opacity: &mut f32, accent: egui::Color32) {
@@ -674,7 +749,7 @@ fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opac
             ui.label(theme::body_muted("Laser hand"));
             for (lh, label) in [(false, "Right"), (true, "Left")] {
                 let sel = *left_handed == lh;
-                if ui.selectable_label(sel, egui::RichText::new(label).color(if sel { accent } else { theme::FG_MUTED })).clicked() {
+                if ui.selectable_label(sel, egui::RichText::new(label).color(if sel { theme::BG_ROOT } else { theme::FG_MUTED })).clicked() {
                     *left_handed = lh;
                 }
             }
@@ -792,7 +867,7 @@ fn placement_card(ui: &mut egui::Ui, p: &mut Placement, accent: egui::Color32) {
             for a in [Anchor::Wrist, Anchor::Hmd, Anchor::World] {
                 let selected = p.anchor == a;
                 let label = egui::RichText::new(a.label())
-                    .color(if selected { accent } else { theme::FG_MUTED });
+                    .color(if selected { theme::BG_ROOT } else { theme::FG_MUTED });
                 if ui.selectable_label(selected, label).clicked() {
                     p.anchor = a;
                 }

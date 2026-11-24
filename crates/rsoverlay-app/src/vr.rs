@@ -269,6 +269,9 @@ mod imp {
         /// (device index, device-local pose) while docked to head/hand.
         rel: Option<(u32, Affine3A)>,
         last_hit: Option<(i32, i32)>,
+        /// UIPI: target elevated and we aren't (re-checked every second).
+        input_blocked: bool,
+        blocked_checked: Option<Instant>,
     }
 
     /// An in-progress grab (XSO model): the panel rides the laser at
@@ -340,6 +343,7 @@ mod imp {
         _notify: Option<NotifyChannel>,
         rt: Handle,
         config: rsoverlay_core::Config,
+        config_path: std::path::PathBuf,
         osc: Option<rsoverlay_osc::OscClient>,
     ) -> Result<()> {
         let vr = OpenVr::init().context("OpenVR init")?;
@@ -366,7 +370,12 @@ mod imp {
 
         let mut dev_view = DevView::default();
         crate::preview::seed_dev_view(&mut dev_view, &config, &crate::preview::TestHooks::default());
+        info!("elevated: {}", dev_view.elevated);
         dev_view.dock_layout = true;
+        // VR mode persists like the desktop modes: edits in the headset
+        // survive a restart, hand-edits to config.toml hot-reload.
+        let mut persister = crate::preview::ConfigPersister::new(config_path, config.clone());
+        let config_base = config.clone();
         let injector = rsoverlay_input::InputInjector::new().ok();
 
         let running = Arc::new(AtomicBool::new(true));
@@ -771,7 +780,16 @@ mod imp {
                                 let _ = overlay.set_transform_absolute(panel.handle, &from_affine(&world));
                                 panel.set_visible(&overlay, true);
                                 info!("window overlay opened: {}", src.label());
-                                wins.push(WinOverlay { panel, mirror, attach: Attach::World, world, rel: None, last_hit: None });
+                                wins.push(WinOverlay {
+                                    panel,
+                                    mirror,
+                                    attach: Attach::World,
+                                    world,
+                                    rel: None,
+                                    last_hit: None,
+                                    input_blocked: false,
+                                    blocked_checked: None,
+                                });
                             }
                             Err(e) => {
                                 warn!("window capture failed: {e:#}");
@@ -790,10 +808,15 @@ mod imp {
                 let lf = w.panel.laser.update(win_samples.get(k).map_or(&[][..], |v| v.as_slice()), dt);
                 win_haptics.extend(lf.haptic);
                 let accent = dev_view.accent;
-                let (title, handle_m, attach, cursor) = (w.mirror.source.label(), w.mirror.handle(), w.attach, lf.cursor);
+                if w.blocked_checked.is_none_or(|t| t.elapsed() >= Duration::from_secs(1)) {
+                    w.blocked_checked = Some(Instant::now());
+                    w.input_blocked = w.mirror.window_hwnd().is_some_and(rsoverlay_input::elevation::input_blocked);
+                }
+                let (title, handle_m, attach, cursor, blocked) =
+                    (w.mirror.source.label(), w.mirror.handle(), w.attach, lf.cursor, w.input_blocked);
                 let mut act = window_panel::WindowPanelAction::default();
                 w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
-                    act = window_panel::show(ctx, &title, Some(handle_m), attach, accent);
+                    act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, accent);
                     laser::paint_cursor(ctx, cursor, accent);
                 });
                 // Laser over the content drives the real window.
@@ -879,6 +902,28 @@ mod imp {
                     if let Err(e) = client.send_chat(msg) {
                         warn!("osc: {e:#}");
                     }
+                }
+            }
+
+            // ── Settings lifecycle: reset, external edits, persistence,
+            // elevated restart.
+            if dev_view.reset_requested {
+                crate::preview::seed_dev_view(&mut dev_view, &rsoverlay_core::Config::default(), &crate::preview::TestHooks::default());
+                dev_view.reset_requested = false;
+            }
+            if let Some(cfg) = persister.poll_external_change() {
+                crate::preview::seed_dev_view(&mut dev_view, &cfg, &crate::preview::TestHooks::default());
+            }
+            persister.tick(&crate::preview::config_from_dev_view(&dev_view, &config_base));
+            if std::mem::take(&mut dev_view.restart_elevated_requested) {
+                persister.tick(&crate::preview::config_from_dev_view(&dev_view, &config_base));
+                persister.flush();
+                let args: Vec<String> = std::env::args().skip(1).collect();
+                if rsoverlay_input::elevation::relaunch_elevated(&args) {
+                    info!("relaunching elevated");
+                    running.store(false, Ordering::SeqCst);
+                } else {
+                    warn!("elevated relaunch cancelled or failed");
                 }
             }
 

@@ -118,6 +118,8 @@ pub fn seed_dev_view(
     dev.vr_left_handed = cfg.vr.left_handed;
     dev.vr_clip_angle = cfg.vr.clip_angle.clamp(30.0, 90.0);
     dev.vr_wrist_opacity = cfg.vr.wrist_opacity.clamp(0.2, 1.0);
+    dev.run_as_admin = cfg.vr.run_as_admin;
+    dev.elevated = rsoverlay_input::elevation::current_process_elevated();
     dev.battery_osc.enabled = cfg.osc.battery_params;
     dev.battery_osc.prefix = cfg.osc.battery_prefix.trim_matches('/').to_string();
     dev.reduce_motion = cfg.appearance.reduce_motion;
@@ -233,6 +235,7 @@ pub fn config_from_dev_view(
         left_handed: dev.vr_left_handed,
         clip_angle: dev.vr_clip_angle,
         wrist_opacity: dev.vr_wrist_opacity,
+        run_as_admin: dev.run_as_admin,
     };
     out.appearance.reduce_motion = dev.reduce_motion;
     out.macros = rsoverlay_core::config::Macros(
@@ -925,6 +928,16 @@ pub fn run(
                             let base = rsoverlay_core::Config::default();
                             seed_dev_view(&mut dev_view, &base, &TestHooks::default());
                             dev_view.reset_requested = false;
+                        }
+                        if std::mem::take(&mut dev_view.restart_elevated_requested) {
+                            persister.tick(&config_from_dev_view(&dev_view, &config_base));
+                            persister.flush();
+                            let args: Vec<String> = std::env::args().skip(1).collect();
+                            if rsoverlay_input::elevation::relaunch_elevated(&args) {
+                                elwt.exit();
+                            } else {
+                                warn!("elevated relaunch cancelled or failed");
+                            }
                         }
 
                         // Pick up external edits (user opened

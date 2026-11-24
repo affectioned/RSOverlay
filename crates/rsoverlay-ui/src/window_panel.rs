@@ -52,6 +52,7 @@ pub fn show(
     title: &str,
     mirror: Option<MirrorHandle>,
     attach: Attach,
+    input_blocked: bool,
     accent: egui::Color32,
 ) -> WindowPanelAction {
     let mut out = WindowPanelAction::default();
@@ -71,7 +72,9 @@ pub fn show(
                     rect,
                     egui::Image::new((m.id, rect.size())).uv(m.uv).rounding(8.0).sense(egui::Sense::click()),
                 );
-                if let Some(pos) = resp.hover_pos().or_else(|| resp.interact_pointer_pos()) {
+                if input_blocked {
+                    uac_banner(ui, rect);
+                } else if let Some(pos) = resp.hover_pos().or_else(|| resp.interact_pointer_pos()) {
                     let u = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                     let v = ((pos.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
                     out.hit = Some(MirrorHit {
@@ -106,6 +109,25 @@ pub fn show(
         });
     });
     out
+}
+
+/// Shown over an elevated window's capture when RSOverlay isn't elevated:
+/// Windows (UIPI) drops our input, so say so instead of failing silently.
+fn uac_banner(ui: &egui::Ui, content: egui::Rect) {
+    let w = (content.width() - 40.0).min(720.0);
+    let r = egui::Rect::from_min_size(egui::pos2(content.center().x - w / 2.0, content.top() + 20.0), egui::vec2(w, 92.0));
+    let p = ui.painter();
+    p.rect_filled(r, 14.0, egui::Color32::from_black_alpha(230));
+    p.rect_stroke(r, 14.0, egui::Stroke::new(1.5_f32, theme::DANGER));
+    p.text(r.center_top() + egui::vec2(0.0, 26.0), egui::Align2::CENTER_CENTER,
+        "This window is running as administrator",
+        egui::FontId::proportional(theme::SIZE_CARD_TITLE), theme::DANGER);
+    p.text(r.center_top() + egui::vec2(0.0, 58.0), egui::Align2::CENTER_CENTER,
+        "Windows (UAC) blocks VR input to it — use your PC's mouse/keyboard,",
+        egui::FontId::proportional(theme::SIZE_BODY), theme::FG_PRIMARY);
+    p.text(r.center_top() + egui::vec2(0.0, 78.0), egui::Align2::CENTER_CENTER,
+        "or enable Settings → Administrator → Run as administrator.",
+        egui::FontId::proportional(theme::SIZE_BODY), theme::FG_MUTED);
 }
 
 fn pill(ui: &mut egui::Ui, text: &str, on: bool, accent: egui::Color32) -> egui::Response {
