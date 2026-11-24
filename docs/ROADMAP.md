@@ -93,8 +93,7 @@ macros, DPI-correct input, dock-anywhere panels. The VR preview's
 - **OpenXR path alongside OpenVR.** Opens the door for the flight-sim
   crowd on non-SteamVR runtimes. *OVR #2.*
 - **Linux / Wayland capture backend** via PipeWire + xdg-desktop-portal.
-  *OVR #1 — the single loudest
-  OVRT ask.*
+  *OVR #1, the single loudest OVRT ask.*
 - **End-user customization beyond accent.** Density presets, layout
   grid override, per-panel opacity, saved "profiles" users can swap at
   runtime. VR text size already ships (Accessibility); groundwork is in
