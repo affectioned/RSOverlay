@@ -35,17 +35,19 @@ pub enum Page {
     Chat,
     Macros,
     Notifications,
+    Layouts,
     Settings,
 }
 
 impl Page {
-    pub const ALL: [Page; 7] = [
+    pub const ALL: [Page; 8] = [
         Page::Home,
         Page::Desktop,
         Page::Audio,
         Page::Chat,
         Page::Macros,
         Page::Notifications,
+        Page::Layouts,
         Page::Settings,
     ];
 
@@ -57,6 +59,7 @@ impl Page {
             Self::Chat => "Chat",
             Self::Macros => "Macros",
             Self::Notifications => "Notifications",
+            Self::Layouts => "Layouts",
             Self::Settings => "Settings",
         }
     }
@@ -69,6 +72,7 @@ impl Page {
             Self::Chat => "chat",
             Self::Macros => "macros",
             Self::Notifications => "notifications",
+            Self::Layouts => "layouts",
             Self::Settings => "settings",
         }
     }
@@ -85,6 +89,7 @@ impl Page {
             Self::Chat => icons::CHAT,
             Self::Macros => icons::GRID,
             Self::Notifications => icons::BELL,
+            Self::Layouts => icons::BRAND,
             Self::Settings => icons::SETTINGS,
         }
     }
@@ -156,7 +161,7 @@ fn nav_item(ui: &mut egui::Ui, p: Page, selected: bool, badge: usize, accent: eg
 
 /// SteamVR-style dock: a centred row of large icon tiles (VR dashboard).
 pub fn dock(ui: &mut egui::Ui, page: &mut Page, badge: usize, accent: egui::Color32) {
-    const TILE: egui::Vec2 = egui::vec2(96.0, 72.0);
+    const TILE: egui::Vec2 = egui::vec2(92.0, 72.0);
     const GAP: f32 = 10.0;
     let n = Page::ALL.len() as f32;
     let total = n * TILE.x + (n - 1.0) * GAP;

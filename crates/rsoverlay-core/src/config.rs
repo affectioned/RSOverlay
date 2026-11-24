@@ -40,11 +40,15 @@ pub struct VrCfg {
     /// Fine-tune the laser's pitch on top of SteamVR's tip pose, degrees
     /// (negative = aim lower).
     pub laser_angle: f32,
+    /// 0 = raw cursor, 1 = heavy smoothing (velocity-adaptive).
+    pub cursor_smoothing: f32,
+    /// Stick scroll speed multiplier.
+    pub scroll_speed: f32,
 }
 
 impl Default for VrCfg {
     fn default() -> Self {
-        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0 }
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0 }
     }
 }
 

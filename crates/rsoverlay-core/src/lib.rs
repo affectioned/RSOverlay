@@ -1,6 +1,7 @@
 //! Shared types and lifecycle primitives used across RSOverlay crates.
 
 pub mod config;
+pub mod layouts;
 pub mod panel;
 pub mod runtime;
 

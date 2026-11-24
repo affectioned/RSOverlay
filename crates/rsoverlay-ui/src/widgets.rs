@@ -47,6 +47,18 @@ impl WidgetKind {
         }
     }
 
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::NowPlaying => "now-playing",
+            Self::System => "system",
+            Self::Volume => "volume",
+            Self::Battery => "battery",
+            Self::Macros => "macros",
+            Self::Chat => "chat",
+            Self::Notifications => "notifications",
+        }
+    }
+
     /// `system`, `now-playing`, … (CLI / config).
     pub fn from_slug(s: &str) -> Option<Self> {
         Self::from_caption(match s {

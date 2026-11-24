@@ -51,6 +51,8 @@ fn static_entries() -> Vec<Entry> {
         card("Reduce motion", "Settings › Accessibility", "animation transitions", Settings, "Accessibility"),
         card("Run as administrator", "Settings › Administrator", "uac admin elevated permissions", Settings, "Administrator"),
         card("Reset all settings", "Settings › Reset", "defaults factory restore", Settings, "Reset"),
+        card("Cursor smoothing", "Settings › Pointer", "jitter steady laser", Settings, "Pointer"),
+        card("Scroll speed", "Settings › Pointer", "wheel scrolling", Settings, "Pointer"),
         card("Placement", "Settings", "position offset size curve curvature opacity anchor", Settings, "Placement"),
         card("Performance stats", "Settings › Stats", "fps frame time cpu ram vram memory footprint light fast", Settings, "Stats"),
         card("Volume mixer", "Audio", "sound mute master app volume", Audio, "Volume"),
@@ -152,7 +154,7 @@ mod tests {
         for e in static_entries() {
             if let Target::Card(_, cap) = e.target {
                 assert!(
-                    ["Appearance", "Night light", "VR", "Accessibility", "Administrator", "Reset", "Placement", "Stats",
+                    ["Appearance", "Night light", "VR", "Pointer", "Accessibility", "Administrator", "Reset", "Placement", "Stats",
                         "Volume", "Now playing", "VRChat chatbox", "Macros", "Notifications", "Battery", "System"]
                         .contains(&cap),
                     "{cap}"

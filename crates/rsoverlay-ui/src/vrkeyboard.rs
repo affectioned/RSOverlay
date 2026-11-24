@@ -123,6 +123,10 @@ pub struct VrKeyboard {
     pub locked_pos: bool,
     /// Opt-in typematic repeat for typing. Off = real hold (games).
     pub auto_repeat: bool,
+    /// VRChat mode: keys build a message here; Enter sends it to the
+    /// chatbox (OSC) instead of typing into the desktop.
+    pub vrchat: bool,
+    vrc_buf: String,
     /// Focused window is elevated and we aren't (cached, 0.5 s).
     blocked: bool,
     blocked_at: f64,
@@ -134,6 +138,8 @@ pub struct KbFrame {
     pub close: bool,
     /// Typing into an RSOverlay text field: events for that panel.
     pub text: Vec<egui::Event>,
+    /// VRChat mode: message to send to the chatbox (Enter pressed).
+    pub chat: Option<String>,
 }
 
 fn slot(h: Hand) -> usize {
@@ -281,7 +287,11 @@ impl VrKeyboard {
         painter.rect_filled(card, 24.0, theme::BG_ROOT);
         painter.rect_stroke(card, 24.0, egui::Stroke::new(1.5_f32, accent.gamma_multiply(0.3)));
         let bar = egui::Rect::from_min_size(card.min + egui::vec2(16.0, 6.0), egui::vec2(card.width() - 32.0, TOP_BAR));
-        if internal {
+        if self.vrchat {
+            let shown = if self.vrc_buf.is_empty() { "VRChat message… (Enter sends)".to_string() } else { format!("{}|", self.vrc_buf) };
+            painter.text(bar.left_center(), egui::Align2::LEFT_CENTER, shown,
+                egui::FontId::proportional(theme::SIZE_BODY), if self.vrc_buf.is_empty() { theme::FG_MUTED } else { theme::FG_PRIMARY });
+        } else if internal {
             painter.text(bar.left_center(), egui::Align2::LEFT_CENTER, "TYPING INTO RSOVERLAY",
                 egui::FontId::proportional(theme::SIZE_CAPTION + 1.0), accent);
         } else if self.blocked {
@@ -295,6 +305,9 @@ impl VrKeyboard {
         let close_r = egui::Rect::from_center_size(bar.right_center() - egui::vec2(18.0, 0.0), egui::vec2(36.0, 32.0));
         let lock_r = close_r.translate(egui::vec2(-46.0, 0.0));
         let repeat_r = egui::Rect::from_center_size(lock_r.center() - egui::vec2(86.0, 0.0), egui::vec2(116.0, 32.0));
+        let vrc_r = egui::Rect::from_center_size(repeat_r.center() - egui::vec2(112.0, 0.0), egui::vec2(96.0, 32.0));
+        let paste_r = egui::Rect::from_center_size(vrc_r.center() - egui::vec2(88.0, 0.0), egui::vec2(72.0, 32.0));
+        let copy_r = egui::Rect::from_center_size(paste_r.center() - egui::vec2(80.0, 0.0), egui::vec2(72.0, 32.0));
 
         let area = egui::Rect::from_min_max(egui::pos2(card.left() + 12.0, bar.bottom() + 4.0), card.max - egui::vec2(12.0, 12.0));
         let unit = area.width() / 15.0;
@@ -336,10 +349,53 @@ impl VrKeyboard {
                     out.haptic.push(hand);
                     continue;
                 }
+                if vrc_r.contains(p) {
+                    self.vrchat = !self.vrchat;
+                    out.haptic.push(hand);
+                    continue;
+                }
+                if copy_r.contains(p) || paste_r.contains(p) {
+                    // Ctrl+C / Ctrl+V as real chords (or egui copy when
+                    // typing into RSOverlay itself).
+                    out.haptic.push(hand);
+                    let v = paste_r.contains(p);
+                    if internal {
+                        if !v {
+                            out.text.push(egui::Event::Copy);
+                        }
+                    } else {
+                        let key = ScanKey::new(if v { 0x2F } else { 0x2E });
+                        let ctrl = ScanKey::new(0x1D);
+                        let _ = physical::send_scan(ctrl, true);
+                        let _ = physical::send_scan(key, true);
+                        let _ = physical::send_scan(key, false);
+                        let _ = physical::send_scan(ctrl, false);
+                    }
+                    continue;
+                }
                 if let Some(k) = key_at(p) {
                     out.haptic.push(hand);
                     match k.kind {
-                        Kind::Mod(m, _) => self.press_mod(k.k, m, time, internal),
+                        Kind::Mod(m, _) => self.press_mod(k.k, m, time, internal || self.vrchat),
+                        _ if self.vrchat => {
+                            // Compose a chatbox message locally.
+                            match (k.kind, k.k.scan) {
+                                (Kind::Char, _) => {
+                                    if let Some(t) = self.labels.get(&k.k) {
+                                        self.vrc_buf.push_str(t);
+                                    }
+                                }
+                                (_, 0x39) => self.vrc_buf.push(' '),
+                                (_, 0x0E) => {
+                                    self.vrc_buf.pop();
+                                }
+                                (_, 0x1C) => out.chat = Some(std::mem::take(&mut self.vrc_buf)),
+                                (_, 0x01) => self.vrc_buf.clear(),
+                                _ => {}
+                            }
+                            self.release_sticky();
+                            self.label_at = f64::NEG_INFINITY;
+                        }
                         _ if internal => {
                             // RSOverlay text field focused: type into it,
                             // never into the desktop.
@@ -406,7 +462,7 @@ impl VrKeyboard {
         }
 
         // Bar buttons — vector-drawn so they never depend on font coverage.
-        for (r, on) in [(lock_r, self.locked_pos), (close_r, false), (repeat_r, self.auto_repeat)] {
+        for (r, on) in [(lock_r, self.locked_pos), (close_r, false), (repeat_r, self.auto_repeat), (vrc_r, self.vrchat), (copy_r, false), (paste_r, false)] {
             let hover = hovered.iter().any(|p| r.contains(*p));
             let fill = if on { accent.gamma_multiply(0.3) } else if hover { egui::Color32::from_rgb(0x2A, 0x2F, 0x37) } else { egui::Color32::from_rgb(0x16, 0x19, 0x1E) };
             painter.rect_filled(r, 10.0, fill);
@@ -414,6 +470,10 @@ impl VrKeyboard {
         let stroke = egui::Stroke::new(2.0_f32, theme::FG_PRIMARY);
         draw_lock(&painter, lock_r.center(), self.locked_pos, if self.locked_pos { egui::Stroke::new(2.0_f32, accent) } else { stroke });
         draw_close(&painter, close_r.center(), stroke);
+        for (r, t, on) in [(vrc_r, "VRChat", self.vrchat), (copy_r, "Copy", false), (paste_r, "Paste", false)] {
+            painter.text(r.center(), egui::Align2::CENTER_CENTER, t,
+                egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), if on { accent } else { theme::FG_PRIMARY });
+        }
         painter.text(repeat_r.center(), egui::Align2::CENTER_CENTER,
             if self.auto_repeat { "repeat: on" } else { "hold: real" },
             egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), if self.auto_repeat { accent } else { theme::FG_PRIMARY });

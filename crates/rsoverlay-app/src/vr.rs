@@ -361,6 +361,103 @@ mod imp {
         }
     }
 
+    fn open_window(
+        overlay: &rsoverlay_openvr::Overlay<'_>,
+        gpu: &GpuCtx,
+        seq: u32,
+        src: rsoverlay_ui::views::CaptureSource,
+        world: Affine3A,
+        icons: &std::collections::HashMap<isize, egui::ColorImage>,
+    ) -> Result<WinOverlay> {
+        let key = format!("rsoverlay.win.{seq}");
+        let mut panel = VrPanel::new(overlay, gpu, &key, &src.label(), WIN_TEX, WIN_PPP, WIN_WIDTH_M, 0.0)?;
+        let mirror = match GpuMirror::start(gpu, &mut panel.egui, src.clone()) {
+            Ok(m) => m,
+            Err(e) => {
+                panel.destroy(overlay);
+                return Err(e);
+            }
+        };
+        let icon = match &src {
+            rsoverlay_ui::views::CaptureSource::Window { hwnd, .. } => icons
+                .get(hwnd)
+                .map(|img| panel.egui.ctx.load_texture("window-icon", img.clone(), egui::TextureOptions::LINEAR)),
+            _ => None,
+        };
+        let _ = overlay.set_transform_absolute(panel.handle, &from_affine(&world));
+        panel.set_visible(overlay, true);
+        info!("window overlay opened: {}", src.label());
+        Ok(WinOverlay {
+            panel,
+            mirror: Some(mirror),
+            widgets: None,
+            attach: Attach::World,
+            world,
+            rel: None,
+            last_hit: None,
+            input_blocked: false,
+            blocked_checked: None,
+            icon,
+            down: None,
+            wheel_acc: 0.0,
+        })
+    }
+
+    fn attach_slug(a: Attach) -> &'static str {
+        match a {
+            Attach::World => "world",
+            Attach::Head => "head",
+            Attach::LeftHand => "left",
+            Attach::RightHand => "right",
+        }
+    }
+
+    fn attach_from_slug(s: &str) -> Attach {
+        match s {
+            "head" => Attach::Head,
+            "left" => Attach::LeftHand,
+            "right" => Attach::RightHand,
+            _ => Attach::World,
+        }
+    }
+
+    /// Snapshot the floating arrangement into a layout.
+    fn capture_layout(wins: &[WinOverlay], kb: Option<(Affine3A, f32)>) -> rsoverlay_core::layouts::Layout {
+        use rsoverlay_core::layouts::{KeyboardPose, Layout, LayoutPanel};
+        let panels = wins
+            .iter()
+            .map(|w| {
+                let (kind, title, monitor, widgets) = match (&w.mirror, &w.widgets) {
+                    (_, Some((tabs, _))) => ("widgets", String::new(), 0, tabs.iter().map(|k| k.slug().to_string()).collect()),
+                    (Some(m), _) => match &m.source {
+                        rsoverlay_ui::views::CaptureSource::Monitor(i) => ("monitor", String::new(), *i, Vec::new()),
+                        rsoverlay_ui::views::CaptureSource::Window { title, .. } => ("window", title.clone(), 0, Vec::new()),
+                    },
+                    _ => ("widgets", String::new(), 0, Vec::new()),
+                };
+                let pose = match w.rel {
+                    Some((_, rel)) => rel,
+                    None => w.world,
+                };
+                LayoutPanel {
+                    kind: kind.into(),
+                    title,
+                    monitor,
+                    widgets,
+                    attach: attach_slug(w.attach).into(),
+                    pose: from_affine(&pose).m,
+                    width: w.panel.width_m,
+                }
+            })
+            .collect();
+        Layout {
+            name: String::new(),
+            saved_unix: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
+            panels,
+            keyboard: kb.map(|(p, width)| KeyboardPose { pose: from_affine(&p).m, width }),
+        }
+    }
+
     fn new_widget(
         overlay: &rsoverlay_openvr::Overlay<'_>,
         gpu: &GpuCtx,
@@ -501,6 +598,10 @@ mod imp {
         let mut dash_pose: Option<Affine3A> = None;
         let mut grab: Option<Grab> = None;
         let mut wins: Vec<WinOverlay> = Vec::new();
+        let layouts_path = rsoverlay_core::layouts::Layouts::path();
+        dev_view.layouts = rsoverlay_core::layouts::Layouts::load(&layouts_path);
+        // The favourite layout loads once controllers/HMD are tracked.
+        let mut favorite_pending = dev_view.layouts.favorite;
         let mut kb = VrPanel::new(&overlay, &gpu, "rsoverlay.keyboard", "RSOverlay Keyboard", KB_TEX, KB_PPP, KB_WIDTH_M, 0.0)?;
         // Laser beams: static white strip textures rendered once, tinted
         // and stretched per frame. Sorted above every panel.
@@ -917,6 +1018,12 @@ mod imp {
                 }
             }
 
+            // Pointer settings (Settings › Pointer) on every panel's laser.
+            for p in [&mut wrist.laser, &mut dash.laser].into_iter().chain(wins.iter_mut().map(|w| &mut w.panel.laser)) {
+                p.smoothing = dev_view.cursor_smoothing;
+                p.scroll_mult = dev_view.scroll_speed;
+            }
+
             // Accessibility text size.
             let scale = dev_view.vr_ui_scale.clamp(0.8, 1.6);
             wrist.apply_scale(scale);
@@ -1059,6 +1166,9 @@ mod imp {
                     }
                 });
                 kb_haptics = kf.haptic;
+                if let Some(msg) = kf.chat.take() {
+                    dev_view.send_chat(msg);
+                }
                 if !kf.text.is_empty() {
                     typed.extend(kf.text);
                     typed_target = text_target;
@@ -1077,48 +1187,15 @@ mod imp {
                 if wins.iter().filter(|w| w.mirror.is_some()).count() >= MAX_WINDOWS || wins.len() >= MAX_FLOATING {
                     warn!("window overlay limit ({MAX_WINDOWS}) reached");
                 } else if let Some(h) = &hmd {
+                    // Behind the dashboard, fanned to the right per
+                    // already-open window.
+                    let base = summon_pose(h);
+                    let fwd = -base.matrix3.z_axis;
+                    let side = base.matrix3.x_axis * (0.25 * wins.len() as f32);
+                    let world = Affine3A { translation: base.translation + fwd * 0.20 + side, ..base };
                     win_seq += 1;
-                    let key = format!("rsoverlay.win.{win_seq}");
-                    match VrPanel::new(&overlay, &gpu, &key, &src.label(), WIN_TEX, WIN_PPP, WIN_WIDTH_M, 0.0) {
-                        Ok(mut panel) => match GpuMirror::start(&gpu, &mut panel.egui, src.clone()) {
-                            Ok(mirror) => {
-                                let icon_tex = match &src {
-                                    rsoverlay_ui::views::CaptureSource::Window { hwnd, .. } => {
-                                        dev_view.sources.icons.get(hwnd).map(|img| {
-                                            panel.egui.ctx.load_texture("window-icon", img.clone(), egui::TextureOptions::LINEAR)
-                                        })
-                                    }
-                                    _ => None,
-                                };
-                                // Behind the dashboard, fanned to the right
-                                // per already-open window.
-                                let base = summon_pose(h);
-                                let fwd = -base.matrix3.z_axis;
-                                let side = base.matrix3.x_axis * (0.25 * wins.len() as f32);
-                                let world = Affine3A { translation: base.translation + fwd * 0.20 + side, ..base };
-                                let _ = overlay.set_transform_absolute(panel.handle, &from_affine(&world));
-                                panel.set_visible(&overlay, true);
-                                info!("window overlay opened: {}", src.label());
-                                wins.push(WinOverlay {
-                                    panel,
-                                    mirror: Some(mirror),
-                                    widgets: None,
-                                    attach: Attach::World,
-                                    world,
-                                    rel: None,
-                                    last_hit: None,
-                                    input_blocked: false,
-                                    blocked_checked: None,
-                                    icon: icon_tex,
-                                    down: None,
-                                    wheel_acc: 0.0,
-                                });
-                            }
-                            Err(e) => {
-                                warn!("window capture failed: {e:#}");
-                                panel.destroy(&overlay);
-                            }
-                        },
+                    match open_window(&overlay, &gpu, win_seq, src, world, &dev_view.sources.icons) {
+                        Ok(w) => wins.push(w),
                         Err(e) => warn!("window overlay: {e:#}"),
                     }
                 }
@@ -1286,6 +1363,104 @@ mod imp {
                 }
             }
             dev_view.open_windows = wins.iter().filter_map(|w| w.mirror.as_ref().map(|m| m.source.clone())).collect();
+
+            // ── Layouts: save / load / favourite / clear. The favourite
+            // loads once tracking is up.
+            if hmd.is_some() {
+                if let Some(i) = favorite_pending.take() {
+                    if dev_view.layouts.slot(i).is_some() {
+                        dev_view.layout_request = Some(rsoverlay_ui::layouts_page::LayoutAction::Load(i));
+                    }
+                }
+            }
+            if let Some(action) = dev_view.layout_request.take() {
+                use rsoverlay_ui::layouts_page::LayoutAction;
+                match action {
+                    LayoutAction::Save(i) => {
+                        let kbp = kb.visible.then_some(kb_pose).flatten().map(|p| (p, kb.width_m));
+                        let layout = capture_layout(&wins, kbp);
+                        info!("layout saved to slot {} ({} panels)", i + 1, layout.panels.len());
+                        dev_view.layouts.set(i, Some(layout));
+                    }
+                    LayoutAction::Clear(i) => dev_view.layouts.set(i, None),
+                    LayoutAction::ToggleFavorite(i) => {
+                        dev_view.layouts.favorite = if dev_view.layouts.favorite == Some(i) { None } else { Some(i) };
+                    }
+                    LayoutAction::Load(i) => {
+                        if let Some(layout) = dev_view.layouts.slot(i).cloned() {
+                            for mut w in wins.drain(..) {
+                                if let Some(m) = w.mirror.take() {
+                                    m.shutdown(&mut w.panel.egui);
+                                }
+                                w.panel.destroy(&overlay);
+                            }
+                            grab = None;
+                            let sources = list_sources();
+                            fetch_icons(&sources, &mut dev_view.sources.icons);
+                            for p in &layout.panels {
+                                let pose = to_affine(&HmdMatrix34_t { m: p.pose });
+                                let attach = attach_from_slug(&p.attach);
+                                let dev = match attach {
+                                    Attach::World => None,
+                                    Attach::Head => Some(0),
+                                    Attach::LeftHand => system.as_ref().and_then(|s| s.hand_index(Hand::Left)),
+                                    Attach::RightHand => system.as_ref().and_then(|s| s.hand_index(Hand::Right)),
+                                };
+                                // Relative poses need a world fallback for
+                                // the first frame / missing device.
+                                let world = dev
+                                    .and_then(|d| device_pose(d, hmd.as_ref(), &controllers))
+                                    .map_or(pose, |d| d * pose);
+                                win_seq += 1;
+                                let opened = match p.kind.as_str() {
+                                    "widgets" => {
+                                        let tabs: Vec<WidgetKind> = p.widgets.iter().filter_map(|s| WidgetKind::from_slug(s)).collect();
+                                        (!tabs.is_empty()).then(|| new_widget(&overlay, &gpu, win_seq, tabs, world))
+                                    }
+                                    "monitor" => Some(open_window(&overlay, &gpu, win_seq, rsoverlay_ui::views::CaptureSource::Monitor(p.monitor), world, &dev_view.sources.icons)),
+                                    _ => {
+                                        // Exact title, else same leading text
+                                        // (titles change: "Discord — #general").
+                                        let head: String = p.title.chars().take(12).collect();
+                                        sources
+                                            .iter()
+                                            .find(|s| s.label() == p.title)
+                                            .or_else(|| sources.iter().find(|s| matches!(s, rsoverlay_ui::views::CaptureSource::Window { .. }) && !head.is_empty() && s.label().starts_with(&head)))
+                                            .map(|src| open_window(&overlay, &gpu, win_seq, src.clone(), world, &dev_view.sources.icons))
+                                    }
+                                };
+                                match opened {
+                                    Some(Ok(mut w)) => {
+                                        w.panel.set_width(&overlay, p.width);
+                                        if let (Some(d), false) = (dev, attach == Attach::World) {
+                                            if overlay.set_transform_device_relative(w.panel.handle, d, &from_affine(&pose)).is_ok() {
+                                                w.rel = Some((d, pose));
+                                                w.attach = attach;
+                                            }
+                                        }
+                                        w.world = world;
+                                        wins.push(w);
+                                    }
+                                    Some(Err(e)) => warn!("layout: reopening {:?}: {e:#}", p.title),
+                                    None => warn!("layout: window {:?} isn't open — skipped", p.title),
+                                }
+                            }
+                            if let Some(k) = &layout.keyboard {
+                                let p = to_affine(&HmdMatrix34_t { m: k.pose });
+                                let _ = overlay.set_transform_absolute(kb.handle, &from_affine(&p));
+                                kb.set_width(&overlay, k.width);
+                                kb_pose = Some(p);
+                                dev_view.show_keyboard = true;
+                                kb.set_visible(&overlay, true);
+                            }
+                            info!("layout slot {} loaded ({} panels)", i + 1, wins.len());
+                        }
+                    }
+                }
+                if let Err(e) = dev_view.layouts.save(&layouts_path) {
+                    warn!("saving layouts: {e:#}");
+                }
+            }
 
             // ── Haptic ticks for clicks on any panel.
             if let Some(sys) = &system {
@@ -1522,6 +1697,14 @@ mod imp {
     mod tests {
         use super::*;
         use rsoverlay_openvr::pose_offset_pitch;
+
+        #[test]
+        fn attach_slugs_roundtrip() {
+            for a in Attach::ALL {
+                assert_eq!(attach_from_slug(attach_slug(a)), a);
+            }
+            assert_eq!(attach_from_slug("garbage"), Attach::World);
+        }
 
         #[test]
         fn affine_roundtrip() {

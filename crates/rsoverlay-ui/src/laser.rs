@@ -68,6 +68,12 @@ pub struct LaserInput {
     dragging: bool,
     /// Button of the current press (release must match it).
     press_button: Option<egui::PointerButton>,
+    /// 0 = raw, 1 = heavy. Velocity-adaptive: slow moves are steadied,
+    /// fast moves pass through (XSO-style "responsive when fast").
+    pub smoothing: f32,
+    /// Stick-scroll multiplier (Settings › Pointer).
+    pub scroll_mult: f32,
+    smoothed: Option<egui::Pos2>,
 }
 
 fn slot(h: Hand) -> usize {
@@ -112,7 +118,20 @@ impl LaserInput {
         }
 
         let sample = self.active.and_then(|h| samples.iter().find(|s| s.hand == h));
-        let hit = sample.and_then(|s| s.hit);
+        let hit = sample.and_then(|s| s.hit).map(|p| {
+            let s = self.smoothing.clamp(0.0, 1.0);
+            let prev = self.smoothed.unwrap_or(p);
+            // Follow factor: 1 at speed (≥ 30 pt/frame), down to 1 − 0.9·s
+            // when nearly still.
+            let speed = (p - prev).length();
+            let k = (1.0 - 0.9 * s) + 0.9 * s * (speed / 30.0).min(1.0);
+            let q = prev + (p - prev) * k;
+            self.smoothed = Some(q);
+            q
+        });
+        if hit.is_none() {
+            self.smoothed = None;
+        }
 
         // Stabilise: while held and within the slop, report the anchor.
         let hit = hit.map(|pos| match self.press_anchor {
@@ -155,7 +174,8 @@ impl LaserInput {
             if hit.is_some() && s.stick_y.abs() > DEAD_ZONE {
                 // Re-scale past the dead zone so scrolling starts at 0.
                 let mag = (s.stick_y.abs() - DEAD_ZONE) / (1.0 - DEAD_ZONE);
-                out.events.push(egui::Event::Scroll(egui::vec2(0.0, s.stick_y.signum() * mag * SCROLL_SPEED * dt)));
+                let mult = if self.scroll_mult > 0.0 { self.scroll_mult } else { 1.0 };
+                out.events.push(egui::Event::Scroll(egui::vec2(0.0, s.stick_y.signum() * mag * SCROLL_SPEED * mult * dt)));
             }
         } else if self.pressed {
             // Owner lost tracking mid-drag: end the drag cleanly.
@@ -311,6 +331,20 @@ mod tests {
         smp.button = egui::PointerButton::Primary;
         let f = l.update(&[smp], 0.011);
         assert!(f.events.iter().any(|e| matches!(e, egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: false, .. })));
+    }
+
+    #[test]
+    fn smoothing_steadies_slow_moves_but_follows_fast_ones() {
+        let mut l = LaserInput { smoothing: 1.0, ..Default::default() };
+        l.update(&[s(Hand::Right, Some((100.0, 100.0)), 0.0)], 0.011);
+        // Tiny tremor: mostly absorbed.
+        let f = l.update(&[s(Hand::Right, Some((102.0, 100.0)), 0.0)], 0.011);
+        let egui::Event::PointerMoved(p) = f.events[0] else { panic!() };
+        assert!(p.x < 101.0, "{p:?}");
+        // Big sweep: follows (almost) fully.
+        let f = l.update(&[s(Hand::Right, Some((300.0, 100.0)), 0.0)], 0.011);
+        let egui::Event::PointerMoved(p) = f.events[0] else { panic!() };
+        assert!(p.x > 295.0, "{p:?}");
     }
 
     #[test]

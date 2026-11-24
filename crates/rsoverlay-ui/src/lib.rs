@@ -13,6 +13,7 @@ pub mod icons;
 pub mod keyboard;
 pub mod keyboard_layout;
 pub mod laser;
+pub mod layouts_page;
 pub mod locale;
 pub mod macros;
 pub mod media;
@@ -131,7 +132,7 @@ mod glyph_coverage {
     /// Every non-ASCII symbol still drawn as *text*. Anything egui's
     /// bundled fonts lack renders as an empty box — those are drawn as
     /// vectors via `glyphs` instead, and must not appear here.
-    const TEXT_SYMBOLS: &[&str] = &["×", "⚡", "▣", "🖵", "♪", "⏮", "⏭", "▶", "⏸", "🔇", "🔊", "—", "…", "·"];
+    const TEXT_SYMBOLS: &[&str] = &["★", "☆", "×", "⚡", "▣", "🖵", "♪", "⏮", "⏭", "▶", "⏸", "🔇", "🔊", "—", "…", "·"];
 
     #[test]
     fn every_text_symbol_has_a_glyph() {

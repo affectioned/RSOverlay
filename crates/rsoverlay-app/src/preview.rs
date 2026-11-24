@@ -125,6 +125,8 @@ pub fn seed_dev_view(
     dev.vr_ui_scale = cfg.vr.ui_scale.clamp(0.8, 1.6);
     dev.vr_show_lasers = cfg.vr.show_lasers;
     dev.vr_laser_angle = cfg.vr.laser_angle.clamp(-30.0, 30.0);
+    dev.cursor_smoothing = cfg.vr.cursor_smoothing.clamp(0.0, 1.0);
+    dev.scroll_speed = cfg.vr.scroll_speed.clamp(0.25, 3.0);
     dev.elevated = rsoverlay_input::elevation::current_process_elevated();
     dev.battery_osc.enabled = cfg.osc.battery_params;
     dev.battery_osc.prefix = cfg.osc.battery_prefix.trim_matches('/').to_string();
@@ -248,6 +250,8 @@ pub fn config_from_dev_view(
         ui_scale: dev.vr_ui_scale,
         show_lasers: dev.vr_show_lasers,
         laser_angle: dev.vr_laser_angle,
+        cursor_smoothing: dev.cursor_smoothing,
+        scroll_speed: dev.scroll_speed,
     };
     out.appearance.reduce_motion = dev.reduce_motion;
     out.macros = rsoverlay_core::config::Macros(
@@ -626,6 +630,8 @@ pub fn run(
     );
     let mut dev_view = DevView::default();
     seed_dev_view(&mut dev_view, &app_config, &test);
+    // Show saved VR layouts (read-only here; saving/loading happens in VR).
+    dev_view.layouts = rsoverlay_core::layouts::Layouts::load(&rsoverlay_core::layouts::Layouts::path());
     let mut persister = ConfigPersister::new(config_path.clone(), app_config.clone());
     let config_base = app_config.clone();
     let mut fps_counter = FpsCounter::new();

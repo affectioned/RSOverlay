@@ -265,6 +265,13 @@ pub struct DevView {
     /// "Restart as admin now" clicked; the app relaunches via UAC.
     pub restart_elevated_requested: bool,
     pub search: crate::shell::SearchState,
+    /// Saved VR layouts (loaded/saved by the app).
+    pub layouts: rsoverlay_core::layouts::Layouts,
+    /// Layout slot action requested from the Layouts page.
+    pub layout_request: Option<crate::layouts_page::LayoutAction>,
+    /// XSO-style knobs: cursor smoothing 0..1, scroll speed multiplier.
+    pub cursor_smoothing: f32,
+    pub scroll_speed: f32,
     /// Reset button armed at this egui time (two-step confirm — VR has
     /// no dialogs).
     reset_armed_at: Option<f64>,
@@ -338,6 +345,10 @@ impl Default for DevView {
             restart_elevated_requested: false,
             reset_armed_at: None,
             search: crate::shell::SearchState::default(),
+            layouts: Default::default(),
+            layout_request: None,
+            cursor_smoothing: 0.5,
+            scroll_speed: 1.0,
             night_light: crate::nightlight::NightLight::default(),
             tint: [1.0; 4],
             last_frame_time: None,
@@ -463,6 +474,13 @@ impl DevView {
             .map(|b| self.battery_est.estimate(b).filter(|e| !e.charging).map(|e| crate::battery::format_duration(e.secs)))
             .collect();
         crate::wrist::show(ctx, &self.batteries, &est, playing, track.as_deref(), self.unread, self.accent)
+    }
+
+    /// Queue a VRChat chatbox message (e.g. from the VR keyboard).
+    pub fn send_chat(&mut self, text: String) {
+        if !text.trim().is_empty() {
+            self.pending_chat = Some(rsoverlay_osc::ChatMessage { text, send_immediately: true, play_notification: true });
+        }
     }
 
     /// Record this frame's render cost (ms) for the Performance card.
@@ -771,6 +789,11 @@ impl DevView {
                 }
             }
             Page::Macros => self.macros.card(ui, injector, accent),
+            Page::Layouts => {
+                if let Some(a) = crate::layouts_page::page(ui, &self.layouts, self.dock_layout, accent) {
+                    self.layout_request = Some(a);
+                }
+            }
             Page::Notifications => {
                 if history_card(ui, &self.history, accent) {
                     self.clear_all_notifications();
@@ -810,6 +833,8 @@ impl DevView {
                     self.night_light.card(l, minute_of_day(), accent);
                     l.add_space(theme::GUTTER);
                     vr_card(l, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, accent);
+                    l.add_space(theme::GUTTER);
+                    pointer_card(l, &mut self.cursor_smoothing, &mut self.scroll_speed, accent);
                     l.add_space(theme::GUTTER);
                     accessibility_card(l, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.reduce_motion, accent);
                     l.add_space(theme::GUTTER);
@@ -932,6 +957,24 @@ fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opac
         ui.horizontal(|ui| {
             ui.label(theme::body_muted("Wrist opacity"));
             ui.add(egui::Slider::new(wrist_opacity, 0.2..=1.0).fixed_decimals(2));
+        });
+    });
+}
+
+fn pointer_card(ui: &mut egui::Ui, smoothing: &mut f32, scroll: &mut f32, accent: egui::Color32) {
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::POINTER, "Pointer", accent);
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Cursor smoothing"));
+            ui.add(egui::Slider::new(smoothing, 0.0..=1.0).fixed_decimals(2));
+        })
+        .response
+        .on_hover_text("Steadier cursor when moving slowly; stays responsive when moving fast");
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Scroll speed"));
+            ui.add(egui::Slider::new(scroll, 0.25..=3.0).fixed_decimals(2).suffix("×"));
         });
     });
 }
@@ -1211,6 +1254,10 @@ fn history_entry_row(ui: &mut egui::Ui, entry: &HistoryEntry) {
             ui.label(theme::body_muted(&entry.n.content));
         }
     });
+}
+
+pub fn relative_time_secs(secs: u64) -> String {
+    relative_time(Duration::from_secs(secs))
 }
 
 fn relative_time(d: Duration) -> String {
