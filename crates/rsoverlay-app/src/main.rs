@@ -154,6 +154,14 @@ struct Args {
     /// Preview the VR wrist watch-face instead of the dashboard.
     #[arg(long)]
     wrist: bool,
+
+    /// Preview a VR widget group, e.g. `--widgets system,volume`.
+    #[arg(long, value_name = "KINDS")]
+    widgets: Option<String>,
+
+    /// Preview the VR keyboard panel (labels from the live layout).
+    #[arg(long)]
+    vr_keyboard: bool,
 }
 
 fn parse_vec3(s: &str) -> Result<(f32, f32, f32), String> {
@@ -301,6 +309,8 @@ fn main() -> Result<()> {
         page: args.page.clone(),
         dock: args.dock,
         wrist: args.wrist,
+        widgets: args.widgets.clone(),
+        vr_keyboard: args.vr_keyboard,
     };
 
     let result = match mode {

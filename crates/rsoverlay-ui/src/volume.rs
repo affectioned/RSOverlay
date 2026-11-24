@@ -21,6 +21,7 @@ impl VolumeCard {
                 ui.add(icon(icons::SPEAKER, 18.0, accent));
                 ui.add_space(6.0);
                 ui.label(theme::caption("Volume"));
+                crate::widgets::popout_button(ui, "Volume", accent);
             });
             ui.add_space(6.0);
             let Some(master) = snap.master else {

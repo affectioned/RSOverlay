@@ -6,7 +6,10 @@
 //!   (`ToUnicodeEx`), refreshed as focus / modifiers change.
 //! - **Both hands** type at once — each laser is its own finger; no
 //!   single egui pointer.
-//! - **Hold to repeat** (450 ms delay, ~28 Hz), like hardware typematic.
+//! - **Real holding**: one key-down on press, one key-up on release,
+//!   nothing in between — a held key reads as *held* to games (raw input
+//!   / GetAsyncKeyState), not as a burst of presses. Typing-style
+//!   auto-repeat is an opt-in toggle on the bar.
 //! - **Modifiers**: tap = sticky for the next key, double-tap = locked
 //!   until tapped again.
 
@@ -72,7 +75,7 @@ fn rows(iso: bool) -> [Vec<Key>; 5] {
             .collect(),
         std::iter::once(named(ScanKey::new(0x3A), 1.75, "Caps"))
             .chain((0x1E..=0x28).map(ch))
-            .chain(std::iter::once(named(ScanKey::new(0x1C), 2.25, "Enter")))
+            .chain(std::iter::once(named(ScanKey::new(0x1C), 2.25, "⏎")))
             .collect(),
         r3,
         vec![
@@ -116,6 +119,8 @@ pub struct VrKeyboard {
     iso: bool,
     /// Pinned: can't be grabbed/moved.
     pub locked_pos: bool,
+    /// Opt-in typematic repeat for typing. Off = real hold (games).
+    pub auto_repeat: bool,
     /// Focused window is elevated and we aren't (cached, 0.5 s).
     blocked: bool,
     blocked_at: f64,
@@ -151,7 +156,11 @@ impl VrKeyboard {
         }
         self.label_key = Some((hkl, mods));
         self.label_at = time;
-        self.iso = physical::key_label(ISO_KEY, LabelMods::default(), hkl).is_some();
+        // ISO layouts give the extra key its own character (DE "<" vs "#",
+        // UK "\\" vs "#"); ANSI layouts like US merely alias it to the
+        // backslash key, so only show it when it differs.
+        let iso_label = physical::key_label(ISO_KEY, LabelMods::default(), hkl);
+        self.iso = iso_label.is_some() && iso_label != physical::key_label(ScanKey::new(0x2B), LabelMods::default(), hkl);
         self.labels.clear();
         for row in rows(self.iso) {
             for k in row.into_iter().filter(|k| k.kind == Kind::Char) {
@@ -224,6 +233,7 @@ impl VrKeyboard {
         }
         let close_r = egui::Rect::from_center_size(bar.right_center() - egui::vec2(18.0, 0.0), egui::vec2(36.0, 32.0));
         let lock_r = close_r.translate(egui::vec2(-46.0, 0.0));
+        let repeat_r = egui::Rect::from_center_size(lock_r.center() - egui::vec2(86.0, 0.0), egui::vec2(116.0, 32.0));
 
         let area = egui::Rect::from_min_max(egui::pos2(card.left() + 12.0, bar.bottom() + 4.0), card.max - egui::vec2(12.0, 12.0));
         let unit = area.width() / 15.0;
@@ -260,6 +270,11 @@ impl VrKeyboard {
                     out.haptic.push(hand);
                     continue;
                 }
+                if repeat_r.contains(p) {
+                    self.auto_repeat = !self.auto_repeat;
+                    out.haptic.push(hand);
+                    continue;
+                }
                 if let Some(k) = key_at(p) {
                     out.haptic.push(hand);
                     match k.kind {
@@ -277,8 +292,8 @@ impl VrKeyboard {
                     // Shift/AltGr may have dropped: relabel now.
                     self.label_at = f64::NEG_INFINITY;
                 }
-            } else if let Some((k, down_at, last)) = self.held[s] {
-                // Typematic repeat: key-down again, no key-up, like hardware.
+            } else if let Some((k, down_at, last)) = self.held[s].filter(|_| self.auto_repeat) {
+                // Opt-in typematic repeat: key-down again, no key-up.
                 if time - down_at > REPEAT_DELAY && time - last > REPEAT_EVERY {
                     let _ = physical::send_scan(k, true);
                     self.held[s] = Some((k, down_at, time));
@@ -306,17 +321,24 @@ impl VrKeyboard {
             if mod_locked {
                 painter.rect_stroke(*rect, 10.0, egui::Stroke::new(2.0_f32, accent));
             }
+            // Size from the smaller key dimension: correct at any panel aspect.
+            let em = row_h.min(unit);
             let (text, size) = match k.kind {
-                Kind::Char => (self.labels.get(&k.k).cloned().unwrap_or_default(), row_h * 0.38),
-                Kind::Named(l) | Kind::Mod(_, l) => (l.to_string(), row_h * 0.26),
+                Kind::Char => (self.labels.get(&k.k).cloned().unwrap_or_default(), em * 0.42),
+                Kind::Named(l) | Kind::Mod(_, l) => (l.to_string(), em * 0.27),
             };
             let caps_on = k.k == ScanKey::new(0x3A) && physical::caps_lock_on();
             let color = if caps_on { accent } else { theme::FG_PRIMARY };
-            painter.text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(size), color);
+            match crate::glyphs::Glyph::from_label(&text) {
+                Some(g) => crate::glyphs::draw(&painter, g, rect.center(), row_h.min(unit) * 0.34, color),
+                None => {
+                    painter.text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(size), color);
+                }
+            }
         }
 
         // Bar buttons — vector-drawn so they never depend on font coverage.
-        for (r, on) in [(lock_r, self.locked_pos), (close_r, false)] {
+        for (r, on) in [(lock_r, self.locked_pos), (close_r, false), (repeat_r, self.auto_repeat)] {
             let hover = hovered.iter().any(|p| r.contains(*p));
             let fill = if on { accent.gamma_multiply(0.3) } else if hover { egui::Color32::from_rgb(0x2A, 0x2F, 0x37) } else { egui::Color32::from_rgb(0x16, 0x19, 0x1E) };
             painter.rect_filled(r, 10.0, fill);
@@ -324,6 +346,9 @@ impl VrKeyboard {
         let stroke = egui::Stroke::new(2.0_f32, theme::FG_PRIMARY);
         draw_lock(&painter, lock_r.center(), self.locked_pos, if self.locked_pos { egui::Stroke::new(2.0_f32, accent) } else { stroke });
         draw_close(&painter, close_r.center(), stroke);
+        painter.text(repeat_r.center(), egui::Align2::CENTER_CENTER,
+            if self.auto_repeat { "repeat: on" } else { "hold: real" },
+            egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), if self.auto_repeat { accent } else { theme::FG_PRIMARY });
 
         // One cursor per hand.
         for &(_, pos, trigger) in hands {

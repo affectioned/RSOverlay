@@ -75,6 +75,7 @@ pub fn card(
             ui.add(icon(icons::BATTERY, 18.0, accent));
             ui.add_space(6.0);
             ui.label(theme::caption("Battery"));
+            crate::widgets::popout_button(ui, "Battery", accent);
         });
         ui.add_space(6.0);
         if readings.is_empty() {

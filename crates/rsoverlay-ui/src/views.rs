@@ -342,6 +342,46 @@ impl DevView {
         self.batteries = readings;
     }
 
+    /// Widget popped out from a card's ↗ this frame (VR dashboard).
+    pub fn take_widget_request(&mut self, ctx: &egui::Context) -> Option<crate::widgets::WidgetKind> {
+        crate::widgets::take_popout_request(ctx)
+    }
+
+    /// A floating widget panel: tab strip + the live card + dock bar.
+    pub fn widget_ui(
+        &mut self,
+        ctx: &egui::Context,
+        tabs: &[crate::widgets::WidgetKind],
+        active: usize,
+        attach: crate::window_panel::Attach,
+        injector: Option<&rsoverlay_input::InputInjector>,
+    ) -> crate::widgets::WidgetAction {
+        use crate::widgets::WidgetKind as K;
+        self.tick_state(ctx);
+        crate::widgets::set_popout_enabled(ctx, false);
+        let accent = self.accent;
+        if ctx.style().visuals.selection.bg_fill != accent {
+            ctx.style_mut(|st| st.visuals.selection.bg_fill = accent);
+        }
+        crate::widgets::frame(ctx, tabs, active, attach, accent, |ui, k| match k {
+            K::NowPlaying => media_card(ui, self.media.as_ref(), accent),
+            K::System => self.system.show(ui, self.last_fps, accent),
+            K::Volume => self.volume.show(ui, accent),
+            K::Battery => crate::battery::card(ui, &self.batteries, &mut self.battery_warn_pct, &mut self.battery_osc, accent),
+            K::Macros => self.macros.card(ui, injector, accent),
+            K::Chat => {
+                if let Some(msg) = chatbox_card(ui, &mut self.chat_draft, &mut self.now_playing.enabled, accent) {
+                    self.pending_chat = Some(msg);
+                }
+            }
+            K::Notifications => {
+                if history_card(ui, &self.history, accent) {
+                    self.clear_all_notifications();
+                }
+            }
+        })
+    }
+
     /// The wrist watch-face (VR). Shares all state with the dashboard;
     /// returns what the wearer tapped.
     pub fn wrist_ui(&mut self, ctx: &egui::Context) -> crate::wrist::WristAction {
@@ -434,6 +474,7 @@ impl DevView {
         injector: Option<&rsoverlay_input::InputInjector>,
     ) {
         self.tick_state(ctx);
+        crate::widgets::set_popout_enabled(ctx, self.dock_layout);
         let now = Instant::now();
         let accent = self.accent;
         // Slider fills, checkbox ticks and text selection follow the
@@ -843,6 +884,7 @@ fn card_header(
         ui.add(icon(source, 18.0, accent));
         ui.add_space(6.0);
         ui.label(theme::caption(label));
+        crate::widgets::popout_button(ui, label, accent);
     });
 }
 

@@ -7,6 +7,7 @@ use egui_wgpu::{Renderer, ScreenDescriptor};
 use std::sync::Arc;
 
 pub mod battery;
+pub mod glyphs;
 pub mod i18n;
 pub mod icons;
 pub mod keyboard;
@@ -23,6 +24,7 @@ pub mod system;
 pub mod theme;
 pub mod views;
 pub mod volume;
+pub mod widgets;
 pub mod vrkeyboard;
 pub mod window_panel;
 pub mod wrist;
@@ -122,3 +124,31 @@ impl EguiPanel {
 /// it by reference above. Shared types live in `rsoverlay-core`.
 #[allow(dead_code)]
 type _Phantom = Arc<()>;
+
+#[cfg(test)]
+mod glyph_coverage {
+    /// Every non-ASCII symbol still drawn as *text*. Anything egui's
+    /// bundled fonts lack renders as an empty box — those are drawn as
+    /// vectors via `glyphs` instead, and must not appear here.
+    const TEXT_SYMBOLS: &[&str] = &["×", "⚡", "▣", "🖵", "♪", "⏮", "⏭", "▶", "⏸", "🔇", "🔊", "—", "…", "·"];
+
+    #[test]
+    fn every_text_symbol_has_a_glyph() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(Default::default(), |_| {});
+        let missing: Vec<&str> = ctx.fonts(|f| {
+            TEXT_SYMBOLS.iter().copied().filter(|s| !f.has_glyphs(&egui::FontId::proportional(14.0), s)).collect()
+        });
+        assert!(missing.is_empty(), "draw these with crate::glyphs instead: {missing:?}");
+    }
+
+    /// Guard the other direction: the vector set really is needed.
+    #[test]
+    fn vector_glyphs_are_genuinely_missing_from_fonts() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(Default::default(), |_| {});
+        for s in ["⌫", "✕", "←", "⏎"] {
+            assert!(!ctx.fonts(|f| f.has_glyphs(&egui::FontId::proportional(14.0), s)), "{s} is covered now; text is fine");
+        }
+    }
+}

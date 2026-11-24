@@ -21,6 +21,7 @@ mod imp {
     use rsoverlay_ui::laser::{self, HandSample, LaserInput};
     use rsoverlay_render::GpuCtx;
     use crate::mirror_source::{list_sources, GpuMirror};
+    use rsoverlay_ui::widgets::WidgetKind;
     use rsoverlay_ui::window_panel::{self, Attach};
     use rsoverlay_ui::{battery::BatteryReading, views::DevView, EguiPanel};
     use std::ffi::c_void;
@@ -58,6 +59,13 @@ mod imp {
     const WIN_PPP: f32 = 1.5;
     const WIN_WIDTH_M: f32 = 0.90;
     const MAX_WINDOWS: usize = 6;
+    /// Widget panels (popped-out cards): 600 × 500 pt, 34 cm wide.
+    const WID_TEX: (u32, u32) = (1200, 1000);
+    const WID_PPP: f32 = 2.0;
+    const WID_WIDTH_M: f32 = 0.34;
+    const MAX_FLOATING: usize = 14;
+    /// Drop a widget within this distance of another to merge them.
+    const MERGE_DIST_M: f32 = 0.18;
     /// Panel indices: 0 wrist, 1 dashboard, 2 keyboard, WIN0.. windows.
     const WIN0: usize = 3;
     /// VR keyboard: 1024 × 400 pt at 2 texels/pt, 75 cm wide, summoned
@@ -259,10 +267,12 @@ mod imp {
         Affine3A::from_cols(x, y, z, pos)
     }
 
-    /// A captured window floating in VR, dockable to world / head / hands.
+    /// A floating panel, dockable to world / head / hands: either a
+    /// captured window (`mirror`) or a tab group of widgets (`widgets`).
     struct WinOverlay {
         panel: VrPanel,
-        mirror: GpuMirror,
+        mirror: Option<GpuMirror>,
+        widgets: Option<(Vec<WidgetKind>, usize)>,
         attach: Attach,
         /// World pose while docked to World.
         world: Affine3A,
@@ -321,6 +331,30 @@ mod imp {
         } else {
             v.signum() * (v.abs() - STICK_DEAD) / (1.0 - STICK_DEAD)
         }
+    }
+
+    fn new_widget(
+        overlay: &rsoverlay_openvr::Overlay<'_>,
+        gpu: &GpuCtx,
+        seq: u32,
+        tabs: Vec<WidgetKind>,
+        world: Affine3A,
+    ) -> Result<WinOverlay> {
+        let key = format!("rsoverlay.widget.{seq}");
+        let mut panel = VrPanel::new(overlay, gpu, &key, "RSOverlay Widget", WID_TEX, WID_PPP, WID_WIDTH_M, 0.0)?;
+        overlay.set_transform_absolute(panel.handle, &from_affine(&world)).ok();
+        panel.set_visible(overlay, true);
+        Ok(WinOverlay {
+            panel,
+            mirror: None,
+            widgets: Some((tabs, 0)),
+            attach: Attach::World,
+            world,
+            rel: None,
+            last_hit: None,
+            input_blocked: false,
+            blocked_checked: None,
+        })
     }
 
     /// Current world pose of a tracked device: 0 = HMD, else a controller.
@@ -525,6 +559,7 @@ mod imp {
             // stick X scale; a second hand gripping the same panel
             // scales by hand separation.
             let eye = hmd.as_ref().map(|h| to_affine(h).translation);
+            let mut released: Option<usize> = None;
             for c in &controllers {
                 let s = hand_slot(c.hand);
                 let pressed = c.grip && !prev_grip[s];
@@ -651,7 +686,33 @@ mod imp {
                             wins[g.panel - WIN0].panel.set_width(&overlay, width);
                         }
                     }
-                    _ => grab = None,
+                    _ => released = grab.take().map(|g| g.panel),
+                }
+            }
+            // Dropped a widget onto another widget → merge into one tab group.
+            if let Some(i) = released.filter(|&i| i >= WIN0) {
+                let k = i - WIN0;
+                if wins.get(k).is_some_and(|w| w.widgets.is_some()) {
+                    let here = win_world(&wins[k], hmd.as_ref(), &controllers).translation;
+                    let target = (0..wins.len()).find(|&j| {
+                        j != k
+                            && wins[j].widgets.is_some()
+                            && (win_world(&wins[j], hmd.as_ref(), &controllers).translation - here).length() < MERGE_DIST_M
+                    });
+                    if let Some(j) = target {
+                        let mut w = wins.remove(k);
+                        let j = if j > k { j - 1 } else { j };
+                        if let (Some((moved, _)), Some((tabs, active))) = (w.widgets.take(), wins[j].widgets.as_mut()) {
+                            for t in moved {
+                                if !tabs.contains(&t) {
+                                    tabs.push(t);
+                                }
+                            }
+                            *active = tabs.len() - 1;
+                        }
+                        w.panel.destroy(&overlay);
+                        info!("merged widget panels");
+                    }
                 }
             }
             // The grabbing hand's stick drives push/scale, not scrolling.
@@ -720,6 +781,29 @@ mod imp {
                 });
             }
 
+            // ── Card ↗ pop-out → new widget panel left of the dashboard.
+            if let Some(kind) = dev_view.take_widget_request(&dash.egui.ctx) {
+                if wins.len() >= MAX_FLOATING {
+                    warn!("floating panel limit ({MAX_FLOATING}) reached");
+                } else if let Some(base) = dash_pose {
+                    let n = wins.iter().filter(|w| w.widgets.is_some()).count() as f32;
+                    let world = Affine3A {
+                        translation: base.translation - base.matrix3.x_axis * (DASH_WIDTH_M * 0.5 + WID_WIDTH_M * 0.6)
+                            + base.matrix3.y_axis * (0.25 - 0.3 * (n % 3.0))
+                            + base.matrix3.z_axis * 0.05,
+                        ..base
+                    };
+                    win_seq += 1;
+                    match new_widget(&overlay, &gpu, win_seq, vec![kind], world) {
+                        Ok(w) => {
+                            info!("widget popped out: {}", kind.label());
+                            wins.push(w);
+                        }
+                        Err(e) => warn!("pop out widget: {e:#}"),
+                    }
+                }
+            }
+
             // ── Keyboard overlay (own panel, both hands type).
             if dev_view.show_keyboard != kb.visible {
                 if dev_view.show_keyboard {
@@ -763,7 +847,7 @@ mod imp {
                 dev_view.sources.choices = list_sources();
             }
             if let Some(src) = dev_view.sources.request.take() {
-                if wins.len() >= MAX_WINDOWS {
+                if wins.iter().filter(|w| w.mirror.is_some()).count() >= MAX_WINDOWS || wins.len() >= MAX_FLOATING {
                     warn!("window overlay limit ({MAX_WINDOWS}) reached");
                 } else if let Some(h) = &hmd {
                     win_seq += 1;
@@ -782,7 +866,8 @@ mod imp {
                                 info!("window overlay opened: {}", src.label());
                                 wins.push(WinOverlay {
                                     panel,
-                                    mirror,
+                                    mirror: Some(mirror),
+                                    widgets: None,
                                     attach: Attach::World,
                                     world,
                                     rel: None,
@@ -803,37 +888,57 @@ mod imp {
 
             // ── Window overlays.
             let mut close: Vec<usize> = Vec::new();
+            let mut splits: Vec<(usize, WidgetKind)> = Vec::new();
             let mut win_haptics = Vec::new();
             for (k, w) in wins.iter_mut().enumerate() {
                 let lf = w.panel.laser.update(win_samples.get(k).map_or(&[][..], |v| v.as_slice()), dt);
                 win_haptics.extend(lf.haptic);
                 let accent = dev_view.accent;
-                if w.blocked_checked.is_none_or(|t| t.elapsed() >= Duration::from_secs(1)) {
-                    w.blocked_checked = Some(Instant::now());
-                    w.input_blocked = w.mirror.window_hwnd().is_some_and(rsoverlay_input::elevation::input_blocked);
-                }
-                let (title, handle_m, attach, cursor, blocked) =
-                    (w.mirror.source.label(), w.mirror.handle(), w.attach, lf.cursor, w.input_blocked);
                 let mut act = window_panel::WindowPanelAction::default();
-                w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
-                    act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, accent);
-                    laser::paint_cursor(ctx, cursor, accent);
-                });
-                // Laser over the content drives the real window.
-                if let (Some(hit), Some(inj), Some(geom)) = (act.hit, injector.as_ref(), w.mirror.geom()) {
-                    if hit.clicked {
-                        if let Some(hwnd) = w.mirror.window_hwnd() {
-                            rsoverlay_capture::window::focus_window(hwnd);
-                        }
-                        if let Err(e) = inj.click_at(&geom, hit.x, hit.y, rsoverlay_input::MouseButton::Left) {
-                            warn!("window click: {e:#}");
-                        }
-                    } else if w.last_hit != Some((hit.x, hit.y)) {
-                        let _ = inj.move_to(&geom, hit.x, hit.y);
+                if let Some((tabs, active)) = w.widgets.clone() {
+                    // Widget group: tabs + live card + dock bar.
+                    let (attach, cursor) = (w.attach, lf.cursor);
+                    let inj = injector.as_ref();
+                    let mut wa = rsoverlay_ui::widgets::WidgetAction::default();
+                    w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
+                        wa = dev_view.widget_ui(ctx, &tabs, active, attach, inj);
+                        laser::paint_cursor(ctx, cursor, accent);
+                    });
+                    if let Some(i) = wa.select {
+                        w.widgets = Some((tabs.clone(), i));
                     }
-                    w.last_hit = Some((hit.x, hit.y));
-                } else {
-                    w.last_hit = None;
+                    if wa.split && tabs.len() > 1 {
+                        splits.push((k, tabs[active]));
+                    }
+                    act.attach = wa.attach;
+                    act.close = wa.close;
+                } else if let Some(mirror) = &w.mirror {
+                    if w.blocked_checked.is_none_or(|t| t.elapsed() >= Duration::from_secs(1)) {
+                        w.blocked_checked = Some(Instant::now());
+                        w.input_blocked = mirror.window_hwnd().is_some_and(rsoverlay_input::elevation::input_blocked);
+                    }
+                    let (title, handle_m, attach, cursor, blocked) =
+                        (mirror.source.label(), mirror.handle(), w.attach, lf.cursor, w.input_blocked);
+                    w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
+                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, accent);
+                        laser::paint_cursor(ctx, cursor, accent);
+                    });
+                    // Laser over the content drives the real window.
+                    if let (Some(hit), Some(inj), Some(geom)) = (act.hit, injector.as_ref(), mirror.geom()) {
+                        if hit.clicked {
+                            if let Some(hwnd) = mirror.window_hwnd() {
+                                rsoverlay_capture::window::focus_window(hwnd);
+                            }
+                            if let Err(e) = inj.click_at(&geom, hit.x, hit.y, rsoverlay_input::MouseButton::Left) {
+                                warn!("window click: {e:#}");
+                            }
+                        } else if w.last_hit != Some((hit.x, hit.y)) {
+                            let _ = inj.move_to(&geom, hit.x, hit.y);
+                        }
+                        w.last_hit = Some((hit.x, hit.y));
+                    } else {
+                        w.last_hit = None;
+                    }
                 }
                 if let Some(a) = act.attach {
                     let cur = win_world(w, hmd.as_ref(), &controllers);
@@ -873,10 +978,28 @@ mod imp {
                 if grab.as_ref().is_some_and(|g| g.panel >= WIN0) {
                     grab = None;
                 }
-                w.mirror.shutdown(&mut w.panel.egui);
+                if let Some(m) = w.mirror.take() {
+                    m.shutdown(&mut w.panel.egui);
+                }
                 w.panel.destroy(&overlay);
             }
-            dev_view.open_windows = wins.iter().map(|w| w.mirror.source.clone()).collect();
+            // Split: the active tab leaves its group as a new panel beside it.
+            for (k, kind) in splits.into_iter().rev() {
+                if wins.len() >= MAX_FLOATING {
+                    break;
+                }
+                let Some((tabs, active)) = wins.get_mut(k).and_then(|w| w.widgets.as_mut()) else { continue };
+                tabs.retain(|t| *t != kind);
+                *active = (*active).min(tabs.len().saturating_sub(1));
+                let base = win_world(&wins[k], hmd.as_ref(), &controllers);
+                let world = Affine3A { translation: base.translation + base.matrix3.x_axis * (WID_WIDTH_M + 0.04), ..base };
+                win_seq += 1;
+                match new_widget(&overlay, &gpu, win_seq, vec![kind], world) {
+                    Ok(w) => wins.push(w),
+                    Err(e) => warn!("split widget: {e:#}"),
+                }
+            }
+            dev_view.open_windows = wins.iter().filter_map(|w| w.mirror.as_ref().map(|m| m.source.clone())).collect();
 
             // ── Haptic ticks for clicks on any panel.
             if let Some(sys) = &system {
@@ -939,7 +1062,9 @@ mod imp {
         }
 
         for mut w in wins.drain(..) {
-            w.mirror.shutdown(&mut w.panel.egui);
+            if let Some(m) = w.mirror.take() {
+                m.shutdown(&mut w.panel.egui);
+            }
             w.panel.destroy(&overlay);
         }
         keyboard.release_all();

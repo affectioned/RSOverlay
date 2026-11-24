@@ -88,10 +88,10 @@ pub fn show(
                 let _ = injector.type_char(' ');
                 state.modifiers.consume_transient();
             }
-            if ui.button("⏎").clicked() {
+            if ui.button("Enter").clicked() {
                 let _ = injector.send_key(VirtualKey::Enter);
             }
-            if ui.button("⌫").clicked() {
+            if ui.button("Bksp").clicked() {
                 let _ = injector.send_key(VirtualKey::Backspace);
             }
         });

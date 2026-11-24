@@ -47,6 +47,7 @@ impl MacroDeck {
                 ui.add(crate::icons::icon(crate::icons::PULSE, 18.0, accent));
                 ui.add_space(6.0);
                 ui.label(theme::caption("Macros"));
+                crate::widgets::popout_button(ui, "Macros", accent);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let label = if self.editing { "Done" } else { "Edit" };
                     let text = egui::RichText::new(label)
@@ -154,7 +155,7 @@ impl MacroDeck {
                     resp.on_hover_text(err.to_string());
                 }
                 if ui
-                    .button(egui::RichText::new("✕").color(theme::FG_MUTED))
+                    .button(egui::RichText::new("×").color(theme::FG_MUTED))
                     .on_hover_text("Remove")
                     .clicked()
                 {

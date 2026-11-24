@@ -21,6 +21,7 @@ impl SystemCard {
                 ui.add(icon(icons::PULSE, 18.0, accent));
                 ui.add_space(6.0);
                 ui.label(theme::caption("System"));
+                crate::widgets::popout_button(ui, "System", accent);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
                         egui::RichText::new(format!("{overlay_fps:.0} fps"))

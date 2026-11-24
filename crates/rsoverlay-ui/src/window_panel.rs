@@ -130,17 +130,21 @@ fn uac_banner(ui: &egui::Ui, content: egui::Rect) {
         egui::FontId::proportional(theme::SIZE_BODY), theme::FG_MUTED);
 }
 
-fn pill(ui: &mut egui::Ui, text: &str, on: bool, accent: egui::Color32) -> egui::Response {
+pub fn pill(ui: &mut egui::Ui, text: &str, on: bool, accent: egui::Color32) -> egui::Response {
+    let glyph = crate::glyphs::Glyph::from_label(text);
     let font = egui::FontId::proportional(theme::SIZE_CAPTION + 2.0);
-    let galley = ui.painter().layout_no_wrap(text.to_string(), font, theme::FG_PRIMARY);
-    let size = egui::vec2(galley.size().x + 24.0, 34.0);
+    let galley = ui.painter().layout_no_wrap(if glyph.is_some() { String::new() } else { text.to_string() }, font, theme::FG_PRIMARY);
+    let size = egui::vec2(if glyph.is_some() { 34.0 } else { galley.size().x + 24.0 }, 34.0);
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
     let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
     let sel = motion::toggle(ui.ctx(), resp.id.with("on"), on, motion::MEDIUM);
     let base = motion::mix(egui::Color32::from_rgb(0x16, 0x19, 0x1E), egui::Color32::from_rgb(0x27, 0x2C, 0x33), hover);
     ui.painter().rect_filled(rect, 17.0, motion::mix(base, accent.gamma_multiply(0.25), sel));
     let color = motion::mix(theme::FG_MUTED, if on { accent } else { theme::FG_PRIMARY }, sel.max(hover));
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, color);
+    match glyph {
+        Some(g) => crate::glyphs::draw(ui.painter(), g, rect.center(), 14.0, color),
+        None => ui.painter().galley(rect.center() - galley.size() / 2.0, galley, color),
+    }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 

@@ -57,6 +57,8 @@ pub struct TestHooks {
     pub page: Option<String>,
     pub dock: bool,
     pub wrist: bool,
+    pub widgets: Option<String>,
+    pub vr_keyboard: bool,
 }
 
 /// Apply CLI overrides to a default Placement. Any field not overridden
@@ -682,6 +684,7 @@ pub fn run(
         }
     }
     let injector = InputInjector::new().context("initializing input injector")?;
+    let mut vr_keyboard = rsoverlay_ui::vrkeyboard::VrKeyboard::default();
 
     info!("preview window up — close window or press Esc to exit");
 
@@ -864,7 +867,17 @@ pub fn run(
                             &overlay_target.view,
                             raw_input,
                             |ctx| {
-                                if test.wrist {
+                                let widget_tabs: Vec<_> = test
+                                    .widgets
+                                    .as_deref()
+                                    .map(|s| s.split(',').filter_map(rsoverlay_ui::widgets::WidgetKind::from_slug).collect())
+                                    .unwrap_or_default();
+                                if test.vr_keyboard {
+                                    let t = ctx.input(|i| i.time);
+                                    let _ = vr_keyboard.frame(ctx, &[], t, dev_view.accent);
+                                } else if !widget_tabs.is_empty() {
+                                    let _ = dev_view.widget_ui(ctx, &widget_tabs, 0, rsoverlay_ui::window_panel::Attach::LeftHand, Some(&injector));
+                                } else if test.wrist {
                                     let _ = dev_view.wrist_ui(ctx);
                                 } else {
                                     dev_view.ui_with(ctx, Some(&injector));
