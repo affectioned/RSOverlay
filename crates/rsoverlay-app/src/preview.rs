@@ -142,6 +142,13 @@ pub fn seed_dev_view(
     dev.pointer.double_click_s = cfg.vr.double_click_s.clamp(0.0, 0.8);
     dev.restore_session = cfg.vr.restore_session;
     dev.vr_hide_wrist = cfg.vr.hide_wrist;
+    let nc = &cfg.notifications;
+    dev.notif.size_m = nc.size_m.clamp(0.15, 0.6);
+    dev.notif.offset_y = nc.offset_y.clamp(-0.4, 0.2);
+    dev.notif.distance_m = nc.distance_m.clamp(0.3, 1.5);
+    dev.notif.volume = nc.volume.clamp(0.0, 1.0);
+    dev.notif.sounds = [nc.sound_notification.clone(), nc.sound_warning.clone(), nc.sound_error.clone(), nc.sound_low_battery.clone()];
+    dev.notif.files = rsoverlay_audio::alerts::list_sound_files(&rsoverlay_core::config::sounds_dir());
     dev.vr_state = cfg.vr_state.clone();
     dev.kb_prefs.packs = rsoverlay_audio::typing::list_packs(&rsoverlay_core::config::sounds_dir());
     dev.elevated = rsoverlay_input::elevation::current_process_elevated();
@@ -234,6 +241,20 @@ pub fn seed_dev_view(
 /// Extract the current DevView state into a fresh Config body, ready
 /// to persist. Preserves fields we don't touch (notify, render, etc.)
 /// from the given template.
+/// Play any alert sounds the dashboard queued, through the user's slot
+/// choices (shared by the desktop window and the VR shell).
+pub fn play_alert_sounds(dev: &mut rsoverlay_ui::views::DevView) {
+    let due = dev.take_sounds();
+    if due.is_empty() {
+        return;
+    }
+    let dir = rsoverlay_core::config::sounds_dir();
+    // Several at once (a burst of toasts): one sound is enough.
+    if let Some((kind, v)) = due.last() {
+        rsoverlay_audio::alerts::play_alert(*kind, dev.notif.sound_for(*kind), &dir, dev.notif.volume * v);
+    }
+}
+
 pub fn config_from_dev_view(
     dev: &rsoverlay_ui::views::DevView,
     base: &rsoverlay_core::Config,
@@ -286,6 +307,17 @@ pub fn config_from_dev_view(
         hide_wrist: dev.vr_hide_wrist,
     };
     out.vr_state = dev.vr_state.clone();
+    let [n, w, e, b] = dev.notif.sounds.clone();
+    out.notifications = rsoverlay_core::config::NotificationsCfg {
+        size_m: dev.notif.size_m,
+        offset_y: dev.notif.offset_y,
+        distance_m: dev.notif.distance_m,
+        volume: dev.notif.volume,
+        sound_notification: n,
+        sound_warning: w,
+        sound_error: e,
+        sound_low_battery: b,
+    };
     out.appearance.reduce_motion = dev.reduce_motion;
     out.macros = rsoverlay_core::config::Macros(
         dev.macros
@@ -755,6 +787,7 @@ pub fn run(
                                 dev_view.push_notification(notif);
                             }
                         }
+                        play_alert_sounds(&mut dev_view);
 
                         // 0b. CPU path only: drain the latest captured frame
                         // (coalesce — only the newest matters) and upload it.
@@ -1257,6 +1290,16 @@ mod config_roundtrip_tests {
             kb_auto_repeat: true,
             kb_full: true,
             kb_vrchat: true,
+        };
+        c.notifications = rsoverlay_core::config::NotificationsCfg {
+            size_m: 0.4,
+            offset_y: 0.1,
+            distance_m: 1.0,
+            volume: 0.3,
+            sound_notification: "ping.wav".into(),
+            sound_warning: "none".into(),
+            sound_error: "buzz.wav".into(),
+            sound_low_battery: "none".into(),
         };
         c.macros = Macros(vec![Macro { label: "Mute".into(), keys: "ctrl+m".into() }]);
         c

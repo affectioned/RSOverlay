@@ -60,13 +60,17 @@ Last reviewed 2026-11-24. Parity detail lives in
 - **M66:** hide the wrist toolbar (Settings › VR); low-battery chime.
 - **M67:** window thumbnails in the Desktop picker (PrintWindow on a
   worker thread, every 2 s while the page is open; icon fallback).
+- **M68:** notifications in VR (they were only drained by the desktop
+  window): head-locked toast panel with size / height / distance;
+  custom sounds for every alert (notification / warning / error / low
+  battery: built-in, silent or any WAV in `sounds/`); client
+  `audioPath` picks a category, never a file.
 
 ## XSOverlay parity: remaining gaps
 
 Ranked by value ÷ cost; full table in [XSO_PARITY.md](XSO_PARITY.md).
 
-1. **Notification scale / offsets.**
-2. Touch injection, gamepad bindings, curve bias.
+1. Touch injection, gamepad bindings, curve bias.
 
 ## Working in VR (productivity track)
 

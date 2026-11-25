@@ -89,7 +89,7 @@ Last reviewed: M60 (2026-11-24).
 | Dark theme + accent colour | ✅ | AMOLED black + accent presets / picker |
 | Themes folder | ❌ | |
 | Notification API | ✅ | M2, XSO-compatible JSON |
-| Notification scale / offsets | ❌ | |
+| Notification scale / offsets | ✅ | M68: head-locked VR toast panel with size / height / distance; per-category custom sounds |
 | OSC device events (battery etc. → VRChat) | ✅ | M37, see [OSC.md](OSC.md) |
 | Discord Rich Presence | 🟡 | M25; opt-in with your own Discord application ID (`--discord-app-id`), no project app is registered |
 | Localization | 🟡 | 9 languages vs XSO's ~40 |
@@ -112,5 +112,4 @@ Last reviewed: M60 (2026-11-24).
 
 ## Next parity gaps (value ÷ cost)
 
-1. **Notification scale / offsets.**
-2. Touch injection, gamepad bindings, curve bias (smaller audiences).
+1. Touch injection, gamepad bindings, curve bias (smaller audiences).

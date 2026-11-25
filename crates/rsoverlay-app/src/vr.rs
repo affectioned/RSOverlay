@@ -81,6 +81,9 @@ mod imp {
     const SNAP_GAP_M: f32 = 0.008;
     /// Panel indices: 0 wrist, 1 dashboard, 2 keyboard, WIN0.. windows.
     const WIN0: usize = 3;
+    /// Notification toasts: 600 × 400 pt at 2 texels/pt, head-locked.
+    const TOAST_TEX: (u32, u32) = (1200, 800);
+    const TOAST_PPP: f32 = 2.0;
     /// VR keyboard: 1024 × 400 pt at 2 texels/pt, 75 cm wide, summoned
     /// 45 cm ahead and 40 cm below eye line, tilted up toward you.
     const KB_TEX: (u32, u32) = (2048, 800);
@@ -689,7 +692,7 @@ mod imp {
     }
 
     pub fn run(
-        _notify: Option<NotifyChannel>,
+        mut notify: Option<NotifyChannel>,
         rt: Handle,
         config: rsoverlay_core::Config,
         config_path: std::path::PathBuf,
@@ -820,6 +823,11 @@ mod imp {
         let mut next_group = 0u32;
         let mut typing_sounds = rsoverlay_audio::typing::TypingSounds::new();
         let mut thumbs = crate::mirror_source::ThumbWorker::spawn();
+        // Head-locked toast panel, shown only while toasts are up.
+        let mut toasts = VrPanel::new(&overlay, &gpu, "rsoverlay.toasts", "RSOverlay Notifications", TOAST_TEX, TOAST_PPP, 0.30, 0.0)?;
+        let _ = overlay.set_sort_order(toasts.handle, 60);
+        let mut toast_place: Option<(f32, f32, f32)> = None;
+        dev_view.toasts_external = true;
         let sounds_dir = rsoverlay_core::config::sounds_dir();
         let mut prev_menu = false;
         let mut prev_grip = [false; 2];
@@ -845,9 +853,7 @@ mod imp {
                 if last_battery_poll.is_none_or(|t| t.elapsed() >= BATTERY_POLL) {
                     last_battery_poll = Some(Instant::now());
                     dev_view.set_batteries(sys.batteries().iter().map(reading).collect());
-                    if dev_view.take_alert_sound() {
-                        rsoverlay_audio::typing::play_alert_chime();
-                    }
+
                 }
             }
 
@@ -1952,6 +1958,29 @@ mod imp {
                 }
             }
 
+            // ── Notifications: drain the server, sounds, head-locked toasts.
+            if let Some(n) = notify.as_mut() {
+                while let Ok(notif) = n.rx.try_recv() {
+                    dev_view.push_notification(notif);
+                }
+            }
+            crate::preview::play_alert_sounds(&mut dev_view);
+            let want_toasts = dev_view.has_toasts() && hmd.is_some();
+            if want_toasts {
+                let place = (dev_view.notif.size_m, dev_view.notif.offset_y, dev_view.notif.distance_m);
+                if toast_place != Some(place) {
+                    toast_place = Some(place);
+                    toasts.set_width(&overlay, place.0);
+                    // Straight ahead of the eyes, facing them (+Z toward the HMD).
+                    let pose = Affine3A::from_translation(glam::Vec3::new(0.0, place.1, -place.2));
+                    if let Err(e) = overlay.set_transform_device_relative(toasts.handle, 0, &from_affine(&pose)) {
+                        warn!("place toasts: {e:#}");
+                    }
+                }
+                toasts.render(&gpu, &overlay, time, dt, Vec::new(), |ctx| dev_view.toasts_ui(ctx));
+            }
+            toasts.set_visible(&overlay, want_toasts);
+
             dev_view.record_frame_ms(frame_start.elapsed().as_secs_f32() * 1000.0);
 
             let tint = dev_view.overlay_tint();
@@ -1989,6 +2018,7 @@ mod imp {
         }
         wrist.destroy(&overlay);
         dash.destroy(&overlay);
+        toasts.destroy(&overlay);
         info!("clean shutdown");
         Ok(())
     }

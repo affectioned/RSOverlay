@@ -17,6 +17,8 @@ pub struct Config {
     pub vr: VrCfg,
     /// Where things were left in VR, restored next session.
     pub vr_state: VrState,
+    /// VR toast placement + alert sounds.
+    pub notifications: NotificationsCfg,
     /// Virtual StreamDeck buttons. Serialized as `[[macros]]` tables.
     /// Must stay the last field: TOML arrays of tables have to follow
     /// every plain table in the document.
@@ -97,6 +99,40 @@ pub struct VrState {
     pub kb_auto_repeat: bool,
     pub kb_full: bool,
     pub kb_vrchat: bool,
+}
+
+/// VR toast placement and the sound each alert plays.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotificationsCfg {
+    /// Toast panel width, metres (0.15–0.6).
+    pub size_m: f32,
+    /// Height relative to eye level, metres (−0.4–0.2).
+    pub offset_y: f32,
+    /// Distance in front of the eyes, metres (0.3–1.5).
+    pub distance_m: f32,
+    /// Alert sound volume (0–1).
+    pub volume: f32,
+    /// Per alert: "builtin", "none" or a WAV file name in `sounds/`.
+    pub sound_notification: String,
+    pub sound_warning: String,
+    pub sound_error: String,
+    pub sound_low_battery: String,
+}
+
+impl Default for NotificationsCfg {
+    fn default() -> Self {
+        Self {
+            size_m: 0.30,
+            offset_y: -0.12,
+            distance_m: 0.65,
+            volume: 0.6,
+            sound_notification: "builtin".into(),
+            sound_warning: "builtin".into(),
+            sound_error: "builtin".into(),
+            sound_low_battery: "builtin".into(),
+        }
+    }
 }
 
 /// Folder holding user typing-sound packs (`sounds/<pack>/key.wav` …),

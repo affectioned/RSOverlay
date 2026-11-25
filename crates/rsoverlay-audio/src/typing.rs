@@ -119,15 +119,8 @@ pub fn alert_chime(volume: f32) -> Vec<u8> {
     wav_pcm16_mono(&samples, RATE)
 }
 
-/// Play the low-battery chime. The buffer is built once and lives for
-/// the whole process, so the asynchronous playback can never outlive it.
-pub fn play_alert_chime() {
-    static CHIME: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
-    play_bytes(CHIME.get_or_init(|| alert_chime(0.6)));
-}
-
 /// Minimal RIFF/WAVE container around mono PCM16 samples.
-fn wav_pcm16_mono(samples: &[i16], rate: u32) -> Vec<u8> {
+pub(crate) fn wav_pcm16_mono(samples: &[i16], rate: u32) -> Vec<u8> {
     let data_len = (samples.len() * 2) as u32;
     let mut w = Vec::with_capacity(44 + data_len as usize);
     w.extend_from_slice(b"RIFF");
@@ -291,7 +284,7 @@ fn read_capped(p: &Path) -> Option<Vec<u8>> {
 }
 
 #[cfg(windows)]
-fn play_bytes(wav: &[u8]) {
+pub(crate) fn play_bytes(wav: &[u8]) {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::HMODULE;
     use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT};
@@ -317,7 +310,7 @@ fn stop() {
 }
 
 #[cfg(not(windows))]
-fn play_bytes(_wav: &[u8]) {}
+pub(crate) fn play_bytes(_wav: &[u8]) {}
 
 #[cfg(not(windows))]
 fn stop() {}

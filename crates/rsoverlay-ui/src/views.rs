@@ -253,8 +253,12 @@ pub struct DevView {
     pub battery_warn_pct: u8,
     /// Chime with the low-battery toast.
     pub battery_sound: bool,
-    /// A low-battery alert fired; the VR shell plays the chime.
-    alert_sound_pending: bool,
+    /// Alert sounds due, (kind, per-message volume); the app plays them.
+    pending_sounds: Vec<(rsoverlay_audio::alerts::AlertKind, f32)>,
+    /// VR toast placement + alert sound choices (Settings › Notifications).
+    pub notif: NotificationPrefs,
+    /// Toasts are drawn on their own panel (VR), not over the dashboard.
+    pub toasts_external: bool,
     /// Settings › VR: hide the wrist toolbar.
     pub vr_hide_wrist: bool,
     pub show_macros: bool,
@@ -380,7 +384,9 @@ impl Default for DevView {
             show_battery: true,
             battery_warn_pct: 20,
             battery_sound: true,
-            alert_sound_pending: false,
+            pending_sounds: Vec::new(),
+            notif: NotificationPrefs::default(),
+            toasts_external: false,
             vr_hide_wrist: false,
             show_macros: true,
             macros: crate::macros::MacroDeck::default(),
@@ -452,6 +458,10 @@ impl DevView {
         const MAX_HISTORY: usize = 50;
         self.notifications_received += 1;
         self.unread += 1;
+        // The sender picks a category; the user's slot decides the file.
+        if let Some(kind) = rsoverlay_audio::alerts::AlertKind::from_audio_path(&n.audio_path) {
+            self.pending_sounds.push((kind, n.volume.clamp(0.0, 1.0)));
+        }
         let timeout = n.timeout.clamp(0.5, 30.0);
         let expires = Instant::now() + Duration::from_secs_f32(timeout);
         self.history.push_back(HistoryEntry {
@@ -470,9 +480,22 @@ impl DevView {
 
     /// Clear every live toast + the full history. XSO's #131 cluster:
     /// one action dismisses everything, including the backlog.
-    /// A low-battery chime is due (taken once by the VR shell).
-    pub fn take_alert_sound(&mut self) -> bool {
-        std::mem::take(&mut self.alert_sound_pending)
+    /// Alert sounds due since the last call (the app plays them).
+    pub fn take_sounds(&mut self) -> Vec<(rsoverlay_audio::alerts::AlertKind, f32)> {
+        std::mem::take(&mut self.pending_sounds)
+    }
+
+    /// Any toast on screen (VR shows its toast panel only then).
+    pub fn has_toasts(&self) -> bool {
+        !self.toasts.is_empty()
+    }
+
+    /// The VR toast panel: just the toasts, centred, on a transparent
+    /// panel. Advances per-frame state like the other surfaces.
+    pub fn toasts_ui(&mut self, ctx: &egui::Context) {
+        self.tick_state(ctx);
+        let accent = self.effective_accent();
+        self.paint_toasts(ctx, accent, 8.0, egui::Align2::CENTER_TOP, 0.0);
     }
 
     pub fn clear_all_notifications(&mut self) {
@@ -485,8 +508,12 @@ impl DevView {
     /// seconds) and raise a toast for any device that just went low.
     /// Alerts fire even with the card hidden — that's the point of them.
     pub fn set_batteries(&mut self, readings: Vec<BatteryReading>) {
-        for n in self.low_battery.update(&readings, self.battery_warn_pct) {
-            self.alert_sound_pending |= self.battery_sound;
+        for mut n in self.low_battery.update(&readings, self.battery_warn_pct) {
+            if self.battery_sound {
+                self.pending_sounds.push((rsoverlay_audio::alerts::AlertKind::LowBattery, 1.0));
+            }
+            // Its own sound (above), not the generic notification one.
+            n.audio_path = "none".into();
             self.push_notification(n);
         }
         self.battery_est.update(self.started.elapsed().as_secs_f64(), &readings);
@@ -711,27 +738,31 @@ impl DevView {
                         Some("keyboard")
                     }
                     5 => {
+                        notifications_card(ui, &mut self.notif, &mut self.pending_sounds, accent);
+                        Some("notifications")
+                    }
+                    6 => {
                         wrist_toolbar_card(ui, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, accent);
                         Some("wrist-toolbar")
                     }
-                    6 => {
+                    7 => {
                         accessibility_card(ui, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.reduce_motion, accent);
                         Some("accessibility")
                     }
-                    7 => {
+                    8 => {
                         let _ = admin_card(ui, &mut self.run_as_admin, self.elevated, accent);
                         Some("administrator")
                     }
-                    8 => {
+                    9 => {
                         placement_card(ui, &mut self.placement, accent);
                         Some("placement")
                     }
-                    9 => {
+                    10 => {
                         let snap = self.system.snapshot();
                         performance_card(ui, snap.as_ref(), self.frame_ms, &self.frame_ms_hist, self.last_fps, self.notifications_received, accent);
                         Some("stats")
                     }
-                    10 => {
+                    11 => {
                         let _ = reset_card(ui, &mut self.reset_armed_at);
                         Some("reset")
                     }
@@ -821,7 +852,6 @@ impl DevView {
     ) {
         self.tick_state(ctx);
         crate::widgets::set_popout_enabled(ctx, self.dock_layout);
-        let now = Instant::now();
         let accent = self.effective_accent();
         // Slider fills, checkbox ticks and text selection follow the
         // user accent instead of egui's stock blue.
@@ -940,32 +970,8 @@ impl DevView {
             }
         }
 
-        // Toasts: each in its own Area so it can slide independently.
-        // Enter from the right, exit to the right in the last 220 ms,
-        // and survivors glide up into the gap a departing toast leaves.
-        // Stacked below the header so they never cover the clock.
-        let t_now = ctx.input(|i| i.time);
-        let mut y = 84.0;
-        for t in self.toasts.iter_mut() {
-            let born = *t.born.get_or_insert(t_now);
-            let enter = crate::motion::progress(ctx, born, crate::motion::MEDIUM);
-            let left = t.expires.saturating_duration_since(now);
-            let exit = if left < TOAST_EXIT {
-                ctx.request_repaint();
-                crate::motion::ease_out(1.0 - left.as_secs_f32() / TOAST_EXIT.as_secs_f32())
-            } else {
-                0.0
-            };
-            let exit = if crate::motion::reduced() { 0.0 } else { exit };
-            let slide = (1.0 - enter + exit) * TOAST_SLIDE;
-            let id = egui::Id::new(("toast", t.seq));
-            let ty = crate::motion::value(ctx, id.with("y"), y, crate::motion::MEDIUM);
-            let resp = egui::Area::new(id)
-                .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-theme::GUTTER + slide, ty))
-                .interactable(false)
-                .show(ctx, |ui| toast_card(ui, &t.n, accent));
-            t.height = resp.response.rect.height();
-            y += t.height + 8.0;
+        if !self.toasts_external {
+            self.paint_toasts(ctx, accent, 84.0, egui::Align2::RIGHT_TOP, -theme::GUTTER);
         }
 
         ctx.request_repaint_after(Duration::from_millis(250));
@@ -973,6 +979,39 @@ impl DevView {
 }
 
 impl DevView {
+    /// Toasts: each in its own Area so it can slide independently.
+    /// Stacked from `top`, anchored at `anchor` offset by `x`.
+    fn paint_toasts(&mut self, ctx: &egui::Context, accent: egui::Color32, top: f32, anchor: egui::Align2, x: f32) {
+        let now = Instant::now();
+    // Toasts: each in its own Area so it can slide independently.
+    // Enter from the right, exit to the right in the last 220 ms,
+    // and survivors glide up into the gap a departing toast leaves.
+    // Stacked below the header so they never cover the clock.
+    let t_now = ctx.input(|i| i.time);
+    let mut y = top;
+    for t in self.toasts.iter_mut() {
+        let born = *t.born.get_or_insert(t_now);
+        let enter = crate::motion::progress(ctx, born, crate::motion::MEDIUM);
+        let left = t.expires.saturating_duration_since(now);
+        let exit = if left < TOAST_EXIT {
+            ctx.request_repaint();
+            crate::motion::ease_out(1.0 - left.as_secs_f32() / TOAST_EXIT.as_secs_f32())
+        } else {
+            0.0
+        };
+        let exit = if crate::motion::reduced() { 0.0 } else { exit };
+        let slide = (1.0 - enter + exit) * TOAST_SLIDE;
+        let id = egui::Id::new(("toast", t.seq));
+        let ty = crate::motion::value(ctx, id.with("y"), y, crate::motion::MEDIUM);
+        let resp = egui::Area::new(id)
+            .anchor(anchor, egui::vec2(x + slide, ty))
+            .interactable(false)
+            .show(ctx, |ui| toast_card(ui, &t.n, accent));
+        t.height = resp.response.rect.height();
+        y += t.height + 8.0;
+    }
+    }
+
     fn page_body(
         &mut self,
         ui: &mut egui::Ui,
@@ -1102,6 +1141,8 @@ impl DevView {
                     pointer_card(l, &mut self.cursor_smoothing, &mut self.scroll_speed, &mut self.pointer, accent);
                     l.add_space(theme::GUTTER);
                     keyboard_card(l, &mut self.kb_prefs, accent);
+                    l.add_space(theme::GUTTER);
+                    notifications_card(l, &mut self.notif, &mut self.pending_sounds, accent);
                     l.add_space(theme::GUTTER);
                     wrist_toolbar_card(l, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, accent);
                     l.add_space(theme::GUTTER);
@@ -1364,6 +1405,103 @@ impl PointerPrefs {
     pub fn long_press_secs(&self) -> f32 {
         if self.long_press { self.long_press_s } else { 0.0 }
     }
+}
+
+/// VR toast placement + alert sound slots.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NotificationPrefs {
+    pub size_m: f32,
+    pub offset_y: f32,
+    pub distance_m: f32,
+    pub volume: f32,
+    /// Per [`rsoverlay_audio::alerts::AlertKind::ALL`]: "builtin", "none"
+    /// or a file name in the sounds folder.
+    pub sounds: [String; 4],
+    /// WAVs found in the sounds folder (rescanned on Refresh).
+    pub files: Vec<String>,
+}
+
+impl Default for NotificationPrefs {
+    fn default() -> Self {
+        Self { size_m: 0.30, offset_y: -0.12, distance_m: 0.65, volume: 0.6, sounds: std::array::from_fn(|_| "builtin".into()), files: Vec::new() }
+    }
+}
+
+impl NotificationPrefs {
+    pub fn sound_for(&self, kind: rsoverlay_audio::alerts::AlertKind) -> &str {
+        let i = rsoverlay_audio::alerts::AlertKind::ALL.iter().position(|k| *k == kind).unwrap_or(0);
+        &self.sounds[i]
+    }
+}
+
+fn notifications_card(
+    ui: &mut egui::Ui,
+    n: &mut NotificationPrefs,
+    test: &mut Vec<(rsoverlay_audio::alerts::AlertKind, f32)>,
+    accent: egui::Color32,
+) {
+    use rsoverlay_audio::alerts::{AlertKind, BUILTIN, NONE};
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::BELL, "Notifications", accent);
+        ui.add_space(6.0);
+        ui.label(theme::body_muted("In VR, toasts float in front of you:"));
+        let slider = |ui: &mut egui::Ui, label: &str, v: &mut f32, r: std::ops::RangeInclusive<f32>, suffix: &str| {
+            ui.horizontal(|ui| {
+                ui.label(theme::body_muted(label));
+                crate::theme::fit_slider(ui);
+                ui.add(egui::Slider::new(v, r).fixed_decimals(2).suffix(suffix));
+            });
+        };
+        slider(ui, "Size", &mut n.size_m, 0.15..=0.6, " m");
+        slider(ui, "Height", &mut n.offset_y, -0.4..=0.2, " m");
+        slider(ui, "Distance", &mut n.distance_m, 0.3..=1.5, " m");
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Sound volume"));
+            crate::theme::fit_slider(ui);
+            ui.add(egui::Slider::new(&mut n.volume, 0.0..=1.0).fixed_decimals(2));
+        });
+        egui::Grid::new("alert-sounds").num_columns(3).spacing([12.0, 8.0]).show(ui, |ui| {
+        for (i, kind) in AlertKind::ALL.into_iter().enumerate() {
+            {
+                ui.label(theme::body_muted(kind.label()));
+                let shown = match n.sounds[i].as_str() {
+                    BUILTIN => "Built-in".to_string(),
+                    NONE => "Silent".to_string(),
+                    f => f.to_string(),
+                };
+                egui::ComboBox::from_id_source(("alert-sound", i)).selected_text(shown).width(180.0).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut n.sounds[i], BUILTIN.to_string(), "Built-in");
+                    ui.selectable_value(&mut n.sounds[i], NONE.to_string(), "Silent");
+                    for f in &n.files {
+                        ui.selectable_value(&mut n.sounds[i], f.clone(), f);
+                    }
+                });
+                if ui.small_button("▶").on_hover_text("Test").clicked() {
+                    test.push((kind, 1.0));
+                }
+                ui.end_row();
+            }
+        }
+        });
+        ui.horizontal(|ui| {
+            let dir = rsoverlay_core::config::sounds_dir();
+            if ui.small_button("Refresh").clicked() {
+                n.files = rsoverlay_audio::alerts::list_sound_files(&dir);
+            }
+            if ui.small_button("Open sounds folder").clicked() {
+                let _ = std::fs::create_dir_all(&dir);
+                #[cfg(windows)]
+                let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+            }
+        })
+        .response
+        .on_hover_text(format!(
+            "Drop .wav files (16-bit PCM, up to 2 MB) into {} and press Refresh. Apps sending notifications pick the category (default / warning / error); you pick the sound.",
+            rsoverlay_core::config::sounds_dir().display()
+        ));
+    });
 }
 
 fn pointer_card(ui: &mut egui::Ui, smoothing: &mut f32, scroll: &mut f32, ptr: &mut PointerPrefs, accent: egui::Color32) {
