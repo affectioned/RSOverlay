@@ -604,15 +604,61 @@ const OVERLAY_TEX_SIZE: u32 = 2048;
 const INITIAL_WIN_W: u32 = 1280;
 const INITIAL_WIN_H: u32 = 1600;
 
-/// `want` (logical px), shrunk to at most 90 % of the primary monitor's
-/// width and 88 % of its height (taskbar + title bar room), respecting the
-/// monitor's scale factor. Unknown monitor → `want` unchanged.
-pub fn fit_to_monitor<T>(target: &winit::event_loop::EventLoopWindowTarget<T>, want: (f64, f64)) -> winit::dpi::LogicalSize<f64> {
-    let Some(m) = target.primary_monitor().or_else(|| target.available_monitors().next()) else {
-        return winit::dpi::LogicalSize::new(want.0, want.1);
-    };
-    let screen = m.size().to_logical::<f64>(m.scale_factor());
-    winit::dpi::LogicalSize::new(want.0.min(screen.width * 0.90), want.1.min(screen.height * 0.88))
+/// Window frame allowance (title bar + borders), logical px.
+const CHROME: (f64, f64) = (16.0, 40.0);
+/// Gap kept between the window and the work-area edges, logical px.
+const EDGE_GAP: f64 = 16.0;
+
+/// Size (≤ `want`, inner) and outer position that fit the window, title
+/// bar included, inside `work` = (x, y, w, h) and centre it there. Pure.
+fn fit_in(want: (f64, f64), work: (f64, f64, f64, f64)) -> ((f64, f64), (f64, f64)) {
+    let (x, y, w, h) = work;
+    let iw = want.0.min(w - CHROME.0 - 2.0 * EDGE_GAP).max(400.0);
+    let ih = want.1.min(h - CHROME.1 - 2.0 * EDGE_GAP).max(300.0);
+    let px = x + ((w - iw - CHROME.0) / 2.0).max(0.0);
+    let py = y + ((h - ih - CHROME.1) / 2.0).max(0.0);
+    ((iw, ih), (px, py))
+}
+
+/// Primary monitor's work area (screen minus taskbar), logical px.
+fn work_area<T>(target: &winit::event_loop::EventLoopWindowTarget<T>) -> Option<(f64, f64, f64, f64)> {
+    let m = target.primary_monitor().or_else(|| target.available_monitors().next())?;
+    let scale = m.scale_factor();
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::RECT;
+        use windows::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETWORKAREA, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS};
+        let mut r = RECT::default();
+        // SAFETY: SPI_GETWORKAREA writes one RECT into the pointer we pass,
+        // which points at a live, correctly sized RECT on our stack.
+        let ok = unsafe {
+            SystemParametersInfoW(SPI_GETWORKAREA, 0, Some(&mut r as *mut RECT as *mut std::ffi::c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0))
+        };
+        if ok.is_ok() && r.right > r.left && r.bottom > r.top {
+            // Physical px (the process is per-monitor DPI aware).
+            return Some((r.left as f64 / scale, r.top as f64 / scale, (r.right - r.left) as f64 / scale, (r.bottom - r.top) as f64 / scale));
+        }
+    }
+    let p = m.position().to_logical::<f64>(scale);
+    let s = m.size().to_logical::<f64>(scale);
+    // No work-area API: assume a ~6 % taskbar along the bottom.
+    Some((p.x, p.y, s.width, s.height * 0.94))
+}
+
+/// Inner size + outer position so the window fits the primary monitor's
+/// work area (never under the taskbar), centred. `None` position = let
+/// the OS place it (monitor unknown).
+pub fn fit_to_monitor<T>(
+    target: &winit::event_loop::EventLoopWindowTarget<T>,
+    want: (f64, f64),
+) -> (winit::dpi::LogicalSize<f64>, Option<winit::dpi::LogicalPosition<f64>>) {
+    match work_area(target) {
+        Some(work) => {
+            let ((w, h), (x, y)) = fit_in(want, work);
+            (winit::dpi::LogicalSize::new(w, h), Some(winit::dpi::LogicalPosition::new(x, y)))
+        }
+        None => (winit::dpi::LogicalSize::new(want.0, want.1), None),
+    }
 }
 
 pub fn run(
@@ -625,9 +671,13 @@ pub fn run(
 ) -> Result<()> {
     let event_loop = EventLoop::new().context("creating winit event loop")?;
     let want = (f64::from(INITIAL_WIN_W), f64::from(INITIAL_WIN_H));
-    let size = if test.screenshot.is_some() { winit::dpi::LogicalSize::new(want.0, want.1) } else { fit_to_monitor(&event_loop, want) };
+    let (size, pos) = if test.screenshot.is_some() { (winit::dpi::LogicalSize::new(want.0, want.1), None) } else { fit_to_monitor(&event_loop, want) };
+    let mut builder = WindowBuilder::new();
+    if let Some(p) = pos {
+        builder = builder.with_position(p);
+    }
     let window = Arc::new(
-        WindowBuilder::new()
+        builder
             .with_title("RSOverlay")
             .with_inner_size(size)
             .with_min_inner_size(winit::dpi::LogicalSize::new(900u32, 600u32))
@@ -1229,6 +1279,43 @@ impl BlitPipeline {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.draw(0..3, 0..1);
+    }
+}
+
+#[cfg(test)]
+mod window_fit_tests {
+    use super::fit_in;
+
+    /// Outer bottom (inner top + height + chrome) must stay inside the work area.
+    fn fits(want: (f64, f64), work: (f64, f64, f64, f64)) {
+        let ((w, h), (x, y)) = fit_in(want, work);
+        assert!(x >= work.0 && y >= work.1, "starts inside: {x},{y}");
+        assert!(x + w + super::CHROME.0 <= work.0 + work.2 + 0.01, "right edge");
+        assert!(y + h + super::CHROME.1 <= work.1 + work.3 + 0.01, "bottom edge (taskbar)");
+    }
+
+    #[test]
+    fn fits_1440p_with_bottom_taskbar() {
+        // 2560 × 1440 at 100 %, 48 px taskbar: the reported work area.
+        fits((1280.0, 1600.0), (0.0, 0.0, 2560.0, 1392.0));
+        let ((w, h), (_, y)) = fit_in((1280.0, 1600.0), (0.0, 0.0, 2560.0, 1392.0));
+        assert_eq!(w, 1280.0, "width untouched when it fits");
+        assert!(h < 1392.0 && y > 0.0);
+    }
+
+    #[test]
+    fn fits_scaled_small_and_odd_taskbars() {
+        fits((1280.0, 1600.0), (0.0, 0.0, 1707.0, 928.0)); // 1440p at 150 %
+        fits((1280.0, 1600.0), (0.0, 0.0, 1280.0, 680.0)); // 1080p at 150 %
+        fits((1280.0, 1600.0), (0.0, 48.0, 2560.0, 1392.0)); // taskbar on top
+        fits((1280.0, 1600.0), (60.0, 0.0, 2500.0, 1440.0)); // taskbar on the left
+    }
+
+    #[test]
+    fn small_windows_are_centred_not_moved_to_the_corner() {
+        let ((w, h), (x, y)) = fit_in((800.0, 600.0), (0.0, 0.0, 2560.0, 1392.0));
+        assert_eq!((w, h), (800.0, 600.0));
+        assert!((x - (2560.0 - 816.0) / 2.0).abs() < 0.01 && (y - (1392.0 - 640.0) / 2.0).abs() < 0.01);
     }
 }
 
