@@ -133,6 +133,11 @@ pub fn seed_dev_view(
     dev.media_theme = cfg.vr.media_theme;
     dev.wrist_expanded = cfg.vr.wrist_expanded;
     dev.wrist_compact = cfg.vr.wrist_compact;
+    dev.kb_prefs.opacity = cfg.vr.keyboard_opacity.clamp(0.2, 1.0);
+    dev.kb_prefs.sounds = cfg.vr.typing_sounds;
+    dev.kb_prefs.volume = cfg.vr.typing_volume.clamp(0.0, 1.0);
+    dev.kb_prefs.pack = cfg.vr.sound_pack.clone();
+    dev.kb_prefs.packs = rsoverlay_audio::typing::list_packs(&rsoverlay_core::config::sounds_dir());
     dev.elevated = rsoverlay_input::elevation::current_process_elevated();
     dev.battery_osc.enabled = cfg.osc.battery_params;
     dev.battery_osc.prefix = cfg.osc.battery_prefix.trim_matches('/').to_string();
@@ -263,6 +268,10 @@ pub fn config_from_dev_view(
         media_theme: dev.media_theme,
         wrist_expanded: dev.wrist_expanded,
         wrist_compact: dev.wrist_compact,
+        keyboard_opacity: dev.kb_prefs.opacity,
+        typing_sounds: dev.kb_prefs.sounds,
+        typing_volume: dev.kb_prefs.volume,
+        sound_pack: dev.kb_prefs.pack.clone(),
     };
     out.appearance.reduce_motion = dev.reduce_motion;
     out.macros = rsoverlay_core::config::Macros(

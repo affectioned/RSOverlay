@@ -791,6 +791,8 @@ mod imp {
         let mut prev_text_target: Option<usize> = None;
         let mut win_seq = 0u32;
         let mut next_group = 0u32;
+        let mut typing_sounds = rsoverlay_audio::typing::TypingSounds::new();
+        let sounds_dir = rsoverlay_core::config::sounds_dir();
         let mut prev_menu = false;
         let mut prev_grip = [false; 2];
         let mut frame = 0u64;
@@ -1501,6 +1503,15 @@ mod imp {
                     }
                 });
                 kb_haptics = kf.haptic;
+                if dev_view.kb_prefs.sounds && !kf.sounds.is_empty() {
+                    let pack = Some(dev_view.kb_prefs.pack.as_str()).filter(|p| !p.is_empty());
+                    typing_sounds.configure(&sounds_dir, pack, dev_view.kb_prefs.volume);
+                    // One click per frame is plenty (two hands on one frame
+                    // would just cut each other off).
+                    if let Some(k) = kf.sounds.last() {
+                        typing_sounds.play(*k);
+                    }
+                }
                 if let Some(msg) = kf.chat.take() {
                     dev_view.send_chat(msg);
                 }
@@ -1877,7 +1888,7 @@ mod imp {
             let tint = dev_view.overlay_tint();
             wrist.apply_tint(&overlay, [tint[0], tint[1], tint[2], tint[3] * dev_view.vr_wrist_opacity]);
             dash.apply_tint(&overlay, tint);
-            kb.apply_tint(&overlay, tint);
+            kb.apply_tint(&overlay, [tint[0], tint[1], tint[2], tint[3] * dev_view.kb_prefs.opacity]);
             for w in &mut wins {
                 w.panel.apply_tint(&overlay, tint);
             }

@@ -2160,6 +2160,7 @@ dependencies = [
  "png",
  "pollster",
  "raw-window-handle 0.6.2",
+ "rsoverlay-audio",
  "rsoverlay-capture",
  "rsoverlay-core",
  "rsoverlay-discord",

@@ -166,6 +166,20 @@ pub struct KbFrame {
     pub text: Vec<egui::Event>,
     /// VRChat mode: message to send to the chatbox (Enter pressed).
     pub chat: Option<String>,
+    /// Key presses this frame, as typing-sound kinds.
+    pub sounds: Vec<rsoverlay_audio::typing::KeySound>,
+}
+
+/// Which typing click a key makes.
+fn key_sound(kind: Kind, scan: u16) -> rsoverlay_audio::typing::KeySound {
+    use rsoverlay_audio::typing::KeySound as S;
+    match (kind, scan) {
+        (Kind::Mod(..), _) => S::Modifier,
+        (_, 0x39) => S::Space,
+        (_, 0x1C) => S::Enter,
+        (_, 0x0E) => S::Backspace,
+        _ => S::Key,
+    }
 }
 
 fn slot(h: Hand) -> usize {
@@ -412,6 +426,7 @@ impl VrKeyboard {
                 }
                 if let Some(k) = key_at(p) {
                     out.haptic.push(hand);
+                    out.sounds.push(key_sound(k.kind, k.k.scan));
                     match k.kind {
                         Kind::Mod(m, _) => self.press_mod(k.k, m, time, internal || self.vrchat),
                         _ if self.vrchat => {

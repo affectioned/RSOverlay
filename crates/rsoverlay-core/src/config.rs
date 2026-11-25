@@ -56,6 +56,20 @@ pub struct VrCfg {
     /// views (see `rsoverlay_ui::wrist::compact`). Default: Add,
     /// Recenter, Keyboard, Dashboard + clock, media, batteries.
     pub wrist_compact: u32,
+    /// VR keyboard opacity (0.2–1.0).
+    pub keyboard_opacity: f32,
+    /// Click sounds while typing on the VR keyboard.
+    pub typing_sounds: bool,
+    /// Typing sound volume (0–1).
+    pub typing_volume: f32,
+    /// Sound pack folder under `sounds/`; empty = built-in clicks.
+    pub sound_pack: String,
+}
+
+/// Folder holding user typing-sound packs (`sounds/<pack>/key.wav` …),
+/// next to config.toml.
+pub fn sounds_dir() -> std::path::PathBuf {
+    Config::default_path().with_file_name("sounds")
 }
 
 /// Compact wrist default: the four everyday actions + clock (with the
@@ -65,7 +79,7 @@ pub const DEFAULT_WRIST_COMPACT: u32 = 0x0F | (1 << 8) | (1 << 9) | (1 << 10) | 
 
 impl Default for VrCfg {
     fn default() -> Self {
-        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0x7F, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT }
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0x7F, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new() }
     }
 }
 

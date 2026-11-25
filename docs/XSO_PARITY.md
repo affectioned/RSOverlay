@@ -57,8 +57,8 @@ Last reviewed: M60 (2026-11-24).
 | Physical layouts | ✅ | M27 + labels from the live Windows layout; XSO also has JIS |
 | Key hold behaviour | ✅ | M46: **real hold** by default (better than XSO's repeated presses in games); auto-repeat opt-in |
 | Sticky / locked modifiers, VRChat chatbox mode, compact / full | ✅ | M46–M55 |
-| Typing sounds + swappable sound packs | ❌ | |
-| Keyboard opacity | ❌ | |
+| Typing sounds + swappable sound packs | ✅ | M62: synthesised built-in clicks (key / space / enter / backspace / modifier), volume, user WAV packs in `sounds/<pack>/` |
+| Keyboard opacity | ✅ | M62, Settings › Keyboard |
 | Favourite layout quick-switch | ❌ | |
 
 ## Wrist / dashboard
@@ -112,9 +112,8 @@ Last reviewed: M60 (2026-11-24).
 
 ## Next parity gaps (value ÷ cost)
 
-1. **Keyboard opacity + typing sounds.** Small, frequently noticed.
-2. **Long-press + double-click delay.** Rounds out the laser mouse.
-3. **Hide wrist** + **low-battery sound**.
-4. **Window thumbnails** in the Desktop picker.
-5. **Notification scale / offsets.**
-6. Touch injection, gamepad bindings, curve bias (smaller audiences).
+1. **Long-press + double-click delay.** Rounds out the laser mouse.
+2. **Hide wrist** + **low-battery sound**.
+3. **Window thumbnails** in the Desktop picker.
+4. **Notification scale / offsets.**
+5. Touch injection, gamepad bindings, curve bias (smaller audiences).

@@ -289,6 +289,8 @@ pub struct DevView {
     pub wrist_buttons: u8,
     /// Compact wrist contents (see `wrist::compact`).
     pub wrist_compact: u32,
+    /// VR keyboard look + typing sounds (Settings › Keyboard).
+    pub kb_prefs: KeyboardPrefs,
     /// XSO-style knobs: cursor smoothing 0..1, scroll speed multiplier.
     pub cursor_smoothing: f32,
     pub scroll_speed: f32,
@@ -379,6 +381,7 @@ impl Default for DevView {
             art_for: String::new(),
             wrist_buttons: 0x7F,
             wrist_compact: rsoverlay_core::config::DEFAULT_WRIST_COMPACT,
+            kb_prefs: KeyboardPrefs::default(),
             cursor_smoothing: 0.5,
             scroll_speed: 1.0,
             night_light: crate::nightlight::NightLight::default(),
@@ -649,27 +652,31 @@ impl DevView {
                         Some("pointer")
                     }
                     4 => {
+                        keyboard_card(ui, &mut self.kb_prefs, accent);
+                        Some("keyboard")
+                    }
+                    5 => {
                         wrist_toolbar_card(ui, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, accent);
                         Some("wrist-toolbar")
                     }
-                    5 => {
+                    6 => {
                         accessibility_card(ui, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.reduce_motion, accent);
                         Some("accessibility")
                     }
-                    6 => {
+                    7 => {
                         let _ = admin_card(ui, &mut self.run_as_admin, self.elevated, accent);
                         Some("administrator")
                     }
-                    7 => {
+                    8 => {
                         placement_card(ui, &mut self.placement, accent);
                         Some("placement")
                     }
-                    8 => {
+                    9 => {
                         let snap = self.system.snapshot();
                         performance_card(ui, snap.as_ref(), self.frame_ms, &self.frame_ms_hist, self.last_fps, self.notifications_received, accent);
                         Some("stats")
                     }
-                    9 => {
+                    10 => {
                         let _ = reset_card(ui, &mut self.reset_armed_at);
                         Some("reset")
                     }
@@ -1036,6 +1043,8 @@ impl DevView {
                     l.add_space(theme::GUTTER);
                     pointer_card(l, &mut self.cursor_smoothing, &mut self.scroll_speed, accent);
                     l.add_space(theme::GUTTER);
+                    keyboard_card(l, &mut self.kb_prefs, accent);
+                    l.add_space(theme::GUTTER);
                     wrist_toolbar_card(l, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, accent);
                     l.add_space(theme::GUTTER);
                     accessibility_card(l, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.reduce_motion, accent);
@@ -1217,6 +1226,63 @@ fn compact_toggle(ui: &mut egui::Ui, compact: &mut u32, bit: u32, name: &str) {
     if ui.checkbox(&mut on, name).changed() {
         *compact ^= bit;
     }
+}
+
+/// VR keyboard look + typing sounds.
+#[derive(Clone, Debug, PartialEq)]
+pub struct KeyboardPrefs {
+    pub opacity: f32,
+    pub sounds: bool,
+    pub volume: f32,
+    /// Pack folder name; empty = built-in clicks.
+    pub pack: String,
+    /// Packs found under the sounds folder (rescanned on Refresh).
+    pub packs: Vec<String>,
+}
+
+impl Default for KeyboardPrefs {
+    fn default() -> Self {
+        Self { opacity: 1.0, sounds: true, volume: 0.4, pack: String::new(), packs: Vec::new() }
+    }
+}
+
+fn keyboard_card(ui: &mut egui::Ui, kb: &mut KeyboardPrefs, accent: egui::Color32) {
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::KEYBOARD, "Keyboard", accent);
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Opacity"));
+            crate::theme::fit_slider(ui);
+            ui.add(egui::Slider::new(&mut kb.opacity, 0.2..=1.0).fixed_decimals(2));
+        });
+        ui.checkbox(&mut kb.sounds, "Typing sounds").on_hover_text("A short click on every key press of the VR keyboard");
+        ui.add_enabled_ui(kb.sounds, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(theme::body_muted("Volume"));
+                crate::theme::fit_slider(ui);
+                ui.add(egui::Slider::new(&mut kb.volume, 0.0..=1.0).fixed_decimals(2));
+            });
+            ui.horizontal(|ui| {
+                ui.label(theme::body_muted("Sound pack"));
+                let current = if kb.pack.is_empty() { "Built-in".to_string() } else { kb.pack.clone() };
+                egui::ComboBox::from_id_source("sound-pack").selected_text(current).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut kb.pack, String::new(), "Built-in");
+                    for p in &kb.packs {
+                        ui.selectable_value(&mut kb.pack, p.clone(), p);
+                    }
+                });
+                if ui.small_button("Refresh").clicked() {
+                    kb.packs = rsoverlay_audio::typing::list_packs(&rsoverlay_core::config::sounds_dir());
+                }
+            })
+            .response
+            .on_hover_text(format!(
+                "Add a pack: a folder in {} with key.wav, space.wav, enter.wav, backspace.wav and/or modifier.wav (16-bit PCM). Missing files use the built-in click.",
+                rsoverlay_core::config::sounds_dir().display()
+            ));
+        });
+    });
 }
 
 fn pointer_card(ui: &mut egui::Ui, smoothing: &mut f32, scroll: &mut f32, accent: egui::Color32) {

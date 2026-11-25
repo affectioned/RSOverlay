@@ -6,6 +6,8 @@
 //! applied optimistically to the snapshot, so a dragged slider doesn't
 //! snap back while the worker catches up.
 
+pub mod typing;
+
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
