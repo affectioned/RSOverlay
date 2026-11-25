@@ -823,6 +823,8 @@ mod imp {
         let mut next_group = 0u32;
         let mut typing_sounds = rsoverlay_audio::typing::TypingSounds::new();
         let mut thumbs = crate::mirror_source::ThumbWorker::spawn();
+        // Device icons from the user's SteamVR install (decoded once each).
+        let mut device_icons = crate::device_icons::DeviceIcons::default();
         // Head-locked toast panel, shown only while toasts are up.
         let mut toasts = VrPanel::new(&overlay, &gpu, "rsoverlay.toasts", "RSOverlay Notifications", TOAST_TEX, TOAST_PPP, 0.30, 0.0)?;
         let _ = overlay.set_sort_order(toasts.handle, 60);
@@ -852,7 +854,16 @@ mod imp {
             if let Some(sys) = &system {
                 if last_battery_poll.is_none_or(|t| t.elapsed() >= BATTERY_POLL) {
                     last_battery_poll = Some(Instant::now());
-                    dev_view.set_batteries(sys.batteries().iter().map(reading).collect());
+                    let use_icons = dev_view.steamvr_icons;
+                    let readings = sys
+                        .batteries()
+                        .iter()
+                        .map(|d| BatteryReading {
+                            icon: if use_icons { device_icons.for_device(d.icon.as_deref(), d.resource_root.as_deref()) } else { None },
+                            ..reading(d)
+                        })
+                        .collect();
+                    dev_view.set_batteries(readings);
 
                 }
             }
@@ -2045,6 +2056,7 @@ mod imp {
             label,
             fraction: d.fraction,
             charging: d.charging,
+            icon: None,
         }
     }
 

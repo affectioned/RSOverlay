@@ -329,8 +329,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
                 let c = egui::Rect::from_min_size(egui::pos2(r5.left() + i as f32 * tw, r5.top()), egui::vec2(tw, r5.height())).shrink(6.0);
                 let pct = (b.fraction * 100.0).round() as u32;
                 let col = if !b.charging && pct < 20 { theme::DANGER } else { accent };
-                let src = if b.label == "HMD" { icons::HEADSET } else { icons::CONTROLLER };
-                icon(src, 22.0, col).paint_at(ui, egui::Rect::from_center_size(egui::pos2(c.left() + 18.0, c.center().y - 4.0), egui::vec2(22.0, 22.0)));
+                crate::battery::paint_device_icon(ui, b, egui::Rect::from_center_size(egui::pos2(c.left() + 18.0, c.center().y - 4.0), egui::vec2(28.0, 22.0)), col);
                 let bar = egui::Rect::from_min_size(egui::pos2(c.left() + 6.0, c.bottom() - 7.0), egui::vec2(24.0, 4.0));
                 ui.painter().rect_filled(bar, 2.0, theme::BG_HOVER);
                 ui.painter().rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(24.0 * b.fraction.clamp(0.0, 1.0), 4.0)), 2.0, col);

@@ -271,6 +271,9 @@ pub struct Appearance {
     pub battery_sound: bool,
     /// Show "Using RSOverlay" on the user's Discord profile.
     pub discord_presence: bool,
+    /// Use each device's icon from the user's SteamVR install (never
+    /// shipped with RSOverlay); off → RSOverlay's own icons.
+    pub steamvr_icons: bool,
 }
 
 impl Default for Appearance {
@@ -294,6 +297,7 @@ impl Default for Appearance {
             battery_warn_pct: 20,
             battery_sound: true,
             discord_presence: true,
+            steamvr_icons: true,
         }
     }
 }

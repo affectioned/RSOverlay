@@ -364,18 +364,25 @@ fn icon_button(ui: &mut egui::Ui, src: egui::ImageSource<'static>, active: bool,
 }
 
 fn battery_chip(ui: &mut egui::Ui, b: &BatteryReading, _accent: egui::Color32) {
-    let short = short_device_label(&b.label);
     let pct = (b.fraction * 100.0).round() as u32;
     let low = !b.charging && pct < 20;
-    let text = if b.charging { format!("{short} ⚡{pct}%") } else { format!("{short} {pct}%") };
+    // With a SteamVR icon the icon names the device; otherwise "L", "HMD"…
+    let has_icon = b.icon.is_some();
+    let short = if has_icon { String::new() } else { format!("{} ", short_device_label(&b.label)) };
+    let text = if b.charging { format!("{short}⚡{pct}%") } else { format!("{short}{pct}%") };
     // Painted rather than a Frame: a Frame in a right-to-left row
     // stretches to the full header height.
     let font = egui::FontId::proportional(theme::SIZE_CAPTION + 1.0);
     let color = if low { theme::DANGER } else { theme::FG_MUTED };
     let galley = ui.painter().layout_no_wrap(text, font, color);
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(galley.size().x + 18.0, 28.0), egui::Sense::hover());
+    let icon_w = if has_icon { 22.0 } else { 0.0 };
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(galley.size().x + 18.0 + icon_w, 28.0), egui::Sense::hover());
     ui.painter().rect_stroke(rect, rect.height() / 2.0, egui::Stroke::new(1.0_f32, if low { theme::DANGER } else { theme::STROKE_CARD }));
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, color);
+    if has_icon {
+        let ir = egui::Rect::from_center_size(egui::pos2(rect.left() + 9.0 + 9.0, rect.center().y), egui::vec2(20.0, 14.0));
+        crate::battery::paint_device_icon(ui, b, ir, color);
+    }
+    ui.painter().galley(egui::pos2(rect.left() + 9.0 + icon_w, rect.center().y - galley.size().y / 2.0), galley, color);
     resp.on_hover_text(format!("{} battery", b.label));
 }
 

@@ -167,6 +167,7 @@ pub fn seed_dev_view(
     dev.battery_warn_pct = cfg.appearance.battery_warn_pct.clamp(5, 50);
     dev.battery_sound = cfg.appearance.battery_sound;
     dev.discord_presence = cfg.appearance.discord_presence;
+    dev.steamvr_icons = cfg.appearance.steamvr_icons;
     dev.discord = cfg.discord.clone();
     if test.show_keyboard {
         dev.show_keyboard = true;
@@ -186,11 +187,14 @@ pub fn seed_dev_view(
     dev.wrist_editing = test.wrist_edit;
     if test.demo_batteries {
         use rsoverlay_ui::battery::BatteryReading;
-        let r = |id, label: &str, fraction, charging| BatteryReading {
+        let mut icons = crate::device_icons::DeviceIcons::default();
+        let use_icons = dev.steamvr_icons;
+        let mut r = |id, label: &str, fraction, charging| BatteryReading {
             id,
             label: label.into(),
             fraction,
             charging,
+            icon: if use_icons { icons.for_label(label) } else { None },
         };
         dev.set_batteries(vec![
             r(0, "HMD", 0.82, false),
@@ -341,6 +345,7 @@ pub fn config_from_dev_view(
     out.appearance.battery_warn_pct = dev.battery_warn_pct;
     out.appearance.battery_sound = dev.battery_sound;
     out.appearance.discord_presence = dev.discord_presence;
+    out.appearance.steamvr_icons = dev.steamvr_icons;
     out.placement.anchor = match dev.placement.anchor {
         UiAnchor::Wrist => PlacementAnchor::Wrist,
         UiAnchor::Hmd => PlacementAnchor::Hmd,
@@ -1344,6 +1349,7 @@ mod config_roundtrip_tests {
         a.battery_warn_pct = 33;
         a.battery_sound = false;
         a.discord_presence = false;
+        a.steamvr_icons = false;
         c.discord = rsoverlay_core::config::DiscordCfg { show_windows: false, show_battery: false, show_music: true, show_button: false };
         let p = &mut c.placement;
         p.anchor = rsoverlay_core::PlacementAnchor::World;

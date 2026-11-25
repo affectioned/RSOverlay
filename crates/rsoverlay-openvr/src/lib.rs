@@ -438,6 +438,10 @@ pub struct DeviceBattery {
     /// 0.0..=1.0, as OpenVR reports it.
     pub fraction: f32,
     pub charging: bool,
+    /// The driver's own icon for this device ("{driver}/icons/….png").
+    pub icon: Option<String>,
+    /// The device's driver resource root ("indexcontroller", …).
+    pub resource_root: Option<String>,
 }
 
 pub struct System<'a> {
@@ -504,6 +508,8 @@ impl<'a> System<'a> {
                     model: self.string_prop(i, sys::Prop_ModelNumber_String).unwrap_or_default(),
                     fraction: fraction.clamp(0.0, 1.0),
                     charging: self.bool_prop(i, sys::Prop_DeviceIsCharging_Bool).unwrap_or(false),
+                    icon: self.string_prop(i, sys::Prop_NamedIconPathDeviceReady_String).filter(|s| !s.is_empty()),
+                    resource_root: self.string_prop(i, sys::Prop_ResourceRoot_String).filter(|s| !s.is_empty()),
                 });
             }
         }

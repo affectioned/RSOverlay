@@ -148,6 +148,11 @@ pub const ETrackedControllerRole_RightHand: ETrackedControllerRole = 2;
 
 pub type ETrackedDeviceProperty = i32;
 pub const Prop_ModelNumber_String: ETrackedDeviceProperty = 1001;
+/// Driver resource folder name, e.g. "indexcontroller".
+pub const Prop_ResourceRoot_String: ETrackedDeviceProperty = 1035;
+/// Icon SteamVR shows for the device when it's ready, e.g.
+/// "{indexcontroller}/icons/left_controller_status_ready.png".
+pub const Prop_NamedIconPathDeviceReady_String: ETrackedDeviceProperty = 5004;
 pub const Prop_DeviceIsCharging_Bool: ETrackedDeviceProperty = 1011;
 pub const Prop_DeviceBatteryPercentage_Float: ETrackedDeviceProperty = 1012;
 pub const Prop_DeviceProvidesBatteryStatus_Bool: ETrackedDeviceProperty = 1026;

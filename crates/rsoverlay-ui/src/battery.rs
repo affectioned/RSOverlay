@@ -8,7 +8,7 @@ use crate::icons::{self, icon};
 use crate::theme;
 use rsoverlay_notify::Notification;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct BatteryReading {
     /// Stable per-session key (the OpenVR device index).
     pub id: u32,
@@ -17,6 +17,41 @@ pub struct BatteryReading {
     /// 0.0..=1.0
     pub fraction: f32,
     pub charging: bool,
+    /// The device's SteamVR icon as an alpha mask (white, shape in alpha),
+    /// loaded from the user's SteamVR install. `None` → our own icon.
+    pub icon: Option<std::sync::Arc<egui::ColorImage>>,
+}
+
+/// Texture for a reading's SteamVR icon, uploaded once per image (the app
+/// reuses one `Arc` per icon file, so the key is stable across polls).
+fn icon_texture(ctx: &egui::Context, r: &BatteryReading) -> Option<(egui::TextureId, egui::Vec2)> {
+    let img = r.icon.as_ref()?;
+    let size = egui::vec2(img.size[0] as f32, img.size[1] as f32);
+    let key = egui::Id::new(("device-icon", std::sync::Arc::as_ptr(img) as usize));
+    if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(key)) {
+        return Some((t.id(), size));
+    }
+    // Created outside `data_mut`: load_texture locks the context too.
+    let t = ctx.load_texture(format!("device-icon-{}", r.id), (**img).clone(), egui::TextureOptions::LINEAR);
+    let id = t.id();
+    ctx.data_mut(|d| d.insert_temp(key, t));
+    Some((id, size))
+}
+
+/// Draw a device's icon fitted inside `rect` (aspect kept) in `tint`:
+/// its SteamVR icon when there is one, else our headset / controller.
+pub fn paint_device_icon(ui: &egui::Ui, r: &BatteryReading, rect: egui::Rect, tint: egui::Color32) {
+    match icon_texture(ui.ctx(), r) {
+        Some((id, size)) => {
+            let s = (rect.width() / size.x).min(rect.height() / size.y);
+            let fit = egui::Rect::from_center_size(rect.center(), size * s);
+            egui::Image::new((id, fit.size())).tint(tint).paint_at(ui, fit);
+        }
+        None => {
+            let src = if r.label == "HMD" { crate::icons::HEADSET } else { crate::icons::CONTROLLER };
+            crate::icons::icon(src, rect.height(), tint).paint_at(ui, rect);
+        }
+    }
 }
 
 /// Playtime estimate from each device's recent discharge (or charge)
@@ -148,12 +183,14 @@ fn pct(fraction: f32) -> u32 {
 }
 
 /// Dashboard card. `warn_pct` is editable inline.
+#[allow(clippy::too_many_arguments)]
 pub fn card(
     ui: &mut egui::Ui,
     readings: &[BatteryReading],
     estimates: &BatteryEstimator,
     warn_pct: &mut u8,
     sound: &mut bool,
+    steamvr_icons: &mut bool,
     osc: &mut BatteryOsc,
     accent: egui::Color32,
 ) {
@@ -179,6 +216,8 @@ pub fn card(
             ui.add(egui::Slider::new(warn_pct, 5..=50).suffix("%"));
         });
         ui.checkbox(sound, "chime when low").on_hover_text("Play a short chime in VR with the low-battery alert");
+        ui.checkbox(steamvr_icons, "SteamVR device icons")
+            .on_hover_text("Show each device with the icon from your own SteamVR install (Index, Quest, Vive, trackers…). Off: RSOverlay's own icons.");
         ui.checkbox(&mut osc.enabled, "send to VRChat avatar").on_hover_text(format!(
             "OSC /avatar/parameters/{p}/HMD, {p}/LeftHand, {p}/Charging/HMD ... (float 0-1 / bool)",
             p = osc.prefix
@@ -190,6 +229,8 @@ fn row(ui: &mut egui::Ui, r: &BatteryReading, est: Option<Estimate>, warn_pct: u
     let low = !r.charging && pct(r.fraction) < u32::from(warn_pct);
     let fill = if low { theme::DANGER } else { accent };
     ui.horizontal(|ui| {
+        let (ir, _) = ui.allocate_exact_size(egui::vec2(26.0, 20.0), egui::Sense::hover());
+        paint_device_icon(ui, r, ir, fill);
         ui.label(theme::body_muted(&r.label));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let text = if r.charging {
@@ -290,7 +331,7 @@ mod tests {
     use super::*;
 
     fn r(id: u32, fraction: f32, charging: bool) -> BatteryReading {
-        BatteryReading { id, label: format!("dev{id}"), fraction, charging }
+        BatteryReading { id, label: format!("dev{id}"), fraction, charging, ..Default::default() }
     }
 
     #[test]
@@ -351,7 +392,7 @@ mod tests {
     }
 
     fn rd(id: u32, f: f32, charging: bool) -> BatteryReading {
-        BatteryReading { id, label: "HMD".into(), fraction: f, charging }
+        BatteryReading { id, label: "HMD".into(), fraction: f, charging, ..Default::default() }
     }
 
     #[test]

@@ -261,6 +261,8 @@ pub struct DevView {
     pub toasts_external: bool,
     /// Settings › Discord: show RSOverlay on the Discord profile.
     pub discord_presence: bool,
+    /// Battery card: device icons from the user's SteamVR install.
+    pub steamvr_icons: bool,
     /// What the presence shares.
     pub discord: rsoverlay_core::config::DiscordCfg,
     /// Settings › VR: hide the wrist toolbar.
@@ -392,6 +394,7 @@ impl Default for DevView {
             notif: NotificationPrefs::default(),
             toasts_external: false,
             discord_presence: true,
+            steamvr_icons: true,
             discord: Default::default(),
             vr_hide_wrist: false,
             show_macros: true,
@@ -600,7 +603,7 @@ impl DevView {
             K::NowPlaying => media_card(ui, self.media.as_ref(), accent),
             K::System => self.system.show(ui, self.last_fps, accent),
             K::Volume => self.volume.show(ui, accent),
-            K::Battery => crate::battery::card(ui, &self.batteries, &self.battery_est, &mut self.battery_warn_pct, &mut self.battery_sound, &mut self.battery_osc, accent),
+            K::Battery => crate::battery::card(ui, &self.batteries, &self.battery_est, &mut self.battery_warn_pct, &mut self.battery_sound, &mut self.steamvr_icons, &mut self.battery_osc, accent),
             K::Macros => self.macros.card(ui, injector, accent),
             K::Chat => {
                 if let Some(msg) = chatbox_card(ui, &mut self.chat_draft, &mut self.now_playing.enabled, accent) {
@@ -1099,7 +1102,7 @@ impl DevView {
                         l.add_space(theme::GUTTER);
                     }
                     if self.show_battery {
-                        crate::battery::card(r, &self.batteries, &self.battery_est, &mut self.battery_warn_pct, &mut self.battery_sound, &mut self.battery_osc, accent);
+                        crate::battery::card(r, &self.batteries, &self.battery_est, &mut self.battery_warn_pct, &mut self.battery_sound, &mut self.steamvr_icons, &mut self.battery_osc, accent);
                         r.add_space(theme::GUTTER);
                     }
                     if self.show_macros {

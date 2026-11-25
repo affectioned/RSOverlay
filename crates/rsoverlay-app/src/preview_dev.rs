@@ -73,6 +73,9 @@ pub struct DevHarness {
     win_opacity: f32,
     /// What the VR keyboard typed (it types into RSOverlay, not Windows).
     typed: String,
+    icons: crate::device_icons::DeviceIcons,
+    /// Last applied "SteamVR device icons" setting (demo devices follow it live).
+    icons_on: bool,
 }
 
 impl DevHarness {
@@ -104,6 +107,8 @@ impl DevHarness {
             win_linked: true,
             win_opacity: 1.0,
             typed: String::new(),
+            icons: Default::default(),
+            icons_on: true,
         }
     }
 
@@ -115,6 +120,11 @@ impl DevHarness {
         keyboard: &mut rsoverlay_ui::vrkeyboard::VrKeyboard,
         injector: &rsoverlay_input::InputInjector,
     ) {
+        // Demo devices follow the "SteamVR device icons" toggle live.
+        if self.demo_batteries && dev.steamvr_icons != self.icons_on {
+            self.icons_on = dev.steamvr_icons;
+            dev.set_batteries(demo_batteries(0.82, &mut self.icons, self.icons_on));
+        }
         if self.show_bar {
             self.bar(ctx, dev);
         }
@@ -236,12 +246,12 @@ impl DevHarness {
                 });
                 ui.horizontal_wrapped(|ui| {
                     if ui.checkbox(&mut self.demo_batteries, "Demo batteries").changed() {
-                        dev.set_batteries(if self.demo_batteries { demo_batteries(0.82) } else { Vec::new() });
+                        dev.set_batteries(if self.demo_batteries { demo_batteries(0.82, &mut self.icons, dev.steamvr_icons) } else { Vec::new() });
                     }
                     if ui.button("Low battery").on_hover_text("Drop the headset below the warning threshold (toast + chime)").clicked() {
                         self.demo_batteries = true;
-                        dev.set_batteries(demo_batteries(0.82));
-                        dev.set_batteries(demo_batteries(0.05));
+                        dev.set_batteries(demo_batteries(0.82, &mut self.icons, dev.steamvr_icons));
+                        dev.set_batteries(demo_batteries(0.05, &mut self.icons, dev.steamvr_icons));
                     }
                     ui.separator();
                     for (label, path) in [("Notify", "default"), ("Warning", "warning"), ("Error", "error"), ("Silent", "none")] {
@@ -278,9 +288,20 @@ impl DevHarness {
     }
 }
 
-fn demo_batteries(hmd: f32) -> Vec<rsoverlay_ui::battery::BatteryReading> {
-    let r = |id, label: &str, fraction, charging| rsoverlay_ui::battery::BatteryReading { id, label: label.into(), fraction, charging };
-    vec![r(0, "HMD", hmd, false), r(1, "Left hand", 0.64, false), r(2, "Right hand", 0.47, true)]
+fn demo_batteries(hmd: f32, icons: &mut crate::device_icons::DeviceIcons, use_icons: bool) -> Vec<rsoverlay_ui::battery::BatteryReading> {
+    let mut r = |id, label: &str, fraction, charging| rsoverlay_ui::battery::BatteryReading {
+        id,
+        label: label.into(),
+        fraction,
+        charging,
+        icon: if use_icons { icons.for_label(label) } else { None },
+    };
+    vec![
+        r(0, "HMD", hmd, false),
+        r(1, "Left hand", 0.64, false),
+        r(2, "Right hand", 0.47, true),
+        r(3, "Tracker · VIVE Tracker 3.0", 0.71, false),
+    ]
 }
 
 fn test_notification(kind: &str, audio_path: &str) -> rsoverlay_notify::Notification {

@@ -12,6 +12,7 @@
 //! work later), independent of the UI mode.
 
 mod mirror_source;
+mod device_icons;
 mod preview;
 mod preview_dev;
 mod preview_mock;
