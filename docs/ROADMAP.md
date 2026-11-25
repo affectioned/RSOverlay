@@ -47,16 +47,17 @@ Last reviewed 2026-11-24. Parity detail lives in
   modules: session timer, CPU / GPU, RAM and Alerts status chips.
 - **M62:** keyboard opacity; typing sounds (built-in synthesised clicks,
   volume, swappable WAV packs in `sounds/<pack>/`).
+- **M63:** laser long-press → right click (opt-in) and double-click
+  delay (a quick second click snaps onto the first).
 
 ## XSOverlay parity: remaining gaps
 
 Ranked by value ÷ cost; full table in [XSO_PARITY.md](XSO_PARITY.md).
 
-1. **Long-press + double-click delay** on the laser mouse.
-2. **Hide wrist** + **low-battery sound**.
-3. **Window thumbnails** in the Desktop picker.
-4. **Notification scale / offsets.**
-5. Touch injection, gamepad bindings, curve bias.
+1. **Hide wrist** + **low-battery sound**.
+2. **Window thumbnails** in the Desktop picker.
+3. **Notification scale / offsets.**
+4. Touch injection, gamepad bindings, curve bias.
 
 ## Working in VR (productivity track)
 

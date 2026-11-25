@@ -64,6 +64,12 @@ pub struct VrCfg {
     pub typing_volume: f32,
     /// Sound pack folder under `sounds/`; empty = built-in clicks.
     pub sound_pack: String,
+    /// Laser: hold the trigger still for a right click (opt-in).
+    pub long_press: bool,
+    /// Long-press time, seconds (0.3–1.5).
+    pub long_press_s: f32,
+    /// Laser double-click assist window, seconds (0 = off).
+    pub double_click_s: f32,
 }
 
 /// Folder holding user typing-sound packs (`sounds/<pack>/key.wav` …),
@@ -79,7 +85,7 @@ pub const DEFAULT_WRIST_COMPACT: u32 = 0x0F | (1 << 8) | (1 << 9) | (1 << 10) | 
 
 impl Default for VrCfg {
     fn default() -> Self {
-        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0x7F, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new() }
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0x7F, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new(), long_press: false, long_press_s: 0.6, double_click_s: 0.4 }
     }
 }
 

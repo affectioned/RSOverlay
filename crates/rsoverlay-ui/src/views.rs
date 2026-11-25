@@ -294,6 +294,8 @@ pub struct DevView {
     /// XSO-style knobs: cursor smoothing 0..1, scroll speed multiplier.
     pub cursor_smoothing: f32,
     pub scroll_speed: f32,
+    /// Long-press + double-click assist (Settings › Pointer).
+    pub pointer: PointerPrefs,
     /// Reset button armed at this egui time (two-step confirm — VR has
     /// no dialogs).
     reset_armed_at: Option<f64>,
@@ -384,6 +386,7 @@ impl Default for DevView {
             kb_prefs: KeyboardPrefs::default(),
             cursor_smoothing: 0.5,
             scroll_speed: 1.0,
+            pointer: PointerPrefs::default(),
             night_light: crate::nightlight::NightLight::default(),
             tint: [1.0; 4],
             last_frame_time: None,
@@ -648,7 +651,7 @@ impl DevView {
                         Some("vr")
                     }
                     3 => {
-                        pointer_card(ui, &mut self.cursor_smoothing, &mut self.scroll_speed, accent);
+                        pointer_card(ui, &mut self.cursor_smoothing, &mut self.scroll_speed, &mut self.pointer, accent);
                         Some("pointer")
                     }
                     4 => {
@@ -1041,7 +1044,7 @@ impl DevView {
                     l.add_space(theme::GUTTER);
                     vr_card(l, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, accent);
                     l.add_space(theme::GUTTER);
-                    pointer_card(l, &mut self.cursor_smoothing, &mut self.scroll_speed, accent);
+                    pointer_card(l, &mut self.cursor_smoothing, &mut self.scroll_speed, &mut self.pointer, accent);
                     l.add_space(theme::GUTTER);
                     keyboard_card(l, &mut self.kb_prefs, accent);
                     l.add_space(theme::GUTTER);
@@ -1285,7 +1288,28 @@ fn keyboard_card(ui: &mut egui::Ui, kb: &mut KeyboardPrefs, accent: egui::Color3
     });
 }
 
-fn pointer_card(ui: &mut egui::Ui, smoothing: &mut f32, scroll: &mut f32, accent: egui::Color32) {
+/// Laser click helpers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointerPrefs {
+    pub long_press: bool,
+    pub long_press_s: f32,
+    pub double_click_s: f32,
+}
+
+impl Default for PointerPrefs {
+    fn default() -> Self {
+        Self { long_press: false, long_press_s: 0.6, double_click_s: 0.4 }
+    }
+}
+
+impl PointerPrefs {
+    /// What the laser state machine uses (0 = off).
+    pub fn long_press_secs(&self) -> f32 {
+        if self.long_press { self.long_press_s } else { 0.0 }
+    }
+}
+
+fn pointer_card(ui: &mut egui::Ui, smoothing: &mut f32, scroll: &mut f32, ptr: &mut PointerPrefs, accent: egui::Color32) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         card_header(ui, icons::POINTER, "Pointer", accent);
@@ -1302,6 +1326,25 @@ fn pointer_card(ui: &mut egui::Ui, smoothing: &mut f32, scroll: &mut f32, accent
             crate::theme::fit_slider(ui);
             ui.add(egui::Slider::new(scroll, 0.25..=3.0).fixed_decimals(2).suffix("×"));
         });
+        ui.checkbox(&mut ptr.long_press, "Long-press for right click")
+            .on_hover_text("Hold the trigger still to right-click. Moving first still drags; letting go early still clicks.");
+        ui.add_enabled_ui(ptr.long_press, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(theme::body_muted("Long-press time"));
+                crate::theme::fit_slider(ui);
+                ui.add(egui::Slider::new(&mut ptr.long_press_s, 0.3..=1.5).fixed_decimals(1).suffix(" s"));
+            });
+        });
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Double-click delay"));
+            crate::theme::fit_slider(ui);
+            let mut ms = ptr.double_click_s * 1000.0;
+            if ui.add(egui::Slider::new(&mut ms, 0.0..=800.0).fixed_decimals(0).suffix(" ms")).changed() {
+                ptr.double_click_s = ms / 1000.0;
+            }
+        })
+        .response
+        .on_hover_text("A second click this soon after the first, and close to it, lands exactly on it, so hand shake doesn't break double-clicks. 0 = off.");
     });
 }
 

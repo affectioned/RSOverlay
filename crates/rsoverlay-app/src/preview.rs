@@ -137,6 +137,9 @@ pub fn seed_dev_view(
     dev.kb_prefs.sounds = cfg.vr.typing_sounds;
     dev.kb_prefs.volume = cfg.vr.typing_volume.clamp(0.0, 1.0);
     dev.kb_prefs.pack = cfg.vr.sound_pack.clone();
+    dev.pointer.long_press = cfg.vr.long_press;
+    dev.pointer.long_press_s = cfg.vr.long_press_s.clamp(0.3, 1.5);
+    dev.pointer.double_click_s = cfg.vr.double_click_s.clamp(0.0, 0.8);
     dev.kb_prefs.packs = rsoverlay_audio::typing::list_packs(&rsoverlay_core::config::sounds_dir());
     dev.elevated = rsoverlay_input::elevation::current_process_elevated();
     dev.battery_osc.enabled = cfg.osc.battery_params;
@@ -272,6 +275,9 @@ pub fn config_from_dev_view(
         typing_sounds: dev.kb_prefs.sounds,
         typing_volume: dev.kb_prefs.volume,
         sound_pack: dev.kb_prefs.pack.clone(),
+        long_press: dev.pointer.long_press,
+        long_press_s: dev.pointer.long_press_s,
+        double_click_s: dev.pointer.double_click_s,
     };
     out.appearance.reduce_motion = dev.reduce_motion;
     out.macros = rsoverlay_core::config::Macros(

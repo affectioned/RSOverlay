@@ -1272,6 +1272,8 @@ mod imp {
             for p in [&mut wrist.laser, &mut dash.laser].into_iter().chain(wins.iter_mut().map(|w| &mut w.panel.laser)) {
                 p.smoothing = dev_view.cursor_smoothing;
                 p.scroll_mult = dev_view.scroll_speed;
+                p.long_press_s = dev_view.pointer.long_press_secs();
+                p.double_click_s = dev_view.pointer.double_click_s;
             }
 
             // Accessibility text size.

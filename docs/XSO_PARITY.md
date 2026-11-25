@@ -38,10 +38,10 @@ Last reviewed: M60 (2026-11-24).
 | SteamVR Input with XSO's default bindings | ✅ | M49: Index, Touch, Vive, WMR; rebindable in SteamVR |
 | Laser mouse: click / drag / scroll | ✅ | M38 + M49: either hand, stick scroll, click stabilisation |
 | Right / middle click | ✅ | M49: trackpad modifiers while clicking |
-| Long-press | ❌ | |
+| Long-press | ✅ | M63: hold still → right click (opt-in, 0.3–1.5 s); moving still drags, early release still clicks |
 | Grab / push / scale gestures | ✅ | M44: grab rides the laser and faces you, stick push/pull + scale, two-hand scale, live size readout (M49) |
 | Grab sensitivity / dampening / smart roll settings | 🟡 | pose smoothing built in; no user settings |
-| Pointer scale, scroll speed, double-click delay | 🟡 | scroll speed + cursor smoothing + laser angle ✅ (M53/M51); pointer scale, double-click ❌ |
+| Pointer scale, scroll speed, double-click delay | 🟡 | scroll speed + cursor smoothing + laser angle ✅ (M53/M51); double-click delay ✅ (M63, snaps a quick second click onto the first); pointer scale ❌ |
 | Automatic mouse control | ❌ | |
 | Touch-injection input method (alt. to mouse) | ❌ | `InjectTouchInput` |
 | Block input to background app (on hover / in layout mode) | ❌ | |
@@ -112,8 +112,7 @@ Last reviewed: M60 (2026-11-24).
 
 ## Next parity gaps (value ÷ cost)
 
-1. **Long-press + double-click delay.** Rounds out the laser mouse.
-2. **Hide wrist** + **low-battery sound**.
-3. **Window thumbnails** in the Desktop picker.
-4. **Notification scale / offsets.**
-5. Touch injection, gamepad bindings, curve bias (smaller audiences).
+1. **Hide wrist** + **low-battery sound**.
+2. **Window thumbnails** in the Desktop picker.
+3. **Notification scale / offsets.**
+4. Touch injection, gamepad bindings, curve bias (smaller audiences).

@@ -16,6 +16,12 @@
 //!   (at the last on-panel position), so a slider let go off-edge
 //!   doesn't stay grabbed.
 //! - **Scroll**: stick Y with a 0.2 dead zone, speed in points/second.
+//! - **Long-press** (opt-in, `long_press_s > 0`): a Primary press is held
+//!   back until it resolves — escape the drag slop → normal drag; let go
+//!   → normal click; hold still for `long_press_s` → right click.
+//! - **Double-click assist** (`double_click_s > 0`): a press within that
+//!   time of the last click and within [`DRAG_SLOP`] of it lands exactly
+//!   on it, so tremor doesn't break the OS double-click.
 
 pub const PRESS: f32 = 0.75;
 pub const RELEASE: f32 = 0.35;
@@ -74,6 +80,18 @@ pub struct LaserInput {
     /// Stick-scroll multiplier (Settings › Pointer).
     pub scroll_mult: f32,
     smoothed: Option<egui::Pos2>,
+    /// Hold still this long (s) for a right click; 0 = off.
+    pub long_press_s: f32,
+    /// Double-click assist window (s); 0 = off.
+    pub double_click_s: f32,
+    /// Seconds since this input started (sum of `dt`).
+    clock: f32,
+    /// Long-press: Primary press not sent yet; time it was pulled.
+    deferred: Option<f32>,
+    /// Long-press fired: swallow the trigger release.
+    consumed: bool,
+    /// Last click (release) position + time, for double-click assist.
+    last_click: Option<(egui::Pos2, f32)>,
 }
 
 fn slot(h: Hand) -> usize {
@@ -92,6 +110,7 @@ impl LaserInput {
 
     pub fn update(&mut self, samples: &[HandSample], dt: f32) -> LaserFrame {
         let mut out = LaserFrame::default();
+        self.clock += dt.max(0.0);
 
         // Edge-detect each hand's trigger with hysteresis.
         let mut pressed_now: Option<Hand> = None;
@@ -146,6 +165,12 @@ impl LaserInput {
             _ => pos,
         });
 
+        // A held-back press that escaped the slop is a drag after all:
+        // send the press at the anchor before the first drag move.
+        if self.dragging && self.deferred.take().is_some() {
+            out.events.push(button(self.press_anchor.unwrap_or_default(), egui::PointerButton::Primary, true));
+        }
+
         match hit {
             Some(pos) => {
                 out.events.push(egui::Event::PointerMoved(pos));
@@ -162,14 +187,34 @@ impl LaserInput {
             // Press only on a fresh edge *on the panel*: a trigger already
             // held elsewhere and swept onto the panel must not click.
             if pressed_now == Some(s.hand) && !self.pressed && hit.is_some() {
+                // Double-click assist: snap onto the previous click.
+                if let (Some(p), Some((at, t))) = (self.last_pos, self.last_click) {
+                    if self.clock - t <= self.double_click_s && p.distance(at) <= DRAG_SLOP {
+                        self.last_pos = Some(at);
+                        out.events.push(egui::Event::PointerMoved(at));
+                    }
+                }
                 self.pressed = true;
                 self.press_anchor = self.last_pos;
                 self.dragging = false;
+                self.consumed = false;
                 self.press_button = Some(s.button);
                 out.haptic = Some(s.hand);
-                out.events.push(button(self.last_pos.unwrap_or_default(), s.button, true));
+                if self.long_press_s > 0.0 && s.button == egui::PointerButton::Primary {
+                    self.deferred = Some(self.clock);
+                } else {
+                    out.events.push(button(self.last_pos.unwrap_or_default(), s.button, true));
+                }
             } else if !latched && self.pressed {
                 self.release(&mut out);
+            } else if self.deferred.is_some_and(|t0| self.clock - t0 >= self.long_press_s) {
+                // Held still long enough: right click at the anchor.
+                self.deferred = None;
+                self.consumed = true;
+                let at = self.press_anchor.unwrap_or_default();
+                out.events.push(button(at, egui::PointerButton::Secondary, true));
+                out.events.push(button(at, egui::PointerButton::Secondary, false));
+                out.haptic = Some(s.hand);
             }
             if hit.is_some() && s.stick_y.abs() > DEAD_ZONE {
                 // Re-scale past the dead zone so scrolling starts at 0.
@@ -191,7 +236,17 @@ impl LaserInput {
         self.press_anchor = None;
         self.dragging = false;
         let b = self.press_button.take().unwrap_or(egui::PointerButton::Primary);
-        out.events.push(button(self.last_pos.unwrap_or_default(), b, false));
+        let at = self.last_pos.unwrap_or_default();
+        if std::mem::take(&mut self.consumed) {
+            // The long-press already sent its right click.
+            return;
+        }
+        if self.deferred.take().is_some() {
+            // Let go before the long-press fired: an ordinary click.
+            out.events.push(button(at, egui::PointerButton::Primary, true));
+        }
+        out.events.push(button(at, b, false));
+        self.last_click = Some((at, self.clock));
     }
 }
 
@@ -229,6 +284,79 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    fn button_events(f: &LaserFrame) -> Vec<(egui::PointerButton, bool, egui::Pos2)> {
+        f.events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::PointerButton { button, pressed, pos, .. } => Some((*button, *pressed, *pos)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    const P: egui::PointerButton = egui::PointerButton::Primary;
+    const R: egui::PointerButton = egui::PointerButton::Secondary;
+
+    #[test]
+    fn long_press_held_still_becomes_one_right_click() {
+        let mut l = LaserInput { long_press_s: 0.5, ..Default::default() };
+        let at = |x| [s(Hand::Right, Some((x, 50.0)), 0.9)];
+        l.update(&[s(Hand::Right, Some((50.0, 50.0)), 0.0)], 0.011);
+        let f = l.update(&at(50.0), 0.1);
+        assert!(button_events(&f).is_empty(), "press is held back");
+        assert_eq!(f.haptic, Some(Hand::Right));
+        assert!(button_events(&l.update(&at(55.0), 0.3)).is_empty(), "tremor doesn't resolve it");
+        let f = l.update(&at(52.0), 0.3);
+        assert_eq!(button_events(&f), vec![(R, true, egui::pos2(50.0, 50.0)), (R, false, egui::pos2(50.0, 50.0))]);
+        assert_eq!(f.haptic, Some(Hand::Right));
+        // Still holding, then letting go: nothing more.
+        assert!(button_events(&l.update(&at(52.0), 0.3)).is_empty());
+        assert!(button_events(&l.update(&[s(Hand::Right, Some((52.0, 50.0)), 0.0)], 0.011)).is_empty());
+    }
+
+    #[test]
+    fn long_press_released_early_is_a_normal_click() {
+        let mut l = LaserInput { long_press_s: 0.5, ..Default::default() };
+        l.update(&[s(Hand::Right, Some((10.0, 10.0)), 0.0)], 0.011);
+        l.update(&[s(Hand::Right, Some((10.0, 10.0)), 0.9)], 0.1);
+        let f = l.update(&[s(Hand::Right, Some((10.0, 10.0)), 0.0)], 0.1);
+        assert_eq!(button_events(&f), vec![(P, true, egui::pos2(10.0, 10.0)), (P, false, egui::pos2(10.0, 10.0))]);
+    }
+
+    #[test]
+    fn long_press_that_moves_is_a_normal_drag() {
+        let mut l = LaserInput { long_press_s: 0.5, ..Default::default() };
+        l.update(&[s(Hand::Right, Some((100.0, 100.0)), 0.0)], 0.011);
+        l.update(&[s(Hand::Right, Some((100.0, 100.0)), 0.9)], 0.05);
+        let f = l.update(&[s(Hand::Right, Some((170.0, 100.0)), 0.9)], 0.05);
+        // Press at the anchor goes out *before* the first drag move.
+        let press = f.events.iter().position(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. })).unwrap();
+        let mv = f.events.iter().position(|e| *e == egui::Event::PointerMoved(egui::pos2(170.0, 100.0))).unwrap();
+        assert!(press < mv);
+        assert_eq!(button_events(&f), vec![(P, true, egui::pos2(100.0, 100.0))]);
+        // Holding after the drag started never turns into a right click.
+        assert!(button_events(&l.update(&[s(Hand::Right, Some((170.0, 100.0)), 0.9)], 1.0)).is_empty());
+        assert_eq!(button_events(&l.update(&[s(Hand::Right, Some((170.0, 100.0)), 0.0)], 0.01)), vec![(P, false, egui::pos2(170.0, 100.0))]);
+    }
+
+    #[test]
+    fn double_click_assist_snaps_the_second_click_onto_the_first() {
+        let mut l = LaserInput { double_click_s: 0.4, ..Default::default() };
+        let tap = |l: &mut LaserInput, x: f32, dt: f32| {
+            l.update(&[s(Hand::Right, Some((x, 40.0)), 0.0)], dt);
+            let a = button_events(&l.update(&[s(Hand::Right, Some((x, 40.0)), 0.9)], 0.02));
+            let b = button_events(&l.update(&[s(Hand::Right, Some((x, 40.0)), 0.0)], 0.02));
+            [a, b].concat()
+        };
+        assert_eq!(tap(&mut l, 40.0, 0.02)[0].2, egui::pos2(40.0, 40.0));
+        // 15 pt off, 0.1 s later: lands on the first click.
+        assert!(tap(&mut l, 55.0, 0.1).iter().all(|e| e.2 == egui::pos2(40.0, 40.0)));
+        // Too late: lands where aimed.
+        assert_eq!(tap(&mut l, 55.0, 1.0)[0].2, egui::pos2(55.0, 40.0));
+        // Too far: lands where aimed.
+        assert_eq!(tap(&mut l, 120.0, 0.05)[0].2, egui::pos2(120.0, 40.0));
     }
 
     #[test]
