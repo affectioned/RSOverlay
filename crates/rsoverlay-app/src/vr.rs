@@ -844,6 +844,9 @@ mod imp {
                 if last_battery_poll.is_none_or(|t| t.elapsed() >= BATTERY_POLL) {
                     last_battery_poll = Some(Instant::now());
                     dev_view.set_batteries(sys.batteries().iter().map(reading).collect());
+                    if dev_view.take_alert_sound() {
+                        rsoverlay_audio::typing::play_alert_chime();
+                    }
                 }
             }
 
@@ -869,8 +872,9 @@ mod imp {
                     }
                     wrist_parent = target;
                 }
-                wrist.set_visible(&overlay, wrist_parent.is_some());
             }
+            // Settings › VR › Hide wrist toolbar applies immediately.
+            wrist.set_visible(&overlay, wrist_parent.is_some() && !dev_view.vr_hide_wrist);
 
             let (hmd, mut controllers) = system.as_ref().map(|s| s.tracking()).unwrap_or_default();
             // Buttons/axes from SteamVR Input (user's bindings), poses

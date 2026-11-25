@@ -69,12 +69,12 @@ Last reviewed: M60 (2026-11-24).
 | Wrist toolbar button customisation | ✅ | M55 |
 | Wrist offsets / rotation / scale / opacity / clip angle | ✅ | grab to move + scale, opacity (M44), clip angle shared with all panels |
 | Dominant-hand setting | ✅ | Laser hand Right / Left; the wrist goes on the other hand |
-| Hide wrist overlay | ❌ | |
+| Hide wrist overlay | ✅ | M66, Settings › VR; dashboard still summoned by double-press |
 | Wrist background theme image | ❌ | |
 | 12/24h + date format | 🟡 | follows system locale; no override |
 | Battery % on wrist | ✅ | M29 / M54, with playtime estimates (M51) |
 | Low-battery warning % | ✅ | M29 |
-| Low-battery **sound** | ❌ | toast only |
+| Low-battery **sound** | ✅ | M66: synthesised chime with the toast (Battery card toggle) |
 
 ## System
 
@@ -112,7 +112,6 @@ Last reviewed: M60 (2026-11-24).
 
 ## Next parity gaps (value ÷ cost)
 
-1. **Hide wrist** + **low-battery sound**.
-2. **Window thumbnails** in the Desktop picker.
-3. **Notification scale / offsets.**
-4. Touch injection, gamepad bindings, curve bias (smaller audiences).
+1. **Window thumbnails** in the Desktop picker.
+2. **Notification scale / offsets.**
+3. Touch injection, gamepad bindings, curve bias (smaller audiences).

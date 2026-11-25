@@ -57,15 +57,15 @@ Last reviewed 2026-11-24. Parity detail lives in
   (`[vr_state]`); Restore last session (on by default) reopens the open
   windows at startup; config change detection is structural; pending
   saves flush on exit; round-trip test guards every setting.
+- **M66:** hide the wrist toolbar (Settings › VR); low-battery chime.
 
 ## XSOverlay parity: remaining gaps
 
 Ranked by value ÷ cost; full table in [XSO_PARITY.md](XSO_PARITY.md).
 
-1. **Hide wrist** + **low-battery sound**.
-2. **Window thumbnails** in the Desktop picker.
-3. **Notification scale / offsets.**
-4. Touch injection, gamepad bindings, curve bias.
+1. **Window thumbnails** in the Desktop picker.
+2. **Notification scale / offsets.**
+3. Touch injection, gamepad bindings, curve bias.
 
 ## Working in VR (productivity track)
 

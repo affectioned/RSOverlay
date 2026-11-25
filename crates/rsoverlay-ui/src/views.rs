@@ -221,6 +221,12 @@ pub struct DevView {
     pub show_history: bool,
     pub show_battery: bool,
     pub battery_warn_pct: u8,
+    /// Chime with the low-battery toast.
+    pub battery_sound: bool,
+    /// A low-battery alert fired; the VR shell plays the chime.
+    alert_sound_pending: bool,
+    /// Settings › VR: hide the wrist toolbar.
+    pub vr_hide_wrist: bool,
     pub show_macros: bool,
     pub macros: crate::macros::MacroDeck,
     pub show_volume: bool,
@@ -343,6 +349,9 @@ impl Default for DevView {
             show_history: false,
             show_battery: true,
             battery_warn_pct: 20,
+            battery_sound: true,
+            alert_sound_pending: false,
+            vr_hide_wrist: false,
             show_macros: true,
             macros: crate::macros::MacroDeck::default(),
             show_volume: true,
@@ -431,6 +440,11 @@ impl DevView {
 
     /// Clear every live toast + the full history. XSO's #131 cluster:
     /// one action dismisses everything, including the backlog.
+    /// A low-battery chime is due (taken once by the VR shell).
+    pub fn take_alert_sound(&mut self) -> bool {
+        std::mem::take(&mut self.alert_sound_pending)
+    }
+
     pub fn clear_all_notifications(&mut self) {
         self.toasts.clear();
         self.history.clear();
@@ -442,6 +456,7 @@ impl DevView {
     /// Alerts fire even with the card hidden — that's the point of them.
     pub fn set_batteries(&mut self, readings: Vec<BatteryReading>) {
         for n in self.low_battery.update(&readings, self.battery_warn_pct) {
+            self.alert_sound_pending |= self.battery_sound;
             self.push_notification(n);
         }
         self.battery_est.update(self.started.elapsed().as_secs_f64(), &readings);
@@ -494,7 +509,7 @@ impl DevView {
             K::NowPlaying => media_card(ui, self.media.as_ref(), accent),
             K::System => self.system.show(ui, self.last_fps, accent),
             K::Volume => self.volume.show(ui, accent),
-            K::Battery => crate::battery::card(ui, &self.batteries, &self.battery_est, &mut self.battery_warn_pct, &mut self.battery_osc, accent),
+            K::Battery => crate::battery::card(ui, &self.batteries, &self.battery_est, &mut self.battery_warn_pct, &mut self.battery_sound, &mut self.battery_osc, accent),
             K::Macros => self.macros.card(ui, injector, accent),
             K::Chat => {
                 if let Some(msg) = chatbox_card(ui, &mut self.chat_draft, &mut self.now_playing.enabled, accent) {
@@ -654,7 +669,7 @@ impl DevView {
                         Some("night-light")
                     }
                     2 => {
-                        vr_card(ui, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, accent);
+                        vr_card(ui, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, &mut self.vr_hide_wrist, accent);
                         Some("vr")
                     }
                     3 => {
@@ -963,7 +978,7 @@ impl DevView {
                         l.add_space(theme::GUTTER);
                     }
                     if self.show_battery {
-                        crate::battery::card(r, &self.batteries, &self.battery_est, &mut self.battery_warn_pct, &mut self.battery_osc, accent);
+                        crate::battery::card(r, &self.batteries, &self.battery_est, &mut self.battery_warn_pct, &mut self.battery_sound, &mut self.battery_osc, accent);
                         r.add_space(theme::GUTTER);
                     }
                     if self.show_macros {
@@ -1052,7 +1067,7 @@ impl DevView {
                     l.add_space(theme::GUTTER);
                     self.night_light.card(l, minute_of_day(), accent);
                     l.add_space(theme::GUTTER);
-                    vr_card(l, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, accent);
+                    vr_card(l, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, &mut self.vr_hide_wrist, accent);
                     l.add_space(theme::GUTTER);
                     pointer_card(l, &mut self.cursor_smoothing, &mut self.scroll_speed, &mut self.pointer, accent);
                     l.add_space(theme::GUTTER);
@@ -1160,7 +1175,7 @@ fn accessibility_card(ui: &mut egui::Ui, scale: &mut f32, lasers: &mut bool, las
     });
 }
 
-fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opacity: &mut f32, accent: egui::Color32) {
+fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opacity: &mut f32, hide_wrist: &mut bool, accent: egui::Color32) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         card_header(ui, icons::POINTER, "VR", accent);
@@ -1186,6 +1201,8 @@ fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opac
             crate::theme::fit_slider(ui);
             ui.add(egui::Slider::new(wrist_opacity, 0.2..=1.0).fixed_decimals(2));
         });
+        ui.checkbox(hide_wrist, "Hide wrist toolbar")
+            .on_hover_text("No wrist overlay at all. Open the dashboard with a double-press of A / X (or the menu button) on the wrist hand.");
     });
 }
 

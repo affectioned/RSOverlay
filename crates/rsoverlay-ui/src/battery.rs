@@ -153,6 +153,7 @@ pub fn card(
     readings: &[BatteryReading],
     estimates: &BatteryEstimator,
     warn_pct: &mut u8,
+    sound: &mut bool,
     osc: &mut BatteryOsc,
     accent: egui::Color32,
 ) {
@@ -177,6 +178,7 @@ pub fn card(
             crate::theme::fit_slider(ui);
             ui.add(egui::Slider::new(warn_pct, 5..=50).suffix("%"));
         });
+        ui.checkbox(sound, "chime when low").on_hover_text("Play a short chime in VR with the low-battery alert");
         ui.checkbox(&mut osc.enabled, "send to VRChat avatar").on_hover_text(format!(
             "OSC /avatar/parameters/{p}/HMD, {p}/LeftHand, {p}/Charging/HMD ... (float 0-1 / bool)",
             p = osc.prefix

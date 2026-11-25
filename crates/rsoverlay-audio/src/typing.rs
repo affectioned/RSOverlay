@@ -98,6 +98,34 @@ pub fn builtin(kind: KeySound, volume: f32) -> Vec<u8> {
     wav_pcm16_mono(&samples, RATE)
 }
 
+/// Low-battery chime: two soft descending tones (≈ 0.4 s), synthesised.
+pub fn alert_chime(volume: f32) -> Vec<u8> {
+    let note = |f: f32, len_s: f32| -> Vec<f32> {
+        let n = (len_s * RATE as f32) as usize;
+        (0..n)
+            .map(|i| {
+                let t = i as f32 / RATE as f32;
+                // Soft attack, bell-like decay, a touch of 2nd harmonic.
+                let env = (t / 0.008).min(1.0) * (-t / 0.09).exp();
+                env * ((std::f32::consts::TAU * f * t).sin() + 0.25 * (std::f32::consts::TAU * 2.0 * f * t).sin())
+            })
+            .collect()
+    };
+    let mut raw = note(880.0, 0.18);
+    raw.extend(note(660.0, 0.24));
+    let peak = raw.iter().fold(0.0_f32, |m, s| m.max(s.abs())).max(1e-6);
+    let scale = 0.85 * volume.clamp(0.0, 1.0) * i16::MAX as f32 / peak;
+    let samples: Vec<i16> = raw.iter().map(|s| (s * scale).round() as i16).collect();
+    wav_pcm16_mono(&samples, RATE)
+}
+
+/// Play the low-battery chime. The buffer is built once and lives for
+/// the whole process, so the asynchronous playback can never outlive it.
+pub fn play_alert_chime() {
+    static CHIME: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    play_bytes(CHIME.get_or_init(|| alert_chime(0.6)));
+}
+
 /// Minimal RIFF/WAVE container around mono PCM16 samples.
 fn wav_pcm16_mono(samples: &[i16], rate: u32) -> Vec<u8> {
     let data_len = (samples.len() * 2) as u32;
@@ -312,6 +340,15 @@ mod tests {
     }
 
     #[test]
+    fn alert_chime_is_a_short_valid_wav() {
+        let w = alert_chime(0.6);
+        assert_eq!(&w[0..4], b"RIFF");
+        let secs = (w.len() - 44) as f32 / 2.0 / 44_100.0;
+        assert!((0.35..0.5).contains(&secs), "{secs}");
+        assert!(scale_pcm16(&w, 0.5).is_some(), "parses as PCM16");
+    }
+
+    #[test]
     fn scaling_a_pcm16_wav_halves_samples_and_keeps_the_header() {
         let w = wav_pcm16_mono(&[1000, -2000, 32767], 8000);
         let s = scale_pcm16(&w, 0.5).unwrap();
@@ -348,11 +385,11 @@ mod tests {
         use windows::core::PCWSTR;
         use windows::Win32::Foundation::HMODULE;
         use windows::Win32::Media::Audio::{PlaySoundW, SND_MEMORY, SND_NODEFAULT, SND_SYNC};
-        for k in KeySound::ALL {
-            let w = builtin(k, 0.3);
+        let clips = KeySound::ALL.map(|k| (format!("{k:?}"), builtin(k, 0.3)));
+        for (name, w) in clips.into_iter().chain([("chime".to_string(), alert_chime(0.4))]) {
             // SAFETY: synchronous play; `w` outlives the call.
             let ok = unsafe { PlaySoundW(PCWSTR(w.as_ptr().cast()), HMODULE::default(), SND_MEMORY | SND_SYNC | SND_NODEFAULT) };
-            assert!(ok.as_bool(), "{k:?} rejected by PlaySoundW");
+            assert!(ok.as_bool(), "{name} rejected by PlaySoundW");
         }
     }
 

@@ -75,6 +75,9 @@ pub struct VrCfg {
     /// Reopen the windows / widgets that were open when VR last closed
     /// (a starred startup layout takes precedence).
     pub restore_session: bool,
+    /// Don't show the wrist toolbar (the dashboard is still summoned with
+    /// the controller's menu double-press).
+    pub hide_wrist: bool,
 }
 
 /// Where things were left in VR — not choices made in Settings, but
@@ -109,7 +112,7 @@ pub const DEFAULT_WRIST_COMPACT: u32 = 0x0F | (1 << 8) | (1 << 9) | (1 << 10) | 
 
 impl Default for VrCfg {
     fn default() -> Self {
-        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0x7F, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new(), long_press: false, long_press_s: 0.6, double_click_s: 0.4, restore_session: true }
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0x7F, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new(), long_press: false, long_press_s: 0.6, double_click_s: 0.4, restore_session: true, hide_wrist: false }
     }
 }
 
@@ -206,6 +209,8 @@ pub struct Appearance {
     pub reduce_motion: bool,
     /// Low-battery toast threshold, percent. Clamped to 5..=50 in UI.
     pub battery_warn_pct: u8,
+    /// Play a chime with the low-battery toast (VR).
+    pub battery_sound: bool,
 }
 
 impl Default for Appearance {
@@ -227,6 +232,7 @@ impl Default for Appearance {
             show_system: true,
             reduce_motion: false,
             battery_warn_pct: 20,
+            battery_sound: true,
         }
     }
 }

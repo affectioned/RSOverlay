@@ -141,6 +141,7 @@ pub fn seed_dev_view(
     dev.pointer.long_press_s = cfg.vr.long_press_s.clamp(0.3, 1.5);
     dev.pointer.double_click_s = cfg.vr.double_click_s.clamp(0.0, 0.8);
     dev.restore_session = cfg.vr.restore_session;
+    dev.vr_hide_wrist = cfg.vr.hide_wrist;
     dev.vr_state = cfg.vr_state.clone();
     dev.kb_prefs.packs = rsoverlay_audio::typing::list_packs(&rsoverlay_core::config::sounds_dir());
     dev.elevated = rsoverlay_input::elevation::current_process_elevated();
@@ -157,6 +158,7 @@ pub fn seed_dev_view(
         })
         .collect();
     dev.battery_warn_pct = cfg.appearance.battery_warn_pct.clamp(5, 50);
+    dev.battery_sound = cfg.appearance.battery_sound;
     if test.show_keyboard {
         dev.show_keyboard = true;
     }
@@ -281,6 +283,7 @@ pub fn config_from_dev_view(
         long_press_s: dev.pointer.long_press_s,
         double_click_s: dev.pointer.double_click_s,
         restore_session: dev.restore_session,
+        hide_wrist: dev.vr_hide_wrist,
     };
     out.vr_state = dev.vr_state.clone();
     out.appearance.reduce_motion = dev.reduce_motion;
@@ -295,6 +298,7 @@ pub fn config_from_dev_view(
             .collect(),
     );
     out.appearance.battery_warn_pct = dev.battery_warn_pct;
+    out.appearance.battery_sound = dev.battery_sound;
     out.placement.anchor = match dev.placement.anchor {
         UiAnchor::Wrist => PlacementAnchor::Wrist,
         UiAnchor::Hmd => PlacementAnchor::Hmd,
@@ -1206,6 +1210,7 @@ mod config_roundtrip_tests {
         a.show_system = !a.show_system;
         a.reduce_motion = !a.reduce_motion;
         a.battery_warn_pct = 33;
+        a.battery_sound = false;
         let p = &mut c.placement;
         p.anchor = rsoverlay_core::PlacementAnchor::World;
         p.offset_x = 0.5;
@@ -1241,6 +1246,7 @@ mod config_roundtrip_tests {
         v.long_press_s = 0.9;
         v.double_click_s = 0.2;
         v.restore_session = false;
+        v.hide_wrist = true;
         c.vr_state = VrState {
             wrist_pose: Some([[1.0, 0.0, 0.0, 0.1], [0.0, 1.0, 0.0, 0.2], [0.0, 0.0, 1.0, 0.3]]),
             wrist_width: Some(0.3),
