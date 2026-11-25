@@ -43,7 +43,8 @@ Last reviewed 2026-11-24. Parity detail lives in
   neighbours so seams stay flush; layout slots remember docked groups.
   User-editable compact wrist (pick any actions + clock, batteries,
   media, layout slots, views) from Settings or in VR (More → Edit, tap
-  to show / hide); batteries on the compact wrist by default.
+  to show / hide); batteries on the compact wrist by default. Wrist
+  modules: session timer, CPU / GPU, RAM and Alerts status chips.
 
 ## XSOverlay parity: remaining gaps
 

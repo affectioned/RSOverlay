@@ -55,12 +55,13 @@ pub struct VrCfg {
     /// as `wrist_buttons`), then clock, media, batteries, layouts,
     /// views (see `rsoverlay_ui::wrist::compact`). Default: Add,
     /// Recenter, Keyboard, Dashboard + clock, media, batteries.
-    pub wrist_compact: u16,
+    pub wrist_compact: u32,
 }
 
-/// Compact wrist default: the four everyday actions + clock, media and
-/// device batteries (battery is the most-glanced wrist readout after time).
-pub const DEFAULT_WRIST_COMPACT: u16 = 0x0F | (1 << 8) | (1 << 9) | (1 << 10);
+/// Compact wrist default: the four everyday actions + clock (with the
+/// session timer), media and device batteries (battery is the
+/// most-glanced wrist readout after time).
+pub const DEFAULT_WRIST_COMPACT: u32 = 0x0F | (1 << 8) | (1 << 9) | (1 << 10) | (1 << 13);
 
 impl Default for VrCfg {
     fn default() -> Self {

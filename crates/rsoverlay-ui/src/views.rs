@@ -288,7 +288,7 @@ pub struct DevView {
     /// Wrist toolbar: which of the 7 action buttons show (bit i).
     pub wrist_buttons: u8,
     /// Compact wrist contents (see `wrist::compact`).
-    pub wrist_compact: u16,
+    pub wrist_compact: u32,
     /// XSO-style knobs: cursor smoothing 0..1, scroll speed multiplier.
     pub cursor_smoothing: f32,
     pub scroll_speed: f32,
@@ -506,6 +506,10 @@ impl DevView {
             .map(|b| self.battery_est.estimate(b).filter(|e| !e.charging).map(|e| crate::battery::format_duration(e.secs)))
             .collect();
         let media = self.media.as_ref().filter(|m| !m.title.is_empty());
+        // System load only when a chip needs it: the sampler is a thread.
+        use crate::wrist::compact as wc;
+        let wants_sys = self.wrist_editing || self.wrist_expanded || self.wrist_compact & (wc::PERF | wc::RAM) != 0;
+        let sys = if wants_sys { self.system.snapshot() } else { None };
         let data = crate::wrist::WristData {
             batteries: &self.batteries,
             estimates: &est,
@@ -522,6 +526,8 @@ impl DevView {
             compact: self.wrist_compact,
             expanded: self.wrist_expanded,
             editing: self.wrist_editing,
+            system: sys.as_ref(),
+            unread: self.unread,
         };
         let act = crate::wrist::show(ctx, &data);
         if act.toggle_more {
@@ -1161,7 +1167,7 @@ fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opac
     });
 }
 
-fn wrist_toolbar_card(ui: &mut egui::Ui, mask: &mut u8, compact: &mut u16, media_theme: &mut bool, accent: egui::Color32) {
+fn wrist_toolbar_card(ui: &mut egui::Ui, mask: &mut u8, compact: &mut u32, media_theme: &mut bool, accent: egui::Color32) {
     use crate::wrist::compact as c;
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -1192,6 +1198,12 @@ fn wrist_toolbar_card(ui: &mut egui::Ui, mask: &mut u8, compact: &mut u16, media
                 compact_toggle(ui, compact, bit, name);
             }
         });
+        ui.horizontal_wrapped(|ui| {
+            ui.label(theme::caption("Status chips"));
+            for &(bit, name) in c::CHIPS {
+                compact_toggle(ui, compact, bit, name);
+            }
+        });
         if ui.small_button("Default compact set").clicked() {
             *compact = rsoverlay_core::config::DEFAULT_WRIST_COMPACT;
         }
@@ -1200,7 +1212,7 @@ fn wrist_toolbar_card(ui: &mut egui::Ui, mask: &mut u8, compact: &mut u16, media
     });
 }
 
-fn compact_toggle(ui: &mut egui::Ui, compact: &mut u16, bit: u16, name: &str) {
+fn compact_toggle(ui: &mut egui::Ui, compact: &mut u32, bit: u32, name: &str) {
     let mut on = *compact & bit != 0;
     if ui.checkbox(&mut on, name).changed() {
         *compact ^= bit;

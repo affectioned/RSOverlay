@@ -35,8 +35,9 @@ mod imp {
     const CLICK_HAPTIC_US: u16 = 1200;
 
     /// Wrist watch: small texture, 2 texels/pt → 512 × 256 pt face.
-    /// Wrist toolbar stack: 600 × 410 pt at 2 texels/pt.
-    const WRIST_TEX: (u32, u32) = (1200, 820);
+    /// Wrist toolbar stack: 600 × 460 pt at 2 texels/pt (room for every
+    /// module at once in edit mode).
+    const WRIST_TEX: (u32, u32) = (1200, 920);
     const WRIST_PPP: f32 = 2.0;
     const WRIST_WIDTH_M: f32 = 0.24;
     /// Wrist mount, in the left controller's frame (−Z = pointing
