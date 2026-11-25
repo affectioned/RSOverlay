@@ -265,7 +265,18 @@ pub fn run(
     let window = Arc::new(
         WindowBuilder::new()
             .with_title("RSOverlay — VR Preview  (1 work · 2 gaming · 3 social · 4 dashboard · 5 wrist · 6 wrist expanded · R reset view)")
-            .with_inner_size(winit::dpi::PhysicalSize::new(INITIAL_WIN_W, INITIAL_WIN_H))
+            .with_inner_size({
+                // Store shots need the exact size; otherwise fit the monitor.
+                let want = winit::dpi::PhysicalSize::new(INITIAL_WIN_W, INITIAL_WIN_H);
+                match &test.screenshot {
+                    Some(_) => winit::dpi::Size::Physical(want),
+                    None => {
+                        let scale = event_loop.primary_monitor().map_or(1.0, |m| m.scale_factor());
+                        let l = want.to_logical::<f64>(scale);
+                        winit::dpi::Size::Logical(crate::preview::fit_to_monitor(&event_loop, (l.width, l.height)))
+                    }
+                }
+            })
             .with_min_inner_size(winit::dpi::LogicalSize::new(800u32, 600u32))
             .build(&event_loop)
             .context("creating VR preview window")?,

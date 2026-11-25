@@ -598,11 +598,22 @@ use winit::{
 /// shipping headset through late-2026. Power users on Crystal Super / XR-4
 /// can override via `[render] overlay_texture_size` in config.toml.
 const OVERLAY_TEX_SIZE: u32 = 2048;
-// Tall enough that every left-column card (Media, Stats, Forward,
-// Chatbox, Appearance) plus the Clock bar fits without scrolling at
-// default ppp. If users want smaller they can resize down.
+// Preferred size: every Home card fits without scrolling. Screenshot runs
+// use exactly this (deterministic captures); interactive runs shrink it to
+// fit the monitor (see `fit_to_monitor`).
 const INITIAL_WIN_W: u32 = 1280;
 const INITIAL_WIN_H: u32 = 1600;
+
+/// `want` (logical px), shrunk to at most 90 % of the primary monitor's
+/// width and 88 % of its height (taskbar + title bar room), respecting the
+/// monitor's scale factor. Unknown monitor → `want` unchanged.
+pub fn fit_to_monitor<T>(target: &winit::event_loop::EventLoopWindowTarget<T>, want: (f64, f64)) -> winit::dpi::LogicalSize<f64> {
+    let Some(m) = target.primary_monitor().or_else(|| target.available_monitors().next()) else {
+        return winit::dpi::LogicalSize::new(want.0, want.1);
+    };
+    let screen = m.size().to_logical::<f64>(m.scale_factor());
+    winit::dpi::LogicalSize::new(want.0.min(screen.width * 0.90), want.1.min(screen.height * 0.88))
+}
 
 pub fn run(
     mut notify: Option<NotifyChannel>,
@@ -613,11 +624,13 @@ pub fn run(
     config_path: std::path::PathBuf,
 ) -> Result<()> {
     let event_loop = EventLoop::new().context("creating winit event loop")?;
+    let want = (f64::from(INITIAL_WIN_W), f64::from(INITIAL_WIN_H));
+    let size = if test.screenshot.is_some() { winit::dpi::LogicalSize::new(want.0, want.1) } else { fit_to_monitor(&event_loop, want) };
     let window = Arc::new(
         WindowBuilder::new()
-            .with_title("RSOverlay — Preview")
-            .with_inner_size(winit::dpi::LogicalSize::new(INITIAL_WIN_W, INITIAL_WIN_H))
-            .with_min_inner_size(winit::dpi::LogicalSize::new(900u32, 760u32))
+            .with_title("RSOverlay")
+            .with_inner_size(size)
+            .with_min_inner_size(winit::dpi::LogicalSize::new(900u32, 600u32))
             .build(&event_loop)
             .context("creating preview window")?,
     );
