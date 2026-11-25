@@ -17,6 +17,7 @@ rsoverlay-core.workspace = true
 rsoverlay-notify.workspace = true
 rsoverlay-osc.workspace = true
 rsoverlay-audio.workspace = true
+rsoverlay-discord.workspace = true
 rsoverlay-sysinfo.workspace = true
 rsoverlay-input.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }

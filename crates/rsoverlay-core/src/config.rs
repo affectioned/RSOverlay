@@ -247,6 +247,8 @@ pub struct Appearance {
     pub battery_warn_pct: u8,
     /// Play a chime with the low-battery toast (VR).
     pub battery_sound: bool,
+    /// Show "Using RSOverlay" on the user's Discord profile.
+    pub discord_presence: bool,
 }
 
 impl Default for Appearance {
@@ -269,6 +271,7 @@ impl Default for Appearance {
             reduce_motion: false,
             battery_warn_pct: 20,
             battery_sound: true,
+            discord_presence: true,
         }
     }
 }

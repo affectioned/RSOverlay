@@ -2307,6 +2307,7 @@ dependencies = [
  "egui_extras",
  "rsoverlay-audio",
  "rsoverlay-core",
+ "rsoverlay-discord",
  "rsoverlay-input",
  "rsoverlay-notify",
  "rsoverlay-osc",

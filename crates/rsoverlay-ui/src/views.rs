@@ -259,6 +259,8 @@ pub struct DevView {
     pub notif: NotificationPrefs,
     /// Toasts are drawn on their own panel (VR), not over the dashboard.
     pub toasts_external: bool,
+    /// Settings › Discord: show RSOverlay on the Discord profile.
+    pub discord_presence: bool,
     /// Settings › VR: hide the wrist toolbar.
     pub vr_hide_wrist: bool,
     pub show_macros: bool,
@@ -387,6 +389,7 @@ impl Default for DevView {
             pending_sounds: Vec::new(),
             notif: NotificationPrefs::default(),
             toasts_external: false,
+            discord_presence: true,
             vr_hide_wrist: false,
             show_macros: true,
             macros: crate::macros::MacroDeck::default(),
@@ -763,6 +766,10 @@ impl DevView {
                         Some("stats")
                     }
                     11 => {
+                        discord_card(ui, &mut self.discord_presence, accent);
+                        Some("discord")
+                    }
+                    12 => {
                         let _ = reset_card(ui, &mut self.reset_armed_at);
                         Some("reset")
                     }
@@ -1156,6 +1163,8 @@ impl DevView {
                     let snap = self.system.snapshot();
                     performance_card(r, snap.as_ref(), self.frame_ms, &self.frame_ms_hist, self.last_fps, self.notifications_received, accent);
                     r.add_space(theme::GUTTER);
+                    discord_card(r, &mut self.discord_presence, accent);
+                    r.add_space(theme::GUTTER);
                     if reset_card(r, &mut self.reset_armed_at) {
                         self.reset_requested = true;
                     }
@@ -1191,6 +1200,31 @@ fn admin_card(ui: &mut egui::Ui, run_as_admin: &mut bool, elevated: bool, accent
 
 /// Two-step "Reset all settings": first click arms for 4 s, second
 /// confirms. Returns true on confirm.
+/// Discord Rich Presence on/off + live status.
+fn discord_card(ui: &mut egui::Ui, on: &mut bool, accent: egui::Color32) {
+    use rsoverlay_discord::Status;
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::CHAT, "Discord", accent);
+        ui.add_space(6.0);
+        let status = rsoverlay_discord::status();
+        ui.add_enabled_ui(status != Status::Unavailable, |ui| {
+            ui.checkbox(on, "Show RSOverlay on my Discord profile").on_hover_text(
+                "Friends see \"Using RSOverlay\" (Desktop / In VR) with a timer. Needs the Discord desktop app, with User Settings › Activity Privacy › Share my activity on.",
+            );
+        });
+        let (text, color) = match status {
+            Status::Unavailable => ("Not available in this build", theme::FG_FAINT),
+            Status::Off => ("Off", theme::FG_MUTED),
+            Status::Waiting => ("Waiting for Discord — is the desktop app running?", theme::FG_MUTED),
+            Status::Connected => ("Connected — showing on your profile", accent),
+        };
+        ui.label(egui::RichText::new(text).size(theme::SIZE_CAPTION + 1.0).color(color));
+        // Status changes come from the worker thread: keep it fresh.
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
+    });
+}
+
 fn reset_card(ui: &mut egui::Ui, armed_at: &mut Option<f64>) -> bool {
     let now = ui.input(|i| i.time);
     if armed_at.is_some_and(|t| now - t > 4.0) {

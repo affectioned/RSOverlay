@@ -166,6 +166,7 @@ pub fn seed_dev_view(
         .collect();
     dev.battery_warn_pct = cfg.appearance.battery_warn_pct.clamp(5, 50);
     dev.battery_sound = cfg.appearance.battery_sound;
+    dev.discord_presence = cfg.appearance.discord_presence;
     if test.show_keyboard {
         dev.show_keyboard = true;
     }
@@ -244,6 +245,9 @@ pub fn seed_dev_view(
 /// Play any alert sounds the dashboard queued, through the user's slot
 /// choices (shared by the desktop window and the VR shell).
 pub fn play_alert_sounds(dev: &mut rsoverlay_ui::views::DevView) {
+    // Same per-frame hook both shells call: keep Discord in step with
+    // the Settings toggle (an atomic store, nothing more).
+    rsoverlay_discord::set_enabled(dev.discord_presence);
     let due = dev.take_sounds();
     if due.is_empty() {
         return;
@@ -331,6 +335,7 @@ pub fn config_from_dev_view(
     );
     out.appearance.battery_warn_pct = dev.battery_warn_pct;
     out.appearance.battery_sound = dev.battery_sound;
+    out.appearance.discord_presence = dev.discord_presence;
     out.placement.anchor = match dev.placement.anchor {
         UiAnchor::Wrist => PlacementAnchor::Wrist,
         UiAnchor::Hmd => PlacementAnchor::Hmd,
@@ -1247,6 +1252,7 @@ mod config_roundtrip_tests {
         a.reduce_motion = !a.reduce_motion;
         a.battery_warn_pct = 33;
         a.battery_sound = false;
+        a.discord_presence = false;
         let p = &mut c.placement;
         p.anchor = rsoverlay_core::PlacementAnchor::World;
         p.offset_x = 0.5;

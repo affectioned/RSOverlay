@@ -322,7 +322,10 @@ fn main() -> Result<()> {
         RuntimeMode::VrPreview => rsoverlay_discord::RuntimeMode::VrPreview,
         RuntimeMode::Vr => rsoverlay_discord::RuntimeMode::Vr,
     };
-    let _discord_handle = match (&args.discord_app_id, args.no_discord) {
+    // Toggle from Settings; the running UI keeps it in sync after this.
+    rsoverlay_discord::set_enabled(config.appearance.discord_presence);
+    let app_id = args.discord_app_id.as_deref().or(rsoverlay_discord::BUILTIN_APP_ID).filter(|id| !id.trim().is_empty());
+    let _discord_handle = match (app_id, args.no_discord) {
         (Some(id), false) => Some(rsoverlay_discord::spawn(&rt_handle, id, discord_mode)),
         _ => None,
     };
