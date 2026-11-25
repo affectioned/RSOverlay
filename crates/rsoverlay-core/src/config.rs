@@ -19,6 +19,8 @@ pub struct Config {
     pub vr_state: VrState,
     /// VR toast placement + alert sounds.
     pub notifications: NotificationsCfg,
+    /// What Discord Rich Presence shares (on/off is `appearance.discord_presence`).
+    pub discord: DiscordCfg,
     /// Virtual StreamDeck buttons. Serialized as `[[macros]]` tables.
     /// Must stay the last field: TOML arrays of tables have to follow
     /// every plain table in the document.
@@ -132,6 +134,26 @@ impl Default for NotificationsCfg {
             sound_error: "builtin".into(),
             sound_low_battery: "builtin".into(),
         }
+    }
+}
+
+/// What Discord Rich Presence shares. Window titles are never shared.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiscordCfg {
+    /// "In VR · 3 windows open" (count only).
+    pub show_windows: bool,
+    /// Headset battery + time left.
+    pub show_battery: bool,
+    /// Current song + artist (off by default: visible to everyone).
+    pub show_music: bool,
+    /// "Get RSOverlay" button linking to the project.
+    pub show_button: bool,
+}
+
+impl Default for DiscordCfg {
+    fn default() -> Self {
+        Self { show_windows: true, show_battery: true, show_music: false, show_button: true }
     }
 }
 

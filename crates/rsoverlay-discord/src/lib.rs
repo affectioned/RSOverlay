@@ -11,9 +11,9 @@
 //! no-op that retries every few seconds, so starting Discord later works.
 
 use anyhow::Result;
-use discord_rich_presence::activity::{Activity, Assets, Timestamps};
+use discord_rich_presence::activity::{Activity, Assets, Button, Timestamps};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, Mutex};
@@ -30,7 +30,7 @@ pub enum RuntimeMode {
 impl RuntimeMode {
     fn state_text(&self) -> &'static str {
         match self {
-            Self::Preview => "Desktop Preview",
+            Self::Preview => "On the desktop",
             Self::VrPreview => "VR Preview",
             Self::Vr => "In VR",
         }
@@ -74,6 +74,67 @@ static ENABLED: AtomicBool = AtomicBool::new(false);
 static AVAILABLE: AtomicBool = AtomicBool::new(false);
 /// The worker currently holds a live presence.
 static CONNECTED: AtomicBool = AtomicBool::new(false);
+
+/// Extra detail shown under the mode, built by the UI from the user's
+/// Settings › Discord choices. Never contains window titles.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Details {
+    /// Open window overlays (count only), if the user shares it.
+    pub windows: Option<usize>,
+    /// Second-line facts, rotated every refresh (battery, now playing…).
+    pub lines: Vec<String>,
+    /// Show the "Get RSOverlay" button.
+    pub button: bool,
+}
+
+static DETAILS: std::sync::Mutex<Option<Details>> = std::sync::Mutex::new(None);
+/// Bumped whenever [`DETAILS`] changes, so the worker knows to repost.
+static DETAILS_GEN: AtomicU64 = AtomicU64::new(0);
+
+/// Update the presence details. Cheap when nothing changed (one compare).
+pub fn set_details(d: Details) {
+    if let Ok(mut cur) = DETAILS.lock() {
+        if cur.as_ref() != Some(&d) {
+            *cur = Some(d);
+            DETAILS_GEN.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+fn current_details() -> Details {
+    DETAILS.lock().ok().and_then(|d| d.clone()).unwrap_or_default()
+}
+
+/// Where the "Get RSOverlay" button points.
+pub const REPO_URL: &str = "https://github.com/affectioned/RSOverlay";
+
+/// Discord caps presence strings at 128 bytes (and wants ≥ 2 chars).
+/// Truncates on a char boundary, adding "…" when cut. O(n).
+pub fn clip(s: &str) -> String {
+    const MAX: usize = 128;
+    let s = s.trim();
+    if s.len() <= MAX {
+        return if s.chars().count() < 2 { format!("{s:<2}") } else { s.to_string() };
+    }
+    let ell = '…';
+    let mut end = MAX - ell.len_utf8();
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{ell}", s[..end].trim_end())
+}
+
+/// The two presence lines for a mode + details, rotating the second line
+/// by `rot`. Pure, so it's tested without Discord.
+pub fn compose(mode: &RuntimeMode, d: &Details, rot: usize) -> (String, String) {
+    let top = match d.windows {
+        Some(1) => format!("{} · 1 window open", mode.state_text()),
+        Some(n) if n > 1 => format!("{} · {n} windows open", mode.state_text()),
+        _ => mode.state_text().to_string(),
+    };
+    let second = if d.lines.is_empty() { "Using RSOverlay".to_string() } else { d.lines[rot % d.lines.len()].clone() };
+    (clip(&top), clip(&second))
+}
 
 /// Turn presence on / off live (Settings toggle). Cheap; call freely.
 pub fn set_enabled(on: bool) {
@@ -120,6 +181,8 @@ pub fn spawn(rt: &tokio::runtime::Handle, app_id: &str, initial_mode: RuntimeMod
         let mut current_mode = initial_mode;
         let mut last_attempt: Option<std::time::Instant> = None;
         let mut last_push = std::time::Instant::now();
+        let mut pushed_gen = u64::MAX;
+        let mut rot = 0usize;
         let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
         loop {
             tokio::select! {
@@ -127,7 +190,7 @@ pub fn spawn(rt: &tokio::runtime::Handle, app_id: &str, initial_mode: RuntimeMod
                     Some(Msg::SetMode(m)) => {
                         current_mode = m;
                         if let Some(c) = &client {
-                            if push_activity(c, &current_mode, started_at).await.is_err() {
+                            if push_activity(c, &current_mode, started_at, rot).await.is_err() {
                                 client = None;
                             }
                         }
@@ -150,19 +213,29 @@ pub fn spawn(rt: &tokio::runtime::Handle, app_id: &str, initial_mode: RuntimeMod
                             last_attempt = Some(std::time::Instant::now());
                             client = connect(&app_id).await;
                             if let Some(c) = &client {
-                                if push_activity(c, &current_mode, started_at).await.is_ok() {
+                                if push_activity(c, &current_mode, started_at, rot).await.is_ok() {
                                     info!("Discord Rich Presence connected");
                                     last_push = std::time::Instant::now();
+                                    pushed_gen = DETAILS_GEN.load(Ordering::Relaxed);
                                 } else {
                                     client = None;
                                 }
                             }
                         }
-                        // Discord doesn't tick "elapsed" itself; repost. A
-                        // failed post means Discord went away: reconnect later.
-                        (Some(c), true) if last_push.elapsed() >= REFRESH => {
+                        // Repost when the details changed (no faster than
+                        // MIN_GAP: Discord rate-limits presence updates) and
+                        // every REFRESH, rotating the second line. A failed
+                        // post means Discord went away: reconnect later.
+                        (Some(c), true)
+                            if last_push.elapsed() >= REFRESH
+                                || (DETAILS_GEN.load(Ordering::Relaxed) != pushed_gen && last_push.elapsed() >= MIN_GAP) =>
+                        {
+                            if last_push.elapsed() >= REFRESH {
+                                rot = rot.wrapping_add(1);
+                            }
                             last_push = std::time::Instant::now();
-                            if let Err(e) = push_activity(c, &current_mode, started_at).await {
+                            pushed_gen = DETAILS_GEN.load(Ordering::Relaxed);
+                            if let Err(e) = push_activity(c, &current_mode, started_at, rot).await {
                                 debug!("Discord: refresh failed, will reconnect: {e:#}");
                                 client = None;
                             }
@@ -180,8 +253,10 @@ pub fn spawn(rt: &tokio::runtime::Handle, app_id: &str, initial_mode: RuntimeMod
 
 /// How often to retry while Discord isn't running.
 const RECONNECT: std::time::Duration = std::time::Duration::from_secs(10);
-/// How often to repost the presence (keeps elapsed time fresh).
+/// How often to repost the presence (rotates the second line).
 const REFRESH: std::time::Duration = std::time::Duration::from_secs(30);
+/// Fastest repost after a detail change (Discord allows ~5 per 20 s).
+const MIN_GAP: std::time::Duration = std::time::Duration::from_secs(15);
 
 async fn connect(app_id: &str) -> Option<Arc<Mutex<DiscordIpcClient>>> {
     let mut c = match DiscordIpcClient::new(app_id) {
@@ -213,21 +288,19 @@ async fn push_activity(
     client: &Arc<Mutex<DiscordIpcClient>>,
     mode: &RuntimeMode,
     started_at: i64,
+    rot: usize,
 ) -> Result<()> {
-    let activity = Activity::new()
-        .details("Using RSOverlay")
-        .state(mode.state_text())
+    let d = current_details();
+    let (top, second) = compose(mode, &d, rot);
+    let mut activity = Activity::new()
+        .details(&top)
+        .state(&second)
         .timestamps(Timestamps::new().start(started_at))
-        .assets(
-            Assets::new()
-                .large_image("rsoverlay-mark")
-                .large_text("RSOverlay"),
-        );
-    client
-        .lock()
-        .await
-        .set_activity(activity)
-        .map_err(|e| anyhow::anyhow!("set_activity: {e}"))?;
+        .assets(Assets::new().large_image("rsoverlay-mark").large_text("RSOverlay — open-source VR overlay"));
+    if d.button {
+        activity = activity.buttons(vec![Button::new("Get RSOverlay", REPO_URL)]);
+    }
+    client.lock().await.set_activity(activity).map_err(|e| anyhow::anyhow!("set_activity: {e}"))?;
     Ok(())
 }
 
@@ -236,4 +309,38 @@ fn unix_now() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn top_line_counts_windows_only() {
+        let d = |w| Details { windows: w, ..Default::default() };
+        assert_eq!(compose(&RuntimeMode::Vr, &d(None), 0).0, "In VR");
+        assert_eq!(compose(&RuntimeMode::Vr, &d(Some(0)), 0).0, "In VR");
+        assert_eq!(compose(&RuntimeMode::Vr, &d(Some(1)), 0).0, "In VR · 1 window open");
+        assert_eq!(compose(&RuntimeMode::Vr, &d(Some(3)), 0).0, "In VR · 3 windows open");
+    }
+
+    #[test]
+    fn second_line_rotates_and_has_a_fallback() {
+        let d = Details { lines: vec!["a1".into(), "b2".into()], ..Default::default() };
+        assert_eq!(compose(&RuntimeMode::Vr, &d, 0).1, "a1");
+        assert_eq!(compose(&RuntimeMode::Vr, &d, 1).1, "b2");
+        assert_eq!(compose(&RuntimeMode::Vr, &d, 2).1, "a1");
+        assert_eq!(compose(&RuntimeMode::Vr, &Details::default(), 7).1, "Using RSOverlay");
+    }
+
+    #[test]
+    fn clip_respects_discords_limits_on_char_boundaries() {
+        assert_eq!(clip("x"), "x ", "padded to Discord's 2-char minimum");
+        let long = "🎵".repeat(100); // 400 bytes of 4-byte chars
+        let c = clip(&long);
+        assert!(c.len() <= 128 && c.ends_with('…'));
+        assert!(c.chars().all(|ch| ch == '🎵' || ch == '…'));
+        let ascii = "a".repeat(200);
+        assert_eq!(clip(&ascii).len(), 128);
+    }
 }

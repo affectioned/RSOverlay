@@ -13,6 +13,7 @@
 
 mod mirror_source;
 mod preview;
+mod preview_dev;
 mod preview_mock;
 mod preview_vr;
 mod snapshot;

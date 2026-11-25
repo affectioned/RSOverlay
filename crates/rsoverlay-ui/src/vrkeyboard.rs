@@ -324,7 +324,9 @@ impl VrKeyboard {
             self.blocked = rsoverlay_input::elevation::foreground_input_blocked();
         }
         let mut out = KbFrame::default();
-        let screen = ctx.screen_rect();
+        // The space left after any panels (in VR: the whole texture; in
+        // the desktop dev harness: below the dev bar).
+        let screen = ctx.available_rect();
         let painter = ctx.layer_painter(egui::LayerId::background());
 
         // Card + top bar.

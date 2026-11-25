@@ -69,6 +69,9 @@ pub fn show(
 ) {
     let layout = crate::keyboard_layout::layout(state.layout);
     let (numbers, top, home, bottom) = (layout.numbers, layout.top, layout.home, layout.bottom);
+    // Keyboard-tight gaps (the theme's card spacing pushed the bottom row
+    // past the panel edge).
+    ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
     ui.vertical(|ui| {
         key_row(ui, state, injector, accent, numbers);
         key_row(ui, state, injector, accent, top);

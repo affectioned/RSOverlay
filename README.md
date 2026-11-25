@@ -79,8 +79,10 @@ time live, so you can check the claim yourself.
   low-battery alerts and an optional VRChat avatar parameter (OSC)
 - VRChat OSC chatbox, including "share now playing"
 - Macros, night light, 9 UI languages
-- Discord Rich Presence ("Using RSOverlay · In VR"), switched on / off
-  live in Settings › Discord
+- Discord Rich Presence ("In VR · 3 windows open", headset battery,
+  optionally your music), switched on / off live in Settings › Discord
+- Custom sounds for typing and every alert: drop in your own WAVs
+  ([how-to](docs/SOUNDS.md))
 - Accessibility: VR text size, reduce motion, laser visibility, cursor
   smoothing, scroll speed
 
@@ -104,9 +106,15 @@ time live, so you can check the claim yourself.
 
 ```bash
 cargo run -p rsoverlay-app -- --vr           # SteamVR (needs SteamVR running)
-cargo run -p rsoverlay-app                   # desktop preview of the dashboard
+cargo run -p rsoverlay-app                   # desktop window + dev harness
 cargo run -p rsoverlay-app -- --vr-preview   # the headset view, on your desktop
 ```
+
+The desktop window has a **DEV bar** across the top: switch live between the
+desktop dashboard, VR dashboard, wrist, VR keyboard (the mouse acts as the
+laser), widgets, window panel and toasts, each at its real VR size, and fire
+demo batteries, a low-battery alert or test notifications (default / warning
+/ error / silent). It's hidden in `--screenshot` runs (`RSO_DEV_BAR=1` keeps it).
 
 `--vr-preview` renders every panel in 3D through the same UI code as VR, so
 design work doesn't need a headset. Keys **1–6** switch layout presets (work,
@@ -187,6 +195,7 @@ crates/
 └── rsoverlay-core/      config, layouts, shared types
 docs/
 ├── ROADMAP.md  XSO_PARITY.md  ARCHITECTURE.md  NOTIFICATION_API.md  OSC.md
+├── SOUNDS.md   custom typing / alert sounds (user guide)
 └── store/      1920×1080 store screenshots
 ```
 

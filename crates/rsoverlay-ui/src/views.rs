@@ -261,6 +261,8 @@ pub struct DevView {
     pub toasts_external: bool,
     /// Settings › Discord: show RSOverlay on the Discord profile.
     pub discord_presence: bool,
+    /// What the presence shares.
+    pub discord: rsoverlay_core::config::DiscordCfg,
     /// Settings › VR: hide the wrist toolbar.
     pub vr_hide_wrist: bool,
     pub show_macros: bool,
@@ -390,6 +392,7 @@ impl Default for DevView {
             notif: NotificationPrefs::default(),
             toasts_external: false,
             discord_presence: true,
+            discord: Default::default(),
             vr_hide_wrist: false,
             show_macros: true,
             macros: crate::macros::MacroDeck::default(),
@@ -483,6 +486,34 @@ impl DevView {
 
     /// Clear every live toast + the full history. XSO's #131 cluster:
     /// one action dismisses everything, including the backlog.
+    /// Rich Presence details from the user's sharing choices. Only counts
+    /// and the user's own media/battery — never window titles.
+    pub fn discord_details(&self) -> rsoverlay_discord::Details {
+        let c = &self.discord;
+        let mut lines = Vec::new();
+        if c.show_battery {
+            if let Some(b) = self.batteries.iter().find(|b| b.label == "HMD") {
+                let pct = (b.fraction * 100.0).round() as u32;
+                let est = self.battery_est.estimate(b).filter(|e| !e.charging).map(|e| crate::battery::format_duration(e.secs));
+                lines.push(match (b.charging, est) {
+                    (true, _) => format!("⚡ Headset {pct}% · charging"),
+                    (false, Some(e)) => format!("🔋 Headset {pct}% · ~{e} left"),
+                    (false, None) => format!("🔋 Headset {pct}%"),
+                });
+            }
+        }
+        if c.show_music {
+            if let Some(m) = self.media.as_ref().filter(|m| !m.title.is_empty()) {
+                lines.push(if m.artist.is_empty() { format!("🎵 {}", m.title) } else { format!("🎵 {} — {}", m.title, m.artist) });
+            }
+        }
+        rsoverlay_discord::Details {
+            windows: c.show_windows.then_some(self.open_windows.len()),
+            lines,
+            button: c.show_button,
+        }
+    }
+
     /// Alert sounds due since the last call (the app plays them).
     pub fn take_sounds(&mut self) -> Vec<(rsoverlay_audio::alerts::AlertKind, f32)> {
         std::mem::take(&mut self.pending_sounds)
@@ -766,7 +797,7 @@ impl DevView {
                         Some("stats")
                     }
                     11 => {
-                        discord_card(ui, &mut self.discord_presence, accent);
+                        discord_card(ui, &mut self.discord_presence, &mut self.discord, accent);
                         Some("discord")
                     }
                     12 => {
@@ -943,6 +974,31 @@ impl DevView {
                     self.page = crate::shell::Page::Notifications;
                 }
             });
+        // Desktop keyboard: a real bottom panel, so the page shrinks above
+        // it instead of being covered.
+        if self.show_keyboard && !self.dock_layout {
+            if let Some(inj) = injector {
+                egui::TopBottomPanel::bottom("virtual-keyboard")
+                    .frame(root.inner_margin(egui::Margin { left: 20.0, right: 20.0, top: 4.0, bottom: 14.0 }))
+                    .show_separator_line(false)
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        theme::card().show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                card_header(ui, icons::KEYBOARD, "Keyboard", accent);
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if crate::window_panel::pill(ui, "✕", false, accent).on_hover_text("Hide keyboard").clicked() {
+                                        self.show_keyboard = false;
+                                    }
+                                });
+                            });
+                            ui.add_space(6.0);
+                            crate::keyboard::show(ui, &mut self.keyboard, inj, accent);
+                        });
+                    });
+            }
+        }
         egui::CentralPanel::default()
             .frame(root.inner_margin(egui::Margin { left: 20.0, right: 20.0, top: 8.0, bottom: 16.0 }))
             .show(ctx, |ui| {
@@ -963,19 +1019,6 @@ impl DevView {
                 }
             });
 
-        if self.show_keyboard && !self.dock_layout {
-            if let Some(inj) = injector {
-                egui::Area::new(egui::Id::new("virtual-keyboard"))
-                    .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -theme::GUTTER))
-                    .show(ctx, |ui| {
-                        theme::card().show(ui, |ui| {
-                            card_header(ui, icons::CHAT, "Keyboard", accent);
-                            ui.add_space(6.0);
-                            crate::keyboard::show(ui, &mut self.keyboard, inj, accent);
-                        });
-                    });
-            }
-        }
 
         if !self.toasts_external {
             self.paint_toasts(ctx, accent, 84.0, egui::Align2::RIGHT_TOP, -theme::GUTTER);
@@ -1163,7 +1206,7 @@ impl DevView {
                     let snap = self.system.snapshot();
                     performance_card(r, snap.as_ref(), self.frame_ms, &self.frame_ms_hist, self.last_fps, self.notifications_received, accent);
                     r.add_space(theme::GUTTER);
-                    discord_card(r, &mut self.discord_presence, accent);
+                    discord_card(r, &mut self.discord_presence, &mut self.discord, accent);
                     r.add_space(theme::GUTTER);
                     if reset_card(r, &mut self.reset_armed_at) {
                         self.reset_requested = true;
@@ -1201,7 +1244,7 @@ fn admin_card(ui: &mut egui::Ui, run_as_admin: &mut bool, elevated: bool, accent
 /// Two-step "Reset all settings": first click arms for 4 s, second
 /// confirms. Returns true on confirm.
 /// Discord Rich Presence on/off + live status.
-fn discord_card(ui: &mut egui::Ui, on: &mut bool, accent: egui::Color32) {
+fn discord_card(ui: &mut egui::Ui, on: &mut bool, share: &mut rsoverlay_core::config::DiscordCfg, accent: egui::Color32) {
     use rsoverlay_discord::Status;
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -1212,6 +1255,14 @@ fn discord_card(ui: &mut egui::Ui, on: &mut bool, accent: egui::Color32) {
             ui.checkbox(on, "Show RSOverlay on my Discord profile").on_hover_text(
                 "Friends see \"Using RSOverlay\" (Desktop / In VR) with a timer. Needs the Discord desktop app, with User Settings › Activity Privacy › Share my activity on.",
             );
+        });
+        ui.add_enabled_ui(status != Status::Unavailable && *on, |ui| {
+            ui.indent("discord-share", |ui| {
+                ui.checkbox(&mut share.show_windows, "Number of open windows").on_hover_text("\"In VR · 3 windows open\" — a count only, never window titles");
+                ui.checkbox(&mut share.show_battery, "Headset battery").on_hover_text("\"Headset 82% · ~1h 40m left\"");
+                ui.checkbox(&mut share.show_music, "What I'm listening to").on_hover_text("Song and artist, visible to everyone who can see your profile");
+                ui.checkbox(&mut share.show_button, "\"Get RSOverlay\" button").on_hover_text("Lets friends open the project page (Discord hides it on your own view)");
+            });
         });
         let (text, color) = match status {
             Status::Unavailable => ("Not available in this build", theme::FG_FAINT),

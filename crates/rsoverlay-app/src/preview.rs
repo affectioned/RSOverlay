@@ -167,6 +167,7 @@ pub fn seed_dev_view(
     dev.battery_warn_pct = cfg.appearance.battery_warn_pct.clamp(5, 50);
     dev.battery_sound = cfg.appearance.battery_sound;
     dev.discord_presence = cfg.appearance.discord_presence;
+    dev.discord = cfg.discord.clone();
     if test.show_keyboard {
         dev.show_keyboard = true;
     }
@@ -248,6 +249,9 @@ pub fn play_alert_sounds(dev: &mut rsoverlay_ui::views::DevView) {
     // Same per-frame hook both shells call: keep Discord in step with
     // the Settings toggle (an atomic store, nothing more).
     rsoverlay_discord::set_enabled(dev.discord_presence);
+    if dev.discord_presence {
+        rsoverlay_discord::set_details(dev.discord_details());
+    }
     let due = dev.take_sounds();
     if due.is_empty() {
         return;
@@ -311,6 +315,7 @@ pub fn config_from_dev_view(
         hide_wrist: dev.vr_hide_wrist,
     };
     out.vr_state = dev.vr_state.clone();
+    out.discord = dev.discord.clone();
     let [n, w, e, b] = dev.notif.sounds.clone();
     out.notifications = rsoverlay_core::config::NotificationsCfg {
         size_m: dev.notif.size_m,
@@ -749,6 +754,8 @@ pub fn run(
     }
     let injector = InputInjector::new().context("initializing input injector")?;
     let mut vr_keyboard = rsoverlay_ui::vrkeyboard::VrKeyboard::default();
+    // Every VR surface, switchable live (dev bar), at real VR sizes.
+    let mut harness = crate::preview_dev::DevHarness::new(&test);
 
     info!("preview window up — close window or press Esc to exit");
 
@@ -935,23 +942,7 @@ pub fn run(
                             &gpu.queue,
                             &overlay_target.view,
                             raw_input,
-                            |ctx| {
-                                let widget_tabs: Vec<_> = test
-                                    .widgets
-                                    .as_deref()
-                                    .map(|s| s.split(',').filter_map(rsoverlay_ui::widgets::WidgetKind::from_slug).collect())
-                                    .unwrap_or_default();
-                                if test.vr_keyboard {
-                                    let t = ctx.input(|i| i.time);
-                                    let _ = vr_keyboard.frame(ctx, &[], t, dev_view.accent, false);
-                                } else if !widget_tabs.is_empty() {
-                                    let _ = dev_view.widget_ui(ctx, &widget_tabs, 0, rsoverlay_ui::window_panel::Attach::LeftHand, false, Some(&injector));
-                                } else if test.wrist {
-                                    let _ = dev_view.wrist_ui(ctx);
-                                } else {
-                                    dev_view.ui_with(ctx, Some(&injector));
-                                }
-                            },
+                            |ctx| harness.show(ctx, &mut dev_view, &mut vr_keyboard, &injector),
                         );
 
                         // 2. Blit the overlay target into the window.
@@ -1253,6 +1244,7 @@ mod config_roundtrip_tests {
         a.battery_warn_pct = 33;
         a.battery_sound = false;
         a.discord_presence = false;
+        c.discord = rsoverlay_core::config::DiscordCfg { show_windows: false, show_battery: false, show_music: true, show_button: false };
         let p = &mut c.placement;
         p.anchor = rsoverlay_core::PlacementAnchor::World;
         p.offset_x = 0.5;

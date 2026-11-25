@@ -126,7 +126,17 @@ pub fn app_label(image_path: &str) -> String {
 fn dedupe(mut sessions: Vec<AppSession>) -> Vec<AppSession> {
     let mut seen = std::collections::HashSet::new();
     sessions.retain(|s| seen.insert(s.pid));
-    sessions.sort_by_key(|s| s.name.to_lowercase());
+    sessions.sort_by_key(|s| (s.name.to_lowercase(), s.pid));
+    // Several processes with one name (Discord, browsers): number them
+    // so two identical rows don't look like a bug.
+    let mut count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for s in &mut sessions {
+        let n = count.entry(s.name.to_lowercase()).or_insert(0);
+        *n += 1;
+        if *n > 1 {
+            s.name = format!("{} {}", s.name, n);
+        }
+    }
     sessions
 }
 
@@ -303,6 +313,14 @@ mod tests {
         let names: Vec<_> = out.iter().map(|a| a.name.as_str()).collect();
         assert_eq!(names, ["Chrome", "System sounds", "zoom"]);
         assert_eq!(out[0].level.volume, 0.9);
+    }
+
+    #[test]
+    fn same_named_apps_are_numbered() {
+        let s = |pid, name: &str| AppSession { pid, name: name.into(), level: Level { volume: 1.0, muted: false } };
+        let out = dedupe(vec![s(20, "Discord"), s(10, "Discord"), s(5, "Chrome")]);
+        let names: Vec<_> = out.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["Chrome", "Discord", "Discord 2"]);
     }
 
     /// Read-only smoke test against the real default device:
