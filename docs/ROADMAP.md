@@ -37,6 +37,11 @@ Last reviewed 2026-11-24. Parity detail lives in
   black, Inter, rose accent), labelled navigation everywhere, compact
   wrist with More, dock + close on every panel, launch with SteamVR, VR
   preview scenes and Steam store screenshots.
+- **M61:** window edge docking (drop a window beside another → it snaps
+  flush left / right / above / below and the two move together until
+  Unlink); user-editable compact wrist (pick any actions + clock,
+  batteries, media, layout slots, views); batteries on the compact
+  wrist by default.
 
 ## XSOverlay parity: remaining gaps
 

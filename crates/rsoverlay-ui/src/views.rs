@@ -285,6 +285,8 @@ pub struct DevView {
     art_for: String,
     /// Wrist toolbar: which of the 7 action buttons show (bit i).
     pub wrist_buttons: u8,
+    /// Compact wrist contents (see `wrist::compact`).
+    pub wrist_compact: u16,
     /// XSO-style knobs: cursor smoothing 0..1, scroll speed multiplier.
     pub cursor_smoothing: f32,
     pub scroll_speed: f32,
@@ -373,6 +375,7 @@ impl Default for DevView {
             art_accent: None,
             art_for: String::new(),
             wrist_buttons: 0x7F,
+            wrist_compact: rsoverlay_core::config::DEFAULT_WRIST_COMPACT,
             cursor_smoothing: 0.5,
             scroll_speed: 1.0,
             night_light: crate::nightlight::NightLight::default(),
@@ -512,6 +515,7 @@ impl DevView {
             keyboard_open: self.show_keyboard,
             accent: self.effective_accent(),
             buttons: self.wrist_buttons,
+            compact: self.wrist_compact,
             expanded: self.wrist_expanded,
         };
         let act = crate::wrist::show(ctx, &data);
@@ -624,7 +628,7 @@ impl DevView {
                         Some("pointer")
                     }
                     4 => {
-                        wrist_toolbar_card(ui, &mut self.wrist_buttons, &mut self.media_theme, accent);
+                        wrist_toolbar_card(ui, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, accent);
                         Some("wrist-toolbar")
                     }
                     5 => {
@@ -1011,7 +1015,7 @@ impl DevView {
                     l.add_space(theme::GUTTER);
                     pointer_card(l, &mut self.cursor_smoothing, &mut self.scroll_speed, accent);
                     l.add_space(theme::GUTTER);
-                    wrist_toolbar_card(l, &mut self.wrist_buttons, &mut self.media_theme, accent);
+                    wrist_toolbar_card(l, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, accent);
                     l.add_space(theme::GUTTER);
                     accessibility_card(l, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.reduce_motion, accent);
                     l.add_space(theme::GUTTER);
@@ -1142,13 +1146,15 @@ fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opac
     });
 }
 
-fn wrist_toolbar_card(ui: &mut egui::Ui, mask: &mut u8, media_theme: &mut bool, accent: egui::Color32) {
+fn wrist_toolbar_card(ui: &mut egui::Ui, mask: &mut u8, compact: &mut u16, media_theme: &mut bool, accent: egui::Color32) {
+    use crate::wrist::compact as c;
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         card_header(ui, icons::GRID, "Wrist toolbar", accent);
         ui.add_space(6.0);
+        ui.label(theme::body_muted("Full toolbar (after More)"));
         ui.horizontal_wrapped(|ui| {
-            for (i, name) in ["Add", "Recenter", "Keyboard", "Dashboard", "Layouts", "Settings", "Close all"].iter().enumerate() {
+            for (i, name) in c::ACTION_NAMES.iter().enumerate() {
                 let mut on = *mask & (1 << i) != 0;
                 if ui.checkbox(&mut on, *name).changed() {
                     *mask ^= 1 << i;
@@ -1158,9 +1164,32 @@ fn wrist_toolbar_card(ui: &mut egui::Ui, mask: &mut u8, media_theme: &mut bool, 
                 }
             }
         });
+        ui.add_space(6.0);
+        ui.label(theme::body_muted("Compact wrist"))
+            .on_hover_text("What the wrist shows before you press More. More is always there.");
+        ui.horizontal_wrapped(|ui| {
+            for (i, name) in c::ACTION_NAMES.iter().enumerate() {
+                compact_toggle(ui, compact, 1 << i, name);
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            for &(bit, name) in c::SECTIONS {
+                compact_toggle(ui, compact, bit, name);
+            }
+        });
+        if ui.small_button("Default compact set").clicked() {
+            *compact = rsoverlay_core::config::DEFAULT_WRIST_COMPACT;
+        }
         ui.add_space(4.0);
         ui.checkbox(media_theme, "Media theme").on_hover_text("Accent colour follows the album art while music plays");
     });
+}
+
+fn compact_toggle(ui: &mut egui::Ui, compact: &mut u16, bit: u16, name: &str) {
+    let mut on = *compact & bit != 0;
+    if ui.checkbox(&mut on, name).changed() {
+        *compact ^= bit;
+    }
 }
 
 fn pointer_card(ui: &mut egui::Ui, smoothing: &mut f32, scroll: &mut f32, accent: egui::Color32) {

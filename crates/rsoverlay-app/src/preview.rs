@@ -131,6 +131,7 @@ pub fn seed_dev_view(
     dev.wrist_buttons = if cfg.vr.wrist_buttons & 0x7F == 0 { 0x7F } else { cfg.vr.wrist_buttons };
     dev.media_theme = cfg.vr.media_theme;
     dev.wrist_expanded = cfg.vr.wrist_expanded;
+    dev.wrist_compact = cfg.vr.wrist_compact;
     dev.elevated = rsoverlay_input::elevation::current_process_elevated();
     dev.battery_osc.enabled = cfg.osc.battery_params;
     dev.battery_osc.prefix = cfg.osc.battery_prefix.trim_matches('/').to_string();
@@ -259,6 +260,7 @@ pub fn config_from_dev_view(
         wrist_buttons: dev.wrist_buttons,
         media_theme: dev.media_theme,
         wrist_expanded: dev.wrist_expanded,
+        wrist_compact: dev.wrist_compact,
     };
     out.appearance.reduce_motion = dev.reduce_motion;
     out.macros = rsoverlay_core::config::Macros(

@@ -413,7 +413,7 @@ pub fn run(
                                     let bar = egui::Rect::from_min_max(egui::pos2(full.left(), full.bottom() - window_panel::TOOLBAR_H), full.max);
                                     let body = egui::Rect::from_min_max(full.min, egui::pos2(full.right(), bar.top() - 6.0));
                                     app.paint(ui, body);
-                                    let _ = window_panel::toolbar(ui, bar, app.title(), None, Attach::World, accent);
+                                    let _ = window_panel::toolbar(ui, bar, app.title(), None, Attach::World, false, accent);
                                 });
                             }
                         }

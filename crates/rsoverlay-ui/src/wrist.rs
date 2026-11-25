@@ -3,9 +3,10 @@
 //! button carries a visible label, so nothing has to be learned by
 //! trial and error.
 //!
-//! Compact by default: the four everyday actions + More, and the clock
-//! with media. More reveals the rest (all actions, layout slots, views,
-//! device batteries); the choice persists. Expanded:
+//! Compact by default: the four everyday actions + More, the clock with
+//! media, and device batteries. What compact shows is user-editable
+//! (Settings → Wrist toolbar, [`compact`] bits). More reveals the rest
+//! (all actions, layout slots, views); the choice persists. Expanded:
 //!
 //! ```text
 //! ╭─────────────────────────────────────────────────╮
@@ -27,6 +28,22 @@ use crate::shell::Page;
 use crate::{locale, motion, theme};
 use chrono::Local;
 
+/// Bits of the compact-wrist mask (`VrCfg::wrist_compact`).
+pub mod compact {
+    /// Action names, bit i = action i (shared with the full-toolbar mask).
+    pub const ACTION_NAMES: [&str; 7] = ["Add", "Recenter", "Keyboard", "Dashboard", "Layouts", "Settings", "Close all"];
+    pub const CLOCK: u16 = 1 << 8;
+    pub const MEDIA: u16 = 1 << 9;
+    pub const BATTERY: u16 = 1 << 10;
+    pub const LAYOUTS: u16 = 1 << 11;
+    pub const VIEWS: u16 = 1 << 12;
+    /// Non-action sections, in settings order.
+    pub const SECTIONS: &[(u16, &str)] =
+        &[(CLOCK, "Clock"), (BATTERY, "Batteries"), (MEDIA, "Media"), (LAYOUTS, "Layout slots"), (VIEWS, "Views")];
+    /// Compact action order: reach order, everyday four first.
+    pub const ORDER: [usize; 7] = [3, 2, 0, 1, 4, 5, 6];
+}
+
 /// Everything the wrist shows, gathered by DevView.
 pub struct WristData<'a> {
     pub batteries: &'a [BatteryReading],
@@ -42,6 +59,8 @@ pub struct WristData<'a> {
     pub accent: egui::Color32,
     /// Which action buttons to show (bit i = actions[i]).
     pub buttons: u8,
+    /// Compact contents (see [`compact`]).
+    pub compact: u16,
     /// Full set (layouts, views, devices) vs the compact default.
     pub expanded: bool,
 }
@@ -88,10 +107,15 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             (icons::SETTINGS, "Settings", "Settings", false),
             (icons::TRASH, "Close all", "Close all floating panels", false),
         ];
-        // Compact: the everyday four, in reach order. Expanded: every
-        // enabled action in toolbar order.
-        let order: &[usize] = if d.expanded { &[0, 1, 2, 3, 4, 5, 6] } else { &[3, 2, 0, 1] };
-        let shown: Vec<_> = order.iter().filter(|&&i| d.buttons & (1 << i) != 0).map(|&i| (i, actions[i].clone())).collect();
+        // Compact: the user's compact picks, in reach order. Expanded:
+        // every enabled action in toolbar order.
+        let shown: Vec<_> = if d.expanded {
+            (0..7).filter(|&i| d.buttons & (1 << i) != 0).map(|i| (i, actions[i].clone())).collect()
+        } else {
+            compact::ORDER.iter().filter(|&&i| d.compact & (1 << i) != 0).map(|&i| (i, actions[i].clone())).collect()
+        };
+        // Section visibility: expanded shows everything; compact follows the mask.
+        let has = |bit: u16| d.expanded || d.compact & bit != 0;
         let cell = r1.width() / (shown.len() + 1) as f32;
         let more = egui::Rect::from_min_size(egui::pos2(r1.right() - cell, r1.top()), egui::vec2(cell, r1.height()));
         let (more_label, more_tip) = if d.expanded { ("Less", "Show fewer options") } else { ("More", "Show more options") };
@@ -113,8 +137,8 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             }
         }
 
-        // 2 · Layouts (expanded only).
-        if d.expanded {
+        // 2 · Layouts.
+        if has(compact::LAYOUTS) {
         let r2 = row(&mut y, 64.0, full.width() * 0.08);
         slab(ui, r2, accent);
         let half = r2.width() * 0.40;
@@ -156,9 +180,15 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         }
 
         // 3 · Clock + views (+ media inside the same slab).
-        let media_h = if d.title.is_some() { 56.0 } else { 0.0 };
-        let r3 = row(&mut y, 108.0 + media_h, full.width() * 0.12);
+        let show_clock = has(compact::CLOCK);
+        let show_views = has(compact::VIEWS);
+        let title = d.title.filter(|_| has(compact::MEDIA));
+        let top_h = if show_clock || show_views { 108.0 } else { 8.0 };
+        let media_h = if title.is_some() { 56.0 } else { 0.0 };
+        if show_clock || show_views || title.is_some() {
+        let r3 = row(&mut y, top_h + media_h, full.width() * 0.12);
         slab(ui, r3, accent);
+        if show_clock {
         let now = Local::now();
         let time = if locale::uses_24h_clock() { now.format("%H:%M").to_string() } else { now.format("%-I:%M %p").to_string() };
         let p = ui.painter();
@@ -168,8 +198,10 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         let s = d.session_secs;
         p.text(r3.left_top() + egui::vec2(18.0, 82.0), egui::Align2::LEFT_TOP, format!("{:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60),
             egui::FontId::monospace(theme::SIZE_CAPTION + 2.0), theme::FG_MUTED);
-        if d.expanded {
-        let views = egui::Rect::from_min_max(egui::pos2(r3.center().x - 6.0, r3.top() + 10.0), egui::pos2(r3.right() - 10.0, r3.top() + 98.0));
+        }
+        if show_views {
+        let left = if show_clock { r3.center().x - 6.0 } else { r3.left() + 10.0 };
+        let views = egui::Rect::from_min_max(egui::pos2(left, r3.top() + 10.0), egui::pos2(r3.right() - 10.0, r3.top() + 98.0));
         ui.painter().rect_filled(views, theme::RADIUS_CARD, theme::BG_CARD);
         let vw = views.width() / 3.0;
         let view_defs: [(egui::ImageSource<'static>, &str, &str); 3] = [
@@ -188,8 +220,8 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             }
         }
         }
-        if let Some(title) = d.title {
-            let m = egui::Rect::from_min_max(egui::pos2(r3.left() + 10.0, r3.top() + 108.0), egui::pos2(r3.right() - 10.0, r3.bottom() - 8.0));
+        if let Some(title) = title {
+            let m = egui::Rect::from_min_max(egui::pos2(r3.left() + 10.0, r3.top() + top_h), egui::pos2(r3.right() - 10.0, r3.bottom() - 8.0));
             ui.painter().rect_filled(m, theme::RADIUS_CONTROL, theme::BG_CARD);
             let text_r = egui::Rect::from_min_max(m.min + egui::vec2(14.0, 6.0), egui::pos2(m.right() - 150.0, m.bottom() - 6.0));
             let tp = ui.painter_at(text_r);
@@ -214,8 +246,10 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             }
         }
 
-        // 4 · Devices (expanded only).
-        if d.expanded && !d.batteries.is_empty() {
+        }
+
+        // 4 · Devices.
+        if has(compact::BATTERY) && !d.batteries.is_empty() {
             let r5 = row(&mut y, 52.0, full.width() * 0.16);
             slab(ui, r5, accent);
             let tw = r5.width() / d.batteries.len() as f32;

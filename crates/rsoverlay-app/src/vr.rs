@@ -67,6 +67,17 @@ mod imp {
     const MAX_FLOATING: usize = 14;
     /// Drop a widget within this distance of another to merge them.
     const MERGE_DIST_M: f32 = 0.18;
+    /// Window edge docking: a dropped window whose edge lands within
+    /// this distance of a neighbour's opposite edge snaps flush to it.
+    const SNAP_DIST_M: f32 = 0.12;
+    /// …only if the two are roughly coplanar (depth apart, in the
+    /// neighbour's frame) and facing the same way (cos of max angle).
+    const SNAP_DEPTH_M: f32 = 0.15;
+    const SNAP_COS: f32 = 0.866;
+    /// Centre-align along the shared edge when this close to aligned.
+    const SNAP_ALIGN_M: f32 = 0.08;
+    /// Seam left between docked windows.
+    const SNAP_GAP_M: f32 = 0.008;
     /// Panel indices: 0 wrist, 1 dashboard, 2 keyboard, WIN0.. windows.
     const WIN0: usize = 3;
     /// VR keyboard: 1024 × 400 pt at 2 texels/pt, 75 cm wide, summoned
@@ -322,6 +333,19 @@ mod imp {
         down: Option<rsoverlay_input::MouseButton>,
         /// Fractional wheel delta not yet sent (WHEEL_DELTA units).
         wheel_acc: f32,
+        /// Stable id (survives index shifts when others close).
+        seq: u32,
+        /// Edge-docked group: members move together while one is grabbed.
+        group: Option<u32>,
+    }
+
+    impl WinOverlay {
+        /// Panel size in metres (width, height): the overlay keeps its
+        /// texture's aspect.
+        fn size_m(&self) -> (f32, f32) {
+            let (tw, th) = self.panel.tex;
+            (self.panel.width_m, self.panel.width_m * th as f32 / tw.max(1) as f32)
+        }
     }
 
     /// An in-progress grab (XSO model): the panel rides the laser at
@@ -337,6 +361,9 @@ mod imp {
         /// Two-hand scale: (other hand, start hand-separation, start width).
         second: Option<(Hand, f32, f32)>,
         smoothed: Affine3A,
+        /// Edge-docked windows riding along: (seq, pose relative to the
+        /// grabbed panel).
+        followers: Vec<(u32, Affine3A)>,
     }
 
     /// XSO-style auto-hide: shown while the angle between the head's
@@ -412,6 +439,8 @@ mod imp {
             icon,
             down: None,
             wheel_acc: 0.0,
+            seq,
+            group: None,
         })
     }
 
@@ -494,6 +523,8 @@ mod imp {
             icon: None,
             down: None,
             wheel_acc: 0.0,
+            seq,
+            group: None,
         })
     }
 
@@ -510,6 +541,60 @@ mod imp {
         match w.rel {
             None => w.world,
             Some((dev, rel)) => device_pose(dev, hmd, controllers).map_or(w.world, |d| d * rel),
+        }
+    }
+
+    /// Where a dropped panel should snap so one of its edges sits flush
+    /// against a neighbour's opposite edge (left / right / top / bottom).
+    /// `others` = (index, pose, (width, height) m). Returns the chosen
+    /// neighbour and the snapped pose (the neighbour's orientation, so
+    /// docked windows form one flat surface). O(n) over `others`.
+    fn snap_pose(moving: &Affine3A, size: (f32, f32), others: &[(usize, Affine3A, (f32, f32))]) -> Option<(usize, Affine3A)> {
+        let (mw, mh) = size;
+        let mut best: Option<(f32, usize, Affine3A)> = None;
+        for &(j, o, (ow, oh)) in others {
+            if moving.matrix3.z_axis.dot(o.matrix3.z_axis) < SNAP_COS {
+                continue;
+            }
+            let local = o.inverse().transform_point3a(moving.translation);
+            if local.z.abs() > SNAP_DEPTH_M {
+                continue;
+            }
+            // Along the shared edge: snap to centred when close, else keep
+            // the offset as long as the edges still overlap.
+            let align = |v: f32, limit: f32| -> Option<f32> {
+                if v.abs() < SNAP_ALIGN_M {
+                    Some(0.0)
+                } else if v.abs() < limit {
+                    Some(v)
+                } else {
+                    None
+                }
+            };
+            let sx = (ow + mw) / 2.0 + SNAP_GAP_M;
+            let sy = (oh + mh) / 2.0 + SNAP_GAP_M;
+            let along_y = align(local.y, (oh + mh) / 2.0);
+            let along_x = align(local.x, (ow + mw) / 2.0);
+            let candidates = [along_y.map(|y| (sx, y)), along_y.map(|y| (-sx, y)), along_x.map(|x| (x, sy)), along_x.map(|x| (x, -sy))];
+            for (tx, ty) in candidates.into_iter().flatten() {
+                let d = ((local.x - tx).powi(2) + (local.y - ty).powi(2)).sqrt();
+                if d < SNAP_DIST_M && best.as_ref().is_none_or(|b| d < b.0) {
+                    let pose = Affine3A { translation: o.transform_point3a(Vec3A::new(tx, ty, 0.0)), ..o };
+                    best = Some((d, j, pose));
+                }
+            }
+        }
+        best.map(|(_, j, p)| (j, p))
+    }
+
+    /// Dissolve edge-dock groups left with a single member. O(n²), n ≤ 14.
+    fn prune_groups(wins: &mut [WinOverlay]) {
+        for k in 0..wins.len() {
+            if let Some(g) = wins[k].group {
+                if wins.iter().filter(|w| w.group == Some(g)).count() < 2 {
+                    wins[k].group = None;
+                }
+            }
         }
     }
 
@@ -681,6 +766,7 @@ mod imp {
         let mut typed_target: Option<usize> = None;
         let mut prev_text_target: Option<usize> = None;
         let mut win_seq = 0u32;
+        let mut next_group = 0u32;
         let mut prev_menu = false;
         let mut prev_grip = [false; 2];
         let mut frame = 0u64;
@@ -917,7 +1003,17 @@ mod imp {
                                 k => wins[k - WIN0].panel.width_m,
                             };
                             let offset = p.matrix3.transpose() * (p.translation - hit) / width;
-                            grab = Some(Grab { hand: c.hand, panel: i, dist, offset, second: None, smoothed: p });
+                            // Edge-docked neighbours ride along.
+                            let followers = match i.checked_sub(WIN0).and_then(|k| wins[k].group.map(|g| (k, g))) {
+                                Some((k, g)) => wins
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|&(j, w)| j != k && w.group == Some(g) && w.attach == Attach::World)
+                                    .map(|(_, w)| (w.seq, p.inverse() * w.world))
+                                    .collect(),
+                                None => Vec::new(),
+                            };
+                            grab = Some(Grab { hand: c.hand, panel: i, dist, offset, second: None, smoothed: p, followers });
                             grabbed_hand = Some(c.hand);
                         }
                     }
@@ -993,8 +1089,24 @@ mod imp {
                             kb_pose = Some(p);
                             kb.set_width(&overlay, width);
                         } else {
-                            wins[g.panel - WIN0].world = p;
-                            wins[g.panel - WIN0].panel.set_width(&overlay, width);
+                            let k = g.panel - WIN0;
+                            wins[k].world = p;
+                            wins[k].panel.set_width(&overlay, width);
+                            // Resizing one window breaks its edge seams:
+                            // it leaves the group (re-dock on drop).
+                            if resizing && !g.followers.is_empty() {
+                                wins[k].group = None;
+                                g.followers.clear();
+                                prune_groups(&mut wins);
+                            }
+                            for (seq, rel) in &g.followers {
+                                if let Some(f) = wins.iter_mut().find(|w| w.seq == *seq) {
+                                    f.world = p * *rel;
+                                    if let Err(e) = overlay.set_transform_absolute(f.panel.handle, &from_affine(&f.world)) {
+                                        warn!("move docked window: {e:#}");
+                                    }
+                                }
+                            }
                         }
                     }
                     _ => {
@@ -1027,6 +1139,41 @@ mod imp {
                         }
                         w.panel.destroy(&overlay);
                         info!("merged widget panels");
+                    }
+                }
+            }
+            // Dropped a window beside another window → snap edges flush and
+            // link them (they move together until Unlink).
+            if let Some(k) = released.filter(|&i| i >= WIN0).map(|i| i - WIN0) {
+                if wins.get(k).is_some_and(|w| w.mirror.is_some() && w.attach == Attach::World) {
+                    let own = wins[k].group;
+                    let others: Vec<_> = wins
+                        .iter()
+                        .enumerate()
+                        .filter(|&(j, w)| j != k && w.mirror.is_some() && w.attach == Attach::World && (own.is_none() || w.group != own))
+                        .map(|(j, w)| (j, w.world, w.size_m()))
+                        .collect();
+                    if let Some((j, pose)) = snap_pose(&wins[k].world, wins[k].size_m(), &others) {
+                        // Shift the dropped window's whole group by the snap.
+                        let delta = pose * wins[k].world.inverse();
+                        let gid = wins[j].group.unwrap_or_else(|| {
+                            next_group += 1;
+                            next_group
+                        });
+                        for (m, w) in wins.iter_mut().enumerate() {
+                            if m == k || (own.is_some() && w.group == own) {
+                                w.world = delta * w.world;
+                                if let Err(e) = overlay.set_transform_absolute(w.panel.handle, &from_affine(&w.world)) {
+                                    warn!("dock window: {e:#}");
+                                }
+                                w.group = Some(gid);
+                            }
+                        }
+                        wins[j].group = Some(gid);
+                        if let (Some(h), Some(i)) = (released_hand, &input) {
+                            i.haptic(h, GRAB_HAPTIC_S, 1.0);
+                        }
+                        info!("docked window edges");
                     }
                 }
             }
@@ -1412,9 +1559,10 @@ mod imp {
                     let (title, handle_m, attach, cursor, blocked) =
                         (mirror.source.label(), mirror.handle(), w.attach, lf.cursor, w.input_blocked);
                     let icon = w.icon.as_ref().map(|t| t.id());
+                    let linked = w.group.is_some();
                     let events = lf.events.clone();
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
-                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, accent);
+                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, accent);
                         if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
                             rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                         }
@@ -1474,7 +1622,12 @@ mod imp {
                         }
                     }
                 }
+                if act.unlink {
+                    w.group = None;
+                }
                 if let Some(a) = act.attach {
+                    // Docked to head / hand → no longer part of a window wall.
+                    w.group = None;
                     let cur = win_world(w, hmd.as_ref(), &controllers);
                     let dev = match a {
                         Attach::World => None,
@@ -1517,6 +1670,8 @@ mod imp {
                 }
                 w.panel.destroy(&overlay);
             }
+            // Unlink / re-dock / close can leave a one-window "group".
+            prune_groups(&mut wins);
             // Split: the active tab leaves its group as a new panel beside it.
             for (k, kind) in splits.into_iter().rev() {
                 if wins.len() >= MAX_FLOATING {
@@ -1875,6 +2030,46 @@ mod imp {
                 assert_eq!(attach_from_slug(attach_slug(a)), a);
             }
             assert_eq!(attach_from_slug("garbage"), Attach::World);
+        }
+
+        const W: (f32, f32) = (0.9, 0.5625);
+
+        #[test]
+        fn window_dropped_near_right_edge_snaps_flush_and_centred() {
+            let anchor = Affine3A::IDENTITY;
+            // Slightly overlapping, a bit low, a bit in front.
+            let moving = Affine3A::from_translation(glam::Vec3::new(0.85, -0.05, 0.04));
+            let (j, p) = snap_pose(&moving, W, &[(7, anchor, W)]).expect("should snap");
+            assert_eq!(j, 7);
+            assert!((p.translation.x - (0.9 + SNAP_GAP_M)).abs() < 1e-5);
+            assert!(p.translation.y.abs() < 1e-5 && p.translation.z.abs() < 1e-5);
+        }
+
+        #[test]
+        fn window_dropped_above_snaps_to_top_edge_keeping_offset() {
+            let moving = Affine3A::from_translation(glam::Vec3::new(0.3, 0.60, 0.0));
+            let (_, p) = snap_pose(&moving, W, &[(0, Affine3A::IDENTITY, W)]).expect("should snap");
+            assert!((p.translation.y - (0.5625 + SNAP_GAP_M)).abs() < 1e-5);
+            assert!((p.translation.x - 0.3).abs() < 1e-5, "offset along the edge is kept");
+        }
+
+        #[test]
+        fn far_away_or_angled_windows_do_not_snap() {
+            let far = Affine3A::from_translation(glam::Vec3::new(1.4, 0.0, 0.0));
+            assert!(snap_pose(&far, W, &[(0, Affine3A::IDENTITY, W)]).is_none());
+            let deep = Affine3A::from_translation(glam::Vec3::new(0.9, 0.0, 0.4));
+            assert!(snap_pose(&deep, W, &[(0, Affine3A::IDENTITY, W)]).is_none());
+            let turned = Affine3A::from_rotation_translation(glam::Quat::from_rotation_y(1.0), glam::Vec3::new(0.9, 0.0, 0.0));
+            assert!(snap_pose(&turned, W, &[(0, Affine3A::IDENTITY, W)]).is_none());
+        }
+
+        #[test]
+        fn snap_picks_the_nearest_neighbour() {
+            let a = Affine3A::IDENTITY;
+            let b = Affine3A::from_translation(glam::Vec3::new(2.0, 0.0, 0.0));
+            let moving = Affine3A::from_translation(glam::Vec3::new(1.05, 0.0, 0.0));
+            let (j, _) = snap_pose(&moving, W, &[(0, a, W), (1, b, W)]).expect("should snap");
+            assert_eq!(j, 1, "1.05 is 0.04 from b's left slot, 0.14 from a's right");
         }
 
         #[test]

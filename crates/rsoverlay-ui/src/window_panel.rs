@@ -46,10 +46,13 @@ pub struct WindowPanelAction {
     pub image_rect: Option<egui::Rect>,
     pub attach: Option<Attach>,
     pub close: bool,
+    /// Leave the edge-docked group this panel is linked into.
+    pub unlink: bool,
 }
 
 pub const TOOLBAR_H: f32 = 52.0;
 
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ctx: &egui::Context,
     title: &str,
@@ -57,6 +60,7 @@ pub fn show(
     attach: Attach,
     input_blocked: bool,
     icon: Option<egui::TextureId>,
+    linked: bool,
     accent: egui::Color32,
 ) -> WindowPanelAction {
     let mut out = WindowPanelAction::default();
@@ -97,20 +101,22 @@ pub fn show(
             }
         }
 
-        (out.attach, out.close) = toolbar(ui, bar, title, icon, attach, accent);
+        (out.attach, out.close, out.unlink) = toolbar(ui, bar, title, icon, attach, linked, accent);
     });
     out
 }
 
-/// A window panel's bottom toolbar: app icon + title, dock + close.
+/// A window panel's bottom toolbar: app icon + title, dock + close, and
+/// Unlink while edge-docked to other windows. Returns (dock, close, unlink).
 pub fn toolbar(
     ui: &mut egui::Ui,
     bar: egui::Rect,
     title: &str,
     icon: Option<egui::TextureId>,
     attach: Attach,
+    linked: bool,
     accent: egui::Color32,
-) -> (Option<Attach>, bool) {
+) -> (Option<Attach>, bool, bool) {
     ui.painter().rect_filled(bar, 14.0, theme::BG_ROOT);
     ui.painter().rect_stroke(bar, 14.0, egui::Stroke::new(1.0_f32, theme::STROKE_CARD));
     let mut bar_ui = ui.child_ui(bar.shrink2(egui::vec2(16.0, 8.0)), egui::Layout::left_to_right(egui::Align::Center));
@@ -118,9 +124,15 @@ pub fn toolbar(
         bar_ui.add(egui::Image::new((id, egui::vec2(24.0, 24.0))));
     }
     bar_ui.add(egui::Label::new(egui::RichText::new(title).color(theme::FG_PRIMARY).size(theme::SIZE_BODY)).truncate(true));
-    let mut out = (None, false);
+    let mut out = (None, false, false);
     bar_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        out = dock_controls(ui, attach, accent);
+        (out.0, out.1) = dock_controls(ui, attach, accent);
+        if linked {
+            ui.add_space(8.0);
+            out.2 = pill(ui, "Unlink", true, accent)
+                .on_hover_text("Docked to the windows beside it — they move together. Unlink to move this one alone.")
+                .clicked();
+        }
     });
     out
 }

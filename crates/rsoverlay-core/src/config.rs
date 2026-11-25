@@ -51,11 +51,20 @@ pub struct VrCfg {
     /// Wrist shows its full set (layouts, devices, views), not the
     /// compact one.
     pub wrist_expanded: bool,
+    /// What the *compact* wrist shows: bits 0..7 = actions (same order
+    /// as `wrist_buttons`), then clock, media, batteries, layouts,
+    /// views (see `rsoverlay_ui::wrist::compact`). Default: Add,
+    /// Recenter, Keyboard, Dashboard + clock, media, batteries.
+    pub wrist_compact: u16,
 }
+
+/// Compact wrist default: the four everyday actions + clock, media and
+/// device batteries (battery is the most-glanced wrist readout after time).
+pub const DEFAULT_WRIST_COMPACT: u16 = 0x0F | (1 << 8) | (1 << 9) | (1 << 10);
 
 impl Default for VrCfg {
     fn default() -> Self {
-        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0x7F, media_theme: false, wrist_expanded: false }
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0x7F, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT }
     }
 }
 
