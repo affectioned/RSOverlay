@@ -157,6 +157,10 @@ struct Args {
     #[arg(long)]
     wrist: bool,
 
+    /// Preview the VR wrist in edit mode (implies --wrist).
+    #[arg(long)]
+    wrist_edit: bool,
+
     /// Preview a VR widget group, e.g. `--widgets system,volume`.
     #[arg(long, value_name = "KINDS")]
     widgets: Option<String>,
@@ -335,7 +339,8 @@ fn main() -> Result<()> {
         switch_to_window: args.switch_to_window.clone(),
         page: args.page.clone(),
         dock: args.dock,
-        wrist: args.wrist,
+        wrist: args.wrist || args.wrist_edit,
+        wrist_edit: args.wrist_edit,
         widgets: args.widgets.clone(),
         vr_keyboard: args.vr_keyboard,
         search: args.search.clone(),

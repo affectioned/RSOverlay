@@ -57,6 +57,7 @@ pub struct TestHooks {
     pub page: Option<String>,
     pub dock: bool,
     pub wrist: bool,
+    pub wrist_edit: bool,
     pub widgets: Option<String>,
     pub vr_keyboard: bool,
     pub search: Option<String>,
@@ -161,6 +162,7 @@ pub fn seed_dev_view(
     if let Some(p) = test.page.as_deref().and_then(rsoverlay_ui::shell::Page::from_slug) {
         dev.page = p;
     }
+    dev.wrist_editing = test.wrist_edit;
     if test.demo_batteries {
         use rsoverlay_ui::battery::BatteryReading;
         let r = |id, label: &str, fraction, charging| BatteryReading {
@@ -903,7 +905,7 @@ pub fn run(
                                     let t = ctx.input(|i| i.time);
                                     let _ = vr_keyboard.frame(ctx, &[], t, dev_view.accent, false);
                                 } else if !widget_tabs.is_empty() {
-                                    let _ = dev_view.widget_ui(ctx, &widget_tabs, 0, rsoverlay_ui::window_panel::Attach::LeftHand, Some(&injector));
+                                    let _ = dev_view.widget_ui(ctx, &widget_tabs, 0, rsoverlay_ui::window_panel::Attach::LeftHand, false, Some(&injector));
                                 } else if test.wrist {
                                     let _ = dev_view.wrist_ui(ctx);
                                 } else {

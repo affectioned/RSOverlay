@@ -405,7 +405,7 @@ pub fn run(
                                 let _ = keyboard.frame(ctx, &hands, time, accent, false);
                             }
                             Content::Widgets(tabs) => {
-                                let _ = dev_view.widget_ui(ctx, &tabs, 0, Attach::World, None);
+                                let _ = dev_view.widget_ui(ctx, &tabs, 0, Attach::World, false, None);
                             }
                             Content::Window(app) => {
                                 egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {

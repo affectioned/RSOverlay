@@ -26,6 +26,10 @@ pub struct LayoutPanel {
     /// Row-major 3×4 pose: world pose (attach = world) or device-local.
     pub pose: [[f32; 4]; 3],
     pub width: f32,
+    /// Edge-docked group id (panels sharing one move together). Only
+    /// meaningful within one layout; absent = not docked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -114,6 +118,7 @@ mod tests {
                 attach: "left".into(),
                 pose: [[1.0, 0.0, 0.0, 0.1], [0.0, 1.0, 0.0, 0.2], [0.0, 0.0, 1.0, 0.3]],
                 width: 0.34,
+                group: Some(3),
                 ..Default::default()
             }],
             keyboard: Some(KeyboardPose { pose: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 1.0], [0.0, 0.0, 1.0, -0.5]], width: 0.75 }),

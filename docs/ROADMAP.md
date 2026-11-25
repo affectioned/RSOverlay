@@ -39,9 +39,11 @@ Last reviewed 2026-11-24. Parity detail lives in
   preview scenes and Steam store screenshots.
 - **M61:** window edge docking (drop a window beside another → it snaps
   flush left / right / above / below and the two move together until
-  Unlink); user-editable compact wrist (pick any actions + clock,
-  batteries, media, layout slots, views); batteries on the compact
-  wrist by default.
+  Unlink); widgets dock too; resizing a docked panel pushes its
+  neighbours so seams stay flush; layout slots remember docked groups.
+  User-editable compact wrist (pick any actions + clock, batteries,
+  media, layout slots, views) from Settings or in VR (More → Edit, tap
+  to show / hide); batteries on the compact wrist by default.
 
 ## XSOverlay parity: remaining gaps
 

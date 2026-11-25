@@ -164,6 +164,8 @@ pub struct WidgetAction {
     pub split: bool,
     pub attach: Option<Attach>,
     pub close: bool,
+    /// Leave the edge-docked group.
+    pub unlink: bool,
 }
 
 pub const TAB_H: f32 = 40.0;
@@ -176,6 +178,7 @@ pub fn frame(
     tabs: &[WidgetKind],
     active: usize,
     attach: Attach,
+    linked: bool,
     accent: egui::Color32,
     body: impl FnOnce(&mut egui::Ui, WidgetKind),
 ) -> WidgetAction {
@@ -226,6 +229,10 @@ pub fn frame(
         // Dock bar.
         let mut dui = ui.child_ui(bar_r, egui::Layout::right_to_left(egui::Align::Center));
         (out.attach, out.close) = crate::window_panel::dock_controls(&mut dui, attach, accent);
+        if linked {
+            dui.add_space(8.0);
+            out.unlink = crate::window_panel::unlink_pill(&mut dui, accent);
+        }
     });
     out
 }

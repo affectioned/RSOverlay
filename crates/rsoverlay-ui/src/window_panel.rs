@@ -129,9 +129,7 @@ pub fn toolbar(
         (out.0, out.1) = dock_controls(ui, attach, accent);
         if linked {
             ui.add_space(8.0);
-            out.2 = pill(ui, "Unlink", true, accent)
-                .on_hover_text("Docked to the windows beside it — they move together. Unlink to move this one alone.")
-                .clicked();
+            out.2 = unlink_pill(ui, accent);
         }
     });
     out
@@ -172,6 +170,13 @@ pub fn dock_controls(ui: &mut egui::Ui, attach: Attach, accent: egui::Color32) -
     }
     ui.label(theme::caption("Dock"));
     out
+}
+
+/// Shown on a panel that's edge-docked to others. Returns clicked.
+pub fn unlink_pill(ui: &mut egui::Ui, accent: egui::Color32) -> bool {
+    pill(ui, "Unlink", true, accent)
+        .on_hover_text("Docked to the panels beside it — they move together. Unlink to move this one alone.")
+        .clicked()
 }
 
 pub fn pill(ui: &mut egui::Ui, text: &str, on: bool, accent: egui::Color32) -> egui::Response {

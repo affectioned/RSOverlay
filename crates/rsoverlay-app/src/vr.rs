@@ -364,6 +364,9 @@ mod imp {
         /// Edge-docked windows riding along: (seq, pose relative to the
         /// grabbed panel).
         followers: Vec<(u32, Affine3A)>,
+        /// Grabbed panel's size (m) at grab start: followers beyond its
+        /// edges are pushed out / pulled in as it's resized.
+        size0: (f32, f32),
     }
 
     /// XSO-style auto-hide: shown while the angle between the head's
@@ -488,6 +491,7 @@ mod imp {
                     attach: attach_slug(w.attach).into(),
                     pose: from_affine(&pose).m,
                     width: w.panel.width_m,
+                    group: w.group,
                 }
             })
             .collect();
@@ -585,6 +589,25 @@ mod imp {
             }
         }
         best.map(|(_, j, p)| (j, p))
+    }
+
+    /// A docked neighbour's pose (relative to the grabbed panel) after the
+    /// grabbed panel resized from `old` to `new` (w, h m) about its centre:
+    /// anything beyond an edge moves by that edge's shift, so seams stay
+    /// flush; anything overlapping the panel's span on an axis stays put.
+    fn push_follower(rel: Affine3A, old: (f32, f32), new: (f32, f32)) -> Affine3A {
+        let shift = |v: f32, half_old: f32, half_new: f32| {
+            if v.abs() >= half_old - 1e-3 {
+                v + v.signum() * (half_new - half_old)
+            } else {
+                v
+            }
+        };
+        let t = rel.translation;
+        Affine3A {
+            translation: Vec3A::new(shift(t.x, old.0 / 2.0, new.0 / 2.0), shift(t.y, old.1 / 2.0, new.1 / 2.0), t.z),
+            ..rel
+        }
     }
 
     /// Dissolve edge-dock groups left with a single member. O(n²), n ≤ 14.
@@ -1013,7 +1036,8 @@ mod imp {
                                     .collect(),
                                 None => Vec::new(),
                             };
-                            grab = Some(Grab { hand: c.hand, panel: i, dist, offset, second: None, smoothed: p, followers });
+                            let size0 = i.checked_sub(WIN0).map_or((width, 0.0), |k| wins[k].size_m());
+                            grab = Some(Grab { hand: c.hand, panel: i, dist, offset, second: None, smoothed: p, followers, size0 });
                             grabbed_hand = Some(c.hand);
                         }
                     }
@@ -1092,16 +1116,10 @@ mod imp {
                             let k = g.panel - WIN0;
                             wins[k].world = p;
                             wins[k].panel.set_width(&overlay, width);
-                            // Resizing one window breaks its edge seams:
-                            // it leaves the group (re-dock on drop).
-                            if resizing && !g.followers.is_empty() {
-                                wins[k].group = None;
-                                g.followers.clear();
-                                prune_groups(&mut wins);
-                            }
+                            let size = wins[k].size_m();
                             for (seq, rel) in &g.followers {
                                 if let Some(f) = wins.iter_mut().find(|w| w.seq == *seq) {
-                                    f.world = p * *rel;
+                                    f.world = p * push_follower(*rel, g.size0, size);
                                     if let Err(e) = overlay.set_transform_absolute(f.panel.handle, &from_affine(&f.world)) {
                                         warn!("move docked window: {e:#}");
                                     }
@@ -1117,6 +1135,7 @@ mod imp {
                 }
             }
             // Dropped a widget onto another widget → merge into one tab group.
+            let mut merged = false;
             if let Some(i) = released.filter(|&i| i >= WIN0) {
                 let k = i - WIN0;
                 if wins.get(k).is_some_and(|w| w.widgets.is_some()) {
@@ -1138,19 +1157,21 @@ mod imp {
                             *active = tabs.len() - 1;
                         }
                         w.panel.destroy(&overlay);
+                        merged = true;
                         info!("merged widget panels");
                     }
                 }
             }
-            // Dropped a window beside another window → snap edges flush and
-            // link them (they move together until Unlink).
-            if let Some(k) = released.filter(|&i| i >= WIN0).map(|i| i - WIN0) {
-                if wins.get(k).is_some_and(|w| w.mirror.is_some() && w.attach == Attach::World) {
+            // Dropped a window / widget beside another → snap edges flush and
+            // link them (they move together until Unlink). Skipped after a
+            // merge: the dropped panel is gone and indices have shifted.
+            if let Some(k) = released.filter(|&i| i >= WIN0 && !merged).map(|i| i - WIN0) {
+                if wins.get(k).is_some_and(|w| w.attach == Attach::World) {
                     let own = wins[k].group;
                     let others: Vec<_> = wins
                         .iter()
                         .enumerate()
-                        .filter(|&(j, w)| j != k && w.mirror.is_some() && w.attach == Attach::World && (own.is_none() || w.group != own))
+                        .filter(|&(j, w)| j != k && w.attach == Attach::World && (own.is_none() || w.group != own))
                         .map(|(j, w)| (j, w.world, w.size_m()))
                         .collect();
                     if let Some((j, pose)) = snap_pose(&wins[k].world, wins[k].size_m(), &others) {
@@ -1173,7 +1194,7 @@ mod imp {
                         if let (Some(h), Some(i)) = (released_hand, &input) {
                             i.haptic(h, GRAB_HAPTIC_S, 1.0);
                         }
-                        info!("docked window edges");
+                        info!("docked panel edges");
                     }
                 }
             }
@@ -1533,11 +1554,11 @@ mod imp {
                 let mut act = window_panel::WindowPanelAction::default();
                 if let Some((tabs, active)) = w.widgets.clone() {
                     // Widget group: tabs + live card + dock bar.
-                    let (attach, cursor) = (w.attach, lf.cursor);
+                    let (attach, cursor, linked) = (w.attach, lf.cursor, w.group.is_some());
                     let inj = injector.as_ref();
                     let mut wa = rsoverlay_ui::widgets::WidgetAction::default();
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
-                        wa = dev_view.widget_ui(ctx, &tabs, active, attach, inj);
+                        wa = dev_view.widget_ui(ctx, &tabs, active, attach, linked, inj);
                         if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
                             rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                         }
@@ -1551,6 +1572,7 @@ mod imp {
                     }
                     act.attach = wa.attach;
                     act.close = wa.close;
+                    act.unlink = wa.unlink;
                 } else if let Some(mirror) = &w.mirror {
                     if w.blocked_checked.is_none_or(|t| t.elapsed() >= Duration::from_secs(1)) {
                         w.blocked_checked = Some(Instant::now());
@@ -1723,6 +1745,9 @@ mod imp {
                             grab = None;
                             let sources = list_sources();
                             fetch_icons(&sources, &mut dev_view.sources.icons);
+                            // Saved group ids are per-layout; offset them past
+                            // any id handed out this session.
+                            let group_base = next_group;
                             for p in &layout.panels {
                                 let pose = to_affine(&HmdMatrix34_t { m: p.pose });
                                 let attach = attach_from_slug(&p.attach);
@@ -1765,6 +1790,8 @@ mod imp {
                                             }
                                         }
                                         w.world = world;
+                                        w.group = p.group.filter(|_| attach == Attach::World).map(|g| group_base + 1 + g);
+                                        next_group = next_group.max(w.group.unwrap_or(0));
                                         wins.push(w);
                                     }
                                     Some(Err(e)) => warn!("layout: reopening {:?}: {e:#}", p.title),
@@ -1779,6 +1806,8 @@ mod imp {
                                 dev_view.show_keyboard = true;
                                 kb.set_visible(&overlay, true);
                             }
+                            // A docked partner whose window isn't open any more.
+                            prune_groups(&mut wins);
                             info!("layout slot {} loaded ({} panels)", i + 1, wins.len());
                         }
                     }
@@ -2061,6 +2090,22 @@ mod imp {
             assert!(snap_pose(&deep, W, &[(0, Affine3A::IDENTITY, W)]).is_none());
             let turned = Affine3A::from_rotation_translation(glam::Quat::from_rotation_y(1.0), glam::Vec3::new(0.9, 0.0, 0.0));
             assert!(snap_pose(&turned, W, &[(0, Affine3A::IDENTITY, W)]).is_none());
+        }
+
+        #[test]
+        fn resizing_pushes_docked_neighbours_to_keep_seams_flush() {
+            let at = |x: f32, y: f32| Affine3A::from_translation(glam::Vec3::new(x, y, 0.0));
+            // Grabbed panel 0.9 × 0.5625 grows to 1.2 × 0.75.
+            let (old, new) = (W, (1.2, 0.75));
+            // Right neighbour: right edge moved +0.15.
+            let right = push_follower(at(0.9, 0.0), old, new);
+            assert!((right.translation.x - 1.05).abs() < 1e-5 && right.translation.y.abs() < 1e-5);
+            // Neighbour below: bottom edge moved −0.09375; x within span stays.
+            let below = push_follower(at(0.2, -0.5625), old, new);
+            assert!((below.translation.y + 0.65625).abs() < 1e-5 && (below.translation.x - 0.2).abs() < 1e-5);
+            // Shrinking pulls them back in.
+            let back = push_follower(right, new, old);
+            assert!((back.translation.x - 0.9).abs() < 1e-5);
         }
 
         #[test]

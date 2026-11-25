@@ -216,6 +216,8 @@ pub struct DevView {
     pub dash_close: bool,
     /// Wrist shows everything (layouts, devices, views) vs the compact set.
     pub wrist_expanded: bool,
+    /// Wrist edit mode (tap items to show / hide them on the compact wrist).
+    pub wrist_editing: bool,
     pub show_history: bool,
     pub show_battery: bool,
     pub battery_warn_pct: u8,
@@ -328,6 +330,7 @@ impl Default for DevView {
             dash_dock: None,
             dash_close: false,
             wrist_expanded: false,
+            wrist_editing: false,
             show_history: false,
             show_battery: true,
             battery_warn_pct: 20,
@@ -464,6 +467,7 @@ impl DevView {
         tabs: &[crate::widgets::WidgetKind],
         active: usize,
         attach: crate::window_panel::Attach,
+        linked: bool,
         injector: Option<&rsoverlay_input::InputInjector>,
     ) -> crate::widgets::WidgetAction {
         use crate::widgets::WidgetKind as K;
@@ -473,7 +477,7 @@ impl DevView {
         if ctx.style().visuals.selection.bg_fill != accent {
             ctx.style_mut(|st| st.visuals.selection.bg_fill = accent);
         }
-        crate::widgets::frame(ctx, tabs, active, attach, accent, |ui, k| match k {
+        crate::widgets::frame(ctx, tabs, active, attach, linked, accent, |ui, k| match k {
             K::NowPlaying => media_card(ui, self.media.as_ref(), accent),
             K::System => self.system.show(ui, self.last_fps, accent),
             K::Volume => self.volume.show(ui, accent),
@@ -517,10 +521,21 @@ impl DevView {
             buttons: self.wrist_buttons,
             compact: self.wrist_compact,
             expanded: self.wrist_expanded,
+            editing: self.wrist_editing,
         };
         let act = crate::wrist::show(ctx, &data);
         if act.toggle_more {
             self.wrist_expanded = !self.wrist_expanded;
+        }
+        if act.toggle_edit {
+            self.wrist_editing = !self.wrist_editing;
+            // Done → land on the compact wrist to see the result.
+            if !self.wrist_editing {
+                self.wrist_expanded = false;
+            }
+        }
+        if let Some(bit) = act.toggle_compact {
+            self.wrist_compact ^= bit;
         }
         if act.slot_delta != 0 {
             let n = rsoverlay_core::layouts::SLOTS as i32;

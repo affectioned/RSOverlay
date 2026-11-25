@@ -63,6 +63,9 @@ pub struct WristData<'a> {
     pub compact: u16,
     /// Full set (layouts, views, devices) vs the compact default.
     pub expanded: bool,
+    /// Edit mode: everything is shown; tapping an item shows / hides it
+    /// on the compact wrist instead of running it.
+    pub editing: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +82,10 @@ pub struct WristAction {
     pub layout: Option<LayoutAction>,
     /// The More / Less button.
     pub toggle_more: bool,
+    /// Edit / Done.
+    pub toggle_edit: bool,
+    /// Edit mode: flip this compact bit.
+    pub toggle_compact: Option<u16>,
 }
 
 const ROW_GAP: f32 = 8.0;
@@ -108,22 +115,49 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             (icons::TRASH, "Close all", "Close all floating panels", false),
         ];
         // Compact: the user's compact picks, in reach order. Expanded:
-        // every enabled action in toolbar order.
-        let shown: Vec<_> = if d.expanded {
+        // every enabled action in toolbar order. Editing: all of them.
+        let shown: Vec<_> = if d.editing {
+            (0..7).map(|i| (i, actions[i].clone())).collect()
+        } else if d.expanded {
             (0..7).filter(|&i| d.buttons & (1 << i) != 0).map(|i| (i, actions[i].clone())).collect()
         } else {
             compact::ORDER.iter().filter(|&&i| d.compact & (1 << i) != 0).map(|&i| (i, actions[i].clone())).collect()
         };
-        // Section visibility: expanded shows everything; compact follows the mask.
-        let has = |bit: u16| d.expanded || d.compact & bit != 0;
-        let cell = r1.width() / (shown.len() + 1) as f32;
+        // Section visibility: expanded / editing show everything; compact
+        // follows the mask.
+        let has = |bit: u16| d.editing || d.expanded || d.compact & bit != 0;
+        // Edit-mode hit areas: (rect, compact bit).
+        let mut edits: Vec<(egui::Rect, u16)> = Vec::new();
+        let show_edit = d.expanded && !d.editing;
+        let cell = r1.width() / (shown.len() + 1 + usize::from(show_edit)) as f32;
         let more = egui::Rect::from_min_size(egui::pos2(r1.right() - cell, r1.top()), egui::vec2(cell, r1.height()));
-        let (more_label, more_tip) = if d.expanded { ("Less", "Show fewer options") } else { ("More", "Show more options") };
-        if labelled_button(ui, more.shrink(6.0), icons::MORE, 24.0, d.expanded, more_label, more_tip, accent) {
-            act.toggle_more = true;
+        let (more_src, more_label, more_tip) = if d.editing {
+            (icons::EDIT, "Done", "Finish editing the compact wrist")
+        } else if d.expanded {
+            (icons::MORE, "Less", "Show fewer options")
+        } else {
+            (icons::MORE, "More", "Show more options")
+        };
+        if labelled_button(ui, more.shrink(6.0), more_src, 24.0, d.expanded || d.editing, more_label, more_tip, accent) {
+            if d.editing {
+                act.toggle_edit = true;
+            } else {
+                act.toggle_more = true;
+            }
+        }
+        if show_edit {
+            let e = more.translate(egui::vec2(-cell, 0.0));
+            if labelled_button(ui, e.shrink(6.0), icons::EDIT, 24.0, false, "Edit", "Choose what the compact wrist shows", accent) {
+                act.toggle_edit = true;
+            }
         }
         for (slot, (i, (src, label, tip, on))) in shown.into_iter().enumerate() {
             let c = egui::Rect::from_min_size(egui::pos2(r1.left() + slot as f32 * cell, r1.top()), egui::vec2(cell, r1.height()));
+            if d.editing {
+                paint_labelled(ui, c.shrink(6.0), src, 24.0, label, theme::FG_PRIMARY, theme::FG_PRIMARY);
+                edits.push((c.shrink(6.0), 1 << i));
+                continue;
+            }
             if labelled_button(ui, c.shrink(6.0), src, 24.0, on, label, tip, accent) {
                 match i {
                     0 => act.open_page = Some(Page::Desktop),
@@ -141,6 +175,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         if has(compact::LAYOUTS) {
         let r2 = row(&mut y, 64.0, full.width() * 0.08);
         slab(ui, r2, accent);
+        edits.push((r2, compact::LAYOUTS));
         let half = r2.width() * 0.40;
         let sel = egui::Rect::from_min_size(r2.min, egui::vec2(half, r2.height())).shrink(8.0);
         ui.painter().rect_filled(sel, theme::RADIUS_CONTROL, theme::BG_RAISED);
@@ -182,13 +217,16 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         // 3 · Clock + views (+ media inside the same slab).
         let show_clock = has(compact::CLOCK);
         let show_views = has(compact::VIEWS);
-        let title = d.title.filter(|_| has(compact::MEDIA));
+        // Editing with nothing playing: a stand-in so Media can be toggled.
+        let title = d.title.filter(|_| has(compact::MEDIA)).or(d.editing.then_some("Media · shows while something plays"));
         let top_h = if show_clock || show_views { 108.0 } else { 8.0 };
         let media_h = if title.is_some() { 56.0 } else { 0.0 };
         if show_clock || show_views || title.is_some() {
         let r3 = row(&mut y, top_h + media_h, full.width() * 0.12);
         slab(ui, r3, accent);
         if show_clock {
+        let clock_w = if show_views { r3.width() / 2.0 - 16.0 } else { r3.width() - 20.0 };
+        edits.push((egui::Rect::from_min_size(r3.min + egui::vec2(8.0, 6.0), egui::vec2(clock_w, 96.0)), compact::CLOCK));
         let now = Local::now();
         let time = if locale::uses_24h_clock() { now.format("%H:%M").to_string() } else { now.format("%-I:%M %p").to_string() };
         let p = ui.painter();
@@ -203,6 +241,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         let left = if show_clock { r3.center().x - 6.0 } else { r3.left() + 10.0 };
         let views = egui::Rect::from_min_max(egui::pos2(left, r3.top() + 10.0), egui::pos2(r3.right() - 10.0, r3.top() + 98.0));
         ui.painter().rect_filled(views, theme::RADIUS_CARD, theme::BG_CARD);
+        edits.push((views, compact::VIEWS));
         let vw = views.width() / 3.0;
         let view_defs: [(egui::ImageSource<'static>, &str, &str); 3] = [
             (icons::LAYERS, "Windows", "Windows & monitors"),
@@ -223,6 +262,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         if let Some(title) = title {
             let m = egui::Rect::from_min_max(egui::pos2(r3.left() + 10.0, r3.top() + top_h), egui::pos2(r3.right() - 10.0, r3.bottom() - 8.0));
             ui.painter().rect_filled(m, theme::RADIUS_CONTROL, theme::BG_CARD);
+            edits.push((m, compact::MEDIA));
             let text_r = egui::Rect::from_min_max(m.min + egui::vec2(14.0, 6.0), egui::pos2(m.right() - 150.0, m.bottom() - 6.0));
             let tp = ui.painter_at(text_r);
             tp.text(text_r.left_top(), egui::Align2::LEFT_TOP, title, egui::FontId::proportional(theme::SIZE_BODY), theme::FG_PRIMARY);
@@ -249,9 +289,16 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         }
 
         // 4 · Devices.
-        if has(compact::BATTERY) && !d.batteries.is_empty() {
+        if d.editing && d.batteries.is_empty() {
             let r5 = row(&mut y, 52.0, full.width() * 0.16);
             slab(ui, r5, accent);
+            ui.painter().text(r5.center(), egui::Align2::CENTER_CENTER, "Batteries · show when devices report them",
+                egui::FontId::proportional(theme::SIZE_BODY), theme::FG_MUTED);
+            edits.push((r5, compact::BATTERY));
+        } else if has(compact::BATTERY) && !d.batteries.is_empty() {
+            let r5 = row(&mut y, 52.0, full.width() * 0.16);
+            slab(ui, r5, accent);
+            edits.push((r5, compact::BATTERY));
             let tw = r5.width() / d.batteries.len() as f32;
             for (i, b) in d.batteries.iter().enumerate() {
                 let c = egui::Rect::from_min_size(egui::pos2(r5.left() + i as f32 * tw, r5.top()), egui::vec2(tw, r5.height())).shrink(6.0);
@@ -271,8 +318,50 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
                     egui::FontId::monospace(theme::SIZE_CAPTION + 1.0), theme::FG_PRIMARY);
             }
         }
+        if d.editing {
+            act.toggle_compact = edit_overlays(ctx, &edits, d.compact, accent);
+        }
     });
     act
+}
+
+/// Edit mode: a foreground layer over every item (so the item's own
+/// buttons can't fire). Shown items get an accent ring, hidden ones are
+/// dimmed; a tap flips the item's compact bit.
+fn edit_overlays(ctx: &egui::Context, items: &[(egui::Rect, u16)], compact: u16, accent: egui::Color32) -> Option<u16> {
+    let mut flip = None;
+    egui::Area::new(egui::Id::new("wrist-edit")).order(egui::Order::Foreground).fixed_pos(egui::Pos2::ZERO).show(ctx, |ui| {
+        // Grow the layer to the whole screen so it owns hits everywhere.
+        ui.expand_to_include_rect(ctx.screen_rect());
+        for &(r, bit) in items {
+            let on = compact & bit != 0;
+            let resp = ui
+                .interact(r, egui::Id::new(("wrist-edit", bit)), egui::Sense::click())
+                .on_hover_text(if on { "Shown on the compact wrist — tap to hide" } else { "Hidden on the compact wrist — tap to show" });
+            let p = ui.painter();
+            if !on {
+                p.rect_filled(r, theme::RADIUS_CONTROL, egui::Color32::from_black_alpha(190));
+            }
+            let stroke = if on { egui::Stroke::new(2.0_f32, accent) } else { egui::Stroke::new(1.0_f32, theme::FG_FAINT) };
+            p.rect_stroke(r, theme::RADIUS_CONTROL, if resp.hovered() { egui::Stroke::new(2.5_f32, theme::FG_PRIMARY) } else { stroke });
+            if r.width() < 200.0 {
+                // Narrow action cells: a dot, so the label doesn't hit the icon.
+                let c = r.right_top() + egui::vec2(-11.0, 11.0);
+                if on {
+                    p.circle_filled(c, 4.5, accent);
+                } else {
+                    p.circle_stroke(c, 4.0, egui::Stroke::new(1.5_f32, theme::FG_MUTED));
+                }
+            } else {
+                p.text(r.right_top() + egui::vec2(-8.0, 5.0), egui::Align2::RIGHT_TOP, if on { "Shown" } else { "Hidden" },
+                    egui::FontId::proportional(theme::SIZE_CAPTION - 1.0), if on { accent } else { theme::FG_MUTED });
+            }
+            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                flip = Some(bit);
+            }
+        }
+    });
+    flip
 }
 
 fn slab(ui: &egui::Ui, r: egui::Rect, _accent: egui::Color32) {
