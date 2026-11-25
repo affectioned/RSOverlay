@@ -912,7 +912,9 @@ impl DevView {
         // edge (panels draw transparent on top of it); desktop keeps the
         // edge-to-edge AMOLED black.
         let root = if self.dock_layout {
-            let slab = ctx.screen_rect().shrink(6.0);
+            // Available, not screen: identical in VR (nothing else on the
+            // texture), and leaves the desktop dev bar visible.
+            let slab = ctx.available_rect().shrink(6.0);
             let bg = ctx.layer_painter(egui::LayerId::background());
             theme::surface(&bg, slab, 24.0);
             egui::Frame::none()
@@ -1155,17 +1157,22 @@ impl DevView {
                 }
             }
             Page::Settings => {
-                ui.columns(2, |cols| {
-                    let (lc, rc) = cols.split_at_mut(1);
-                    let (lp, rp) = (&mut lc[0], &mut rc[0]);
-                    // ui.columns() hands out *justified* layouts, and egui
-                    // letter-justifies wrapped text in those. Re-plain them
-                    // (and hand the used rects back to the parents below,
-                    // so the scroll area still knows the page height).
+                {
+                    // Two columns when there's room; one when the window is
+                    // narrow (label + slider + value rows overflowed narrow
+                    // columns into their neighbour). Plain top-down layouts:
+                    // ui.columns() letter-justifies wrapped text.
+                    const TWO_COLUMNS_MIN: f32 = 960.0;
                     let plain = egui::Layout::top_down(egui::Align::Min);
-                    let mut l = lp.child_ui(lp.max_rect(), plain);
-                    let mut r = rp.child_ui(rp.max_rect(), plain);
-                    let (l, r) = (&mut l, &mut r);
+                    let gap = theme::GUTTER;
+                    let width = ui.available_width();
+                    let narrow = width < TWO_COLUMNS_MIN;
+                    let col_w = if narrow { width } else { (width - gap) / 2.0 };
+                    let top = ui.cursor().min;
+                    let bottom = ui.max_rect().bottom().max(top.y + 1.0);
+                    let column = |min: egui::Pos2| egui::Rect::from_min_max(min, egui::pos2(min.x + col_w, bottom.max(min.y + 1.0)));
+                    let mut l = ui.child_ui(column(top), plain);
+                    let l = &mut l;
                     if appearance_card(
                         l,
                         &mut self.accent,
@@ -1201,6 +1208,10 @@ impl DevView {
                     if admin_card(l, &mut self.run_as_admin, self.elevated, accent) {
                         self.restart_elevated_requested = true;
                     }
+                    // Right column: beside the left one, or below it when narrow.
+                    let r_min = if narrow { egui::pos2(top.x, l.min_rect().bottom() + gap) } else { egui::pos2(top.x + col_w + gap, top.y) };
+                    let mut r = ui.child_ui(column(r_min), plain);
+                    let r = &mut r;
                     placement_card(r, &mut self.placement, accent);
                     r.add_space(theme::GUTTER);
                     let snap = self.system.snapshot();
@@ -1211,9 +1222,9 @@ impl DevView {
                     if reset_card(r, &mut self.reset_armed_at) {
                         self.reset_requested = true;
                     }
-                    lp.allocate_rect(l.min_rect(), egui::Sense::hover());
-                    rp.allocate_rect(r.min_rect(), egui::Sense::hover());
-                });
+                    // Hand the used area back so the scroll area knows the height.
+                    ui.allocate_rect(l.min_rect().union(r.min_rect()), egui::Sense::hover());
+                }
             }
         }
     }

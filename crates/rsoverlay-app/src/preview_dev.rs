@@ -121,7 +121,18 @@ impl DevHarness {
         dev.dock_layout = self.surface == Surface::VrDashboard;
         self.frame_to_vr_width(ctx);
         match self.surface {
-            Surface::Dashboard | Surface::VrDashboard => dev.ui_with(ctx, Some(injector)),
+            Surface::Dashboard => dev.ui_with(ctx, Some(injector)),
+            Surface::VrDashboard => {
+                dev.ui_with(ctx, Some(injector));
+                // The VR shell handles these in a headset; here, Dock just
+                // highlights and ✕ goes back to the desktop dashboard.
+                if let Some(a) = dev.dash_dock.take() {
+                    dev.dash_attach = a;
+                }
+                if std::mem::take(&mut dev.dash_close) {
+                    self.surface = Surface::Dashboard;
+                }
+            }
             Surface::Wrist => {
                 let _ = dev.wrist_ui(ctx);
             }
@@ -142,15 +153,24 @@ impl DevHarness {
                 if let Some(msg) = kf.chat {
                     self.typed = format!("[VRChat] {msg}");
                 }
+                if kf.close {
+                    self.surface = Surface::Dashboard;
+                }
             }
             Surface::Widgets => {
                 self.widget_active = self.widget_active.min(self.widgets.len().saturating_sub(1));
-                let wa = dev.widget_ui(ctx, &self.widgets, self.widget_active, Attach::World, self.win_linked, Some(injector));
+                let wa = dev.widget_ui(ctx, &self.widgets, self.widget_active, self.win_attach, self.win_linked, Some(injector));
                 if let Some(i) = wa.select {
                     self.widget_active = i;
                 }
                 if wa.unlink {
                     self.win_linked = false;
+                }
+                if let Some(a) = wa.attach {
+                    self.win_attach = a;
+                }
+                if wa.close {
+                    self.surface = Surface::Dashboard;
                 }
             }
             Surface::WindowPanel => {
@@ -163,6 +183,9 @@ impl DevHarness {
                 }
                 if let Some(o) = act.opacity {
                     self.win_opacity = o;
+                }
+                if act.close {
+                    self.surface = Surface::Dashboard;
                 }
             }
             Surface::Toasts => {
