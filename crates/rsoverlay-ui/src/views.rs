@@ -78,9 +78,39 @@ pub struct SourcePicker {
     /// lazily per egui context).
     pub icons: std::collections::HashMap<isize, egui::ColorImage>,
     icon_tex: std::collections::HashMap<isize, egui::TextureHandle>,
+    /// Window thumbnails (generation, image) from the app's worker.
+    thumbs: std::collections::HashMap<isize, (u64, egui::ColorImage)>,
+    thumb_tex: std::collections::HashMap<isize, (u64, egui::TextureHandle)>,
 }
 
 impl SourcePicker {
+    /// Replace the thumbnails with a finished batch (`generation` bumps
+    /// each batch so textures re-upload only when the picture changed).
+    pub fn set_thumbnails(&mut self, generation: u64, thumbs: &std::collections::HashMap<isize, egui::ColorImage>) {
+        self.thumbs = thumbs.iter().map(|(h, img)| (*h, (generation, img.clone()))).collect();
+        self.thumb_tex.retain(|h, _| thumbs.contains_key(h));
+    }
+
+    /// Texture + pixel size of a window's thumbnail, uploaded / updated
+    /// lazily per egui context.
+    pub fn thumb_texture(&mut self, ctx: &egui::Context, hwnd: isize) -> Option<(egui::TextureId, egui::Vec2)> {
+        let (generation, img) = self.thumbs.get(&hwnd)?;
+        let size = egui::vec2(img.size[0] as f32, img.size[1] as f32);
+        match self.thumb_tex.get_mut(&hwnd) {
+            Some((g, t)) if g == generation => return Some((t.id(), size)),
+            Some((g, t)) => {
+                t.set(img.clone(), egui::TextureOptions::LINEAR);
+                *g = *generation;
+                return Some((t.id(), size));
+            }
+            None => {}
+        }
+        let t = ctx.load_texture(format!("winthumb-{hwnd}"), img.clone(), egui::TextureOptions::LINEAR);
+        let id = t.id();
+        self.thumb_tex.insert(hwnd, (*generation, t));
+        Some((id, size))
+    }
+
     /// Texture for a window's app icon, uploaded on first use.
     pub fn icon_texture(&mut self, ctx: &egui::Context, hwnd: isize) -> Option<egui::TextureId> {
         if let Some(t) = self.icon_tex.get(&hwnd) {

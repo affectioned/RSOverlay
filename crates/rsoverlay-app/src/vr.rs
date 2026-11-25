@@ -819,6 +819,7 @@ mod imp {
         let mut win_seq = 0u32;
         let mut next_group = 0u32;
         let mut typing_sounds = rsoverlay_audio::typing::TypingSounds::new();
+        let mut thumbs = crate::mirror_source::ThumbWorker::spawn();
         let sounds_dir = rsoverlay_core::config::sounds_dir();
         let mut prev_menu = false;
         let mut prev_grip = [false; 2];
@@ -1561,7 +1562,9 @@ mod imp {
             if std::mem::take(&mut dev_view.sources.wants_refresh) {
                 dev_view.sources.choices = list_sources();
                 fetch_icons(&dev_view.sources.choices, &mut dev_view.sources.icons);
+                thumbs.request(&dev_view.sources.choices);
             }
+            thumbs.collect(&mut dev_view.sources);
             if let Some(src) = dev_view.sources.request.take() {
                 if wins.iter().filter(|w| w.mirror.is_some()).count() >= MAX_WINDOWS || wins.len() >= MAX_FLOATING {
                     warn!("window overlay limit ({MAX_WINDOWS}) reached");

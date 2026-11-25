@@ -240,6 +240,9 @@ fn fit(aspect: f32, max_w: f32, max_h: f32) -> (f32, f32) {
     }
 }
 
+/// Desktop-picker tile height: a preview area plus a caption row.
+const TILE_H: f32 = 190.0;
+
 /// VR Desktop page: every capturable window + monitor as a big tile;
 /// clicking one requests it as a floating window overlay.
 pub fn source_grid(ui: &mut egui::Ui, sources: &mut SourcePicker, open: &[CaptureSource], accent: egui::Color32) {
@@ -271,34 +274,55 @@ pub fn source_grid(ui: &mut egui::Ui, sources: &mut SourcePicker, open: &[Captur
             ui.spacing_mut().item_spacing.x = gap;
             for src in row {
                 let is_open = open.contains(src);
-                let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 64.0), egui::Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, TILE_H), egui::Sense::click());
                 let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
                 let fill = motion::mix(theme::BG_CARD, crate::theme::BG_HOVER, hover);
                 ui.painter().rect_filled(rect, 14.0, fill);
                 if is_open {
                     ui.painter().rect_stroke(rect, 14.0, egui::Stroke::new(1.5_f32, accent));
                 }
-                let icon_r = egui::Rect::from_center_size(rect.left_center() + egui::vec2(30.0, 0.0), egui::vec2(32.0, 32.0));
+                // Preview on top, icon + title along the bottom.
+                let preview = egui::Rect::from_min_max(rect.min + egui::vec2(10.0, 10.0), egui::pos2(rect.right() - 10.0, rect.bottom() - 52.0));
+                let caption = rect.left_bottom() + egui::vec2(0.0, -26.0);
+                let icon_r = egui::Rect::from_center_size(caption + egui::vec2(28.0, 0.0), egui::vec2(26.0, 26.0));
+                ui.painter().rect_filled(preview, 10.0, theme::BG_ROOT);
                 let label = match src {
                     CaptureSource::Monitor(i) => {
-                        crate::icons::icon(crate::icons::MONITOR, 28.0, if is_open { accent } else { theme::FG_MUTED })
-                            .paint_at(ui, icon_r.shrink(2.0));
+                        let tint = if is_open { accent } else { theme::FG_MUTED };
+                        crate::icons::icon(crate::icons::MONITOR, 48.0, tint)
+                            .paint_at(ui, egui::Rect::from_center_size(preview.center(), egui::vec2(48.0, 48.0)));
+                        crate::icons::icon(crate::icons::MONITOR, 22.0, tint).paint_at(ui, icon_r.shrink(2.0));
                         format!("Monitor {i}")
                     }
                     CaptureSource::Window { hwnd, title } => {
-                        match sources.icon_texture(ui.ctx(), *hwnd) {
+                        let icon = sources.icon_texture(ui.ctx(), *hwnd);
+                        match sources.thumb_texture(ui.ctx(), *hwnd) {
+                            Some((id, size)) => {
+                                let (tw, th) = fit(size.x / size.y.max(1.0), preview.width(), preview.height());
+                                let r = egui::Rect::from_center_size(preview.center(), egui::vec2(tw, th));
+                                egui::Image::new((id, r.size())).rounding(8.0).paint_at(ui, r);
+                            }
+                            // Minimised / not captured yet: the app icon, large.
+                            None => match icon {
+                                Some(id) => egui::Image::new((id, egui::vec2(48.0, 48.0)))
+                                    .paint_at(ui, egui::Rect::from_center_size(preview.center(), egui::vec2(48.0, 48.0))),
+                                None => crate::icons::icon(crate::icons::MONITOR, 48.0, theme::FG_FAINT)
+                                    .paint_at(ui, egui::Rect::from_center_size(preview.center(), egui::vec2(48.0, 48.0))),
+                            },
+                        }
+                        match icon {
                             Some(id) => egui::Image::new((id, icon_r.size())).paint_at(ui, icon_r),
-                            None => crate::icons::icon(crate::icons::MONITOR, 28.0, theme::FG_MUTED).paint_at(ui, icon_r.shrink(2.0)),
+                            None => crate::icons::icon(crate::icons::MONITOR, 22.0, theme::FG_MUTED).paint_at(ui, icon_r.shrink(2.0)),
                         }
                         title.clone()
                     }
                 };
-                let painter = ui.painter_at(rect.shrink(12.0));
+                let painter = ui.painter_at(rect.shrink(10.0));
                 // Titles carry symbols the font lacks (terminal spinners
                 // like ◑ ✳) — drop those rather than draw empty boxes.
                 let font = egui::FontId::proportional(theme::SIZE_BODY);
                 let label: String = ui.fonts(|f| label.chars().filter(|c| f.has_glyph(&font, *c)).collect());
-                painter.text(rect.left_center() + egui::vec2(56.0, 0.0), egui::Align2::LEFT_CENTER,
+                painter.text(caption + egui::vec2(50.0, 0.0), egui::Align2::LEFT_CENTER,
                     shell_truncate(label.trim(), 28), font, theme::FG_PRIMARY);
                 if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !is_open {
                     sources.request = Some(src.clone());

@@ -42,6 +42,7 @@ pub use shared::SharedCapture;
 
 #[cfg(windows)]
 pub mod window;
+pub mod thumbnail;
 #[cfg(windows)]
 pub use window::{enumerate_windows, find_window, WindowCapture, WindowInfo};
 

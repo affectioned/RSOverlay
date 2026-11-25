@@ -175,6 +175,67 @@ pub fn fetch_icons(sources: &[CaptureSource], have: &mut std::collections::HashM
     }
 }
 
+/// Thumbnail width for the Desktop picker, px.
+const THUMB_W: u32 = 320;
+
+/// Grabs Desktop-picker thumbnails on its own thread: `PrintWindow` can
+/// block on a hung app and costs a full-size CPU copy per window, neither
+/// of which belongs on the render loop. Requests are coalesced (a request
+/// arriving while one is in flight is dropped — the picker asks again in
+/// 2 s). The thread exits when the worker is dropped.
+pub struct ThumbWorker {
+    tx: std::sync::mpsc::SyncSender<Vec<isize>>,
+    out: Arc<std::sync::Mutex<(u64, std::collections::HashMap<isize, egui::ColorImage>)>>,
+    seen: u64,
+}
+
+impl ThumbWorker {
+    pub fn spawn() -> Self {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<isize>>(1);
+        let out = Arc::new(std::sync::Mutex::new((0u64, std::collections::HashMap::new())));
+        let shared = out.clone();
+        let _ = std::thread::Builder::new().name("rso-thumbs".into()).spawn(move || {
+            while let Ok(hwnds) = rx.recv() {
+                let fresh: std::collections::HashMap<isize, egui::ColorImage> = hwnds
+                    .into_iter()
+                    .filter_map(|h| {
+                        rsoverlay_capture::thumbnail::window_thumbnail(h, THUMB_W)
+                            .map(|(w, hh, px)| (h, egui::ColorImage::from_rgba_unmultiplied([w as usize, hh as usize], &px)))
+                    })
+                    .collect();
+                if let Ok(mut o) = shared.lock() {
+                    o.0 += 1;
+                    o.1 = fresh;
+                }
+            }
+        });
+        Self { tx, out, seen: 0 }
+    }
+
+    /// Ask for thumbnails of these windows (dropped if one is in flight).
+    pub fn request(&self, sources: &[CaptureSource]) {
+        let hwnds = sources
+            .iter()
+            .filter_map(|s| match s {
+                CaptureSource::Window { hwnd, .. } => Some(*hwnd),
+                CaptureSource::Monitor(_) => None,
+            })
+            .collect();
+        let _ = self.tx.try_send(hwnds);
+    }
+
+    /// Copy a finished batch into the picker; true if anything changed.
+    pub fn collect(&mut self, picker: &mut rsoverlay_ui::views::SourcePicker) -> bool {
+        let Ok(o) = self.out.lock() else { return false };
+        if o.0 == self.seen {
+            return false;
+        }
+        self.seen = o.0;
+        picker.set_thumbnails(o.0, &o.1);
+        true
+    }
+}
+
 /// Every monitor plus every capturable window, for the source picker.
 pub fn list_sources() -> Vec<CaptureSource> {
     let mut out: Vec<CaptureSource> = enumerate_monitors()

@@ -20,7 +20,7 @@ Last reviewed: M60 (2026-11-24).
 | Launch with SteamVR (startup overlay app) | ✅ | M58: `.vrmanifest` registered via IVRApplications; auto-launch on first run, toggle in SteamVR › Startup; exits when SteamVR quits |
 | Desktop mirror | ✅ | M14, GPU-to-GPU; cursor drawn on monitor mirrors (M47) |
 | Per-window capture | ✅ | M31, Windows Graphics Capture, GPU-to-GPU |
-| Window picker with previews | 🟡 | Desktop page tiles with real app icons + search filter (M47/M50); no live thumbnails |
+| Window picker with previews | ✅ | Desktop page tiles with real app icons + search filter (M47/M50); window thumbnails refreshed every 2 s off-thread (M67) |
 | Multiple window overlays at once | ✅ | M44: up to 6 windows, 14 floating panels in total |
 | Attach overlay to world / head / left hand / right hand | ✅ | M44 windows, M46 widgets, M59 dashboard; grabbing a docked panel undocks it |
 | Gather overlays + recenter | 🟡 | Recenter arcs every world panel (and the keyboard) in front of you; no grid view |
@@ -112,6 +112,5 @@ Last reviewed: M60 (2026-11-24).
 
 ## Next parity gaps (value ÷ cost)
 
-1. **Window thumbnails** in the Desktop picker.
-2. **Notification scale / offsets.**
-3. Touch injection, gamepad bindings, curve bias (smaller audiences).
+1. **Notification scale / offsets.**
+2. Touch injection, gamepad bindings, curve bias (smaller audiences).

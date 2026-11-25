@@ -58,14 +58,15 @@ Last reviewed 2026-11-24. Parity detail lives in
   windows at startup; config change detection is structural; pending
   saves flush on exit; round-trip test guards every setting.
 - **M66:** hide the wrist toolbar (Settings › VR); low-battery chime.
+- **M67:** window thumbnails in the Desktop picker (PrintWindow on a
+  worker thread, every 2 s while the page is open; icon fallback).
 
 ## XSOverlay parity: remaining gaps
 
 Ranked by value ÷ cost; full table in [XSO_PARITY.md](XSO_PARITY.md).
 
-1. **Window thumbnails** in the Desktop picker.
-2. **Notification scale / offsets.**
-3. Touch injection, gamepad bindings, curve bias.
+1. **Notification scale / offsets.**
+2. Touch injection, gamepad bindings, curve bias.
 
 ## Working in VR (productivity track)
 

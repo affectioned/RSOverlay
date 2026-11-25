@@ -643,6 +643,7 @@ pub fn run(
     // Show saved VR layouts (read-only here; saving/loading happens in VR).
     dev_view.layouts = rsoverlay_core::layouts::Layouts::load(&rsoverlay_core::layouts::Layouts::path());
     let mut persister = ConfigPersister::new(config_path.clone(), app_config.clone());
+    let mut thumbs = crate::mirror_source::ThumbWorker::spawn();
     let config_base = app_config.clone();
     let mut fps_counter = FpsCounter::new();
     let mut frame_counter: u64 = 0;
@@ -777,7 +778,9 @@ pub fn run(
                         if std::mem::take(&mut dev_view.sources.wants_refresh) {
                             dev_view.sources.choices = list_sources();
                             fetch_icons(&dev_view.sources.choices, &mut dev_view.sources.icons);
+                            thumbs.request(&dev_view.sources.choices);
                         }
+                        thumbs.collect(&mut dev_view.sources);
                         if let Some(req) = dev_view.sources.request.take() {
                             // Tear down first: DXGI allows one duplication
                             // per output per process.
