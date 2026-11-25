@@ -43,7 +43,7 @@ Exactly matches XSOverlay's `/api/v1/send`:
 | `height` | f32 | Pixel height of the toast at reference DPI. |
 | `opacity` | f32 | 0..=1. |
 | `volume` | f32 | 0..=1, multiplied with the user's alert volume. |
-| `audioPath` | string | Sound **category**: `"default"`, `"warning"`, `"error"` or `"none"`. The user picks the actual sound per category (Settings › Notifications). File paths are **not** played — anything else falls back to `"default"` (a client-supplied path, e.g. a `\host\share` UNC path, could otherwise leak the user's NTLM hash). |
+| `audioPath` | string | Sound **category**: `"default"`, `"warning"`, `"error"` or `"none"`. The user picks the actual sound per category (Settings › Notifications). File paths are **not** played — anything else falls back to `"default"` (a client-supplied path, e.g. a `\\host\share` UNC path, could otherwise leak the user's NTLM hash). |
 | `title` | string | Toast heading. UTF-8. |
 | `content` | string | Toast body. UTF-8. |
 | `useBase64Icon` | bool | If true, `icon` is a base64 data URI. |
