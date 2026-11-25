@@ -52,6 +52,11 @@ Last reviewed 2026-11-24. Parity detail lives in
 - **M64:** per-window opacity — a slider on every window toolbar fades
   just the captured content (toolbar stays solid) so you can watch your
   game and still see the world; saved with layouts.
+- **M65:** persistence audit — wrist pose / size and keyboard toggles
+  (pinned, auto-repeat, compact / full, VRChat) survive restarts
+  (`[vr_state]`); Restore last session (on by default) reopens the open
+  windows at startup; config change detection is structural; pending
+  saves flush on exit; round-trip test guards every setting.
 
 ## XSOverlay parity: remaining gaps
 

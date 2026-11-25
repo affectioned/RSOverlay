@@ -60,6 +60,17 @@ pub struct Layouts {
     pub slots: std::collections::BTreeMap<String, Layout>,
     /// Slot loaded automatically when VR starts.
     pub favorite: Option<usize>,
+    /// The arrangement open when VR last closed (autosaved), reopened at
+    /// startup when no favourite is set and session restore is on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_session: Option<Layout>,
+}
+
+impl Layout {
+    /// Same panels and keyboard, ignoring when it was saved.
+    pub fn same_arrangement(&self, other: &Layout) -> bool {
+        self.panels == other.panels && self.keyboard == other.keyboard
+    }
 }
 
 impl Layouts {

@@ -2172,6 +2172,7 @@ dependencies = [
  "rsoverlay-ui",
  "serde_json",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "wgpu",

@@ -787,6 +787,28 @@ mod imp {
         }
         let mut beam_tint = [[f32::NAN; 4]; 2];
         let mut keyboard = rsoverlay_ui::vrkeyboard::VrKeyboard::default();
+        // Restore hands-on state from last session.
+        {
+            let st = &dev_view.vr_state;
+            if let Some(m) = st.wrist_pose {
+                wrist_rel = to_affine(&HmdMatrix34_t { m });
+            }
+            if let Some(w) = st.wrist_width {
+                wrist.set_width(&overlay, w);
+            }
+            keyboard.locked_pos = st.kb_pinned;
+            keyboard.auto_repeat = st.kb_auto_repeat;
+            keyboard.full = st.kb_full;
+            keyboard.vrchat = st.kb_vrchat;
+        }
+        // Last session: reopened once tracking is up, unless a starred
+        // layout is set (that wins). Autosaved every few seconds after.
+        let mut session_pending = dev_view
+            .layouts
+            .last_session
+            .clone()
+            .filter(|l| favorite_pending.is_none() && dev_view.restore_session && !l.panels.is_empty());
+        let mut session_checked = Instant::now();
         let mut kb_pose: Option<Affine3A> = None;
         // VR keyboard → RSOverlay's own text fields: events typed this
         // frame go to the panel whose field has focus (1 = dashboard,
@@ -1736,11 +1758,15 @@ mod imp {
 
             // ── Layouts: save / load / favourite / clear. The favourite
             // loads once tracking is up.
+            let mut load_now: Option<(String, rsoverlay_core::layouts::Layout)> = None;
             if hmd.is_some() {
                 if let Some(i) = favorite_pending.take() {
                     if dev_view.layouts.slot(i).is_some() {
                         dev_view.layout_request = Some(rsoverlay_ui::layouts_page::LayoutAction::Load(i));
                     }
+                }
+                if let Some(l) = session_pending.take() {
+                    load_now = Some(("last session".into(), l));
                 }
             }
             if let Some(action) = dev_view.layout_request.take() {
@@ -1757,88 +1783,113 @@ mod imp {
                         dev_view.layouts.favorite = if dev_view.layouts.favorite == Some(i) { None } else { Some(i) };
                     }
                     LayoutAction::Load(i) => {
-                        if let Some(layout) = dev_view.layouts.slot(i).cloned() {
-                            for mut w in wins.drain(..) {
-                                if let Some(m) = w.mirror.take() {
-                                    m.shutdown(&mut w.panel.egui);
-                                }
-                                w.panel.destroy(&overlay);
-                            }
-                            grab = None;
-                            let sources = list_sources();
-                            fetch_icons(&sources, &mut dev_view.sources.icons);
-                            // Saved group ids are per-layout; offset them past
-                            // any id handed out this session.
-                            let group_base = next_group;
-                            for p in &layout.panels {
-                                let pose = to_affine(&HmdMatrix34_t { m: p.pose });
-                                let attach = attach_from_slug(&p.attach);
-                                let dev = match attach {
-                                    Attach::World => None,
-                                    Attach::Head => Some(0),
-                                    Attach::LeftHand => system.as_ref().and_then(|s| s.hand_index(Hand::Left)),
-                                    Attach::RightHand => system.as_ref().and_then(|s| s.hand_index(Hand::Right)),
-                                };
-                                // Relative poses need a world fallback for
-                                // the first frame / missing device.
-                                let world = dev
-                                    .and_then(|d| device_pose(d, hmd.as_ref(), &controllers))
-                                    .map_or(pose, |d| d * pose);
-                                win_seq += 1;
-                                let opened = match p.kind.as_str() {
-                                    "widgets" => {
-                                        let tabs: Vec<WidgetKind> = p.widgets.iter().filter_map(|s| WidgetKind::from_slug(s)).collect();
-                                        (!tabs.is_empty()).then(|| new_widget(&overlay, &gpu, win_seq, tabs, world))
-                                    }
-                                    "monitor" => Some(open_window(&overlay, &gpu, win_seq, rsoverlay_ui::views::CaptureSource::Monitor(p.monitor), world, &dev_view.sources.icons)),
-                                    _ => {
-                                        // Exact title, else same leading text
-                                        // (titles change: "Discord — #general").
-                                        let head: String = p.title.chars().take(12).collect();
-                                        sources
-                                            .iter()
-                                            .find(|s| s.label() == p.title)
-                                            .or_else(|| sources.iter().find(|s| matches!(s, rsoverlay_ui::views::CaptureSource::Window { .. }) && !head.is_empty() && s.label().starts_with(&head)))
-                                            .map(|src| open_window(&overlay, &gpu, win_seq, src.clone(), world, &dev_view.sources.icons))
-                                    }
-                                };
-                                match opened {
-                                    Some(Ok(mut w)) => {
-                                        w.panel.set_width(&overlay, p.width);
-                                        if let (Some(d), false) = (dev, attach == Attach::World) {
-                                            if overlay.set_transform_device_relative(w.panel.handle, d, &from_affine(&pose)).is_ok() {
-                                                w.rel = Some((d, pose));
-                                                w.attach = attach;
-                                            }
-                                        }
-                                        w.world = world;
-                                        w.group = p.group.filter(|_| attach == Attach::World).map(|g| group_base + 1 + g);
-                                        w.opacity = p.opacity.unwrap_or(1.0).clamp(window_panel::MIN_CONTENT_OPACITY, 1.0);
-                                        next_group = next_group.max(w.group.unwrap_or(0));
-                                        wins.push(w);
-                                    }
-                                    Some(Err(e)) => warn!("layout: reopening {:?}: {e:#}", p.title),
-                                    None => warn!("layout: window {:?} isn't open — skipped", p.title),
-                                }
-                            }
-                            if let Some(k) = &layout.keyboard {
-                                let p = to_affine(&HmdMatrix34_t { m: k.pose });
-                                let _ = overlay.set_transform_absolute(kb.handle, &from_affine(&p));
-                                kb.set_width(&overlay, k.width);
-                                kb_pose = Some(p);
-                                dev_view.show_keyboard = true;
-                                kb.set_visible(&overlay, true);
-                            }
-                            // A docked partner whose window isn't open any more.
-                            prune_groups(&mut wins);
-                            info!("layout slot {} loaded ({} panels)", i + 1, wins.len());
-                        }
+                        load_now = dev_view.layouts.slot(i).cloned().map(|l| (format!("slot {}", i + 1), l));
                     }
                 }
                 if let Err(e) = dev_view.layouts.save(&layouts_path) {
                     warn!("saving layouts: {e:#}");
                 }
             }
+            if let Some((what, layout)) = load_now.take() {
+                for mut w in wins.drain(..) {
+                    if let Some(m) = w.mirror.take() {
+                        m.shutdown(&mut w.panel.egui);
+                    }
+                    w.panel.destroy(&overlay);
+                }
+                grab = None;
+                let sources = list_sources();
+                fetch_icons(&sources, &mut dev_view.sources.icons);
+                // Saved group ids are per-layout; offset them past
+                // any id handed out this session.
+                let group_base = next_group;
+                for p in &layout.panels {
+                    let pose = to_affine(&HmdMatrix34_t { m: p.pose });
+                    let attach = attach_from_slug(&p.attach);
+                    let dev = match attach {
+                        Attach::World => None,
+                        Attach::Head => Some(0),
+                        Attach::LeftHand => system.as_ref().and_then(|s| s.hand_index(Hand::Left)),
+                        Attach::RightHand => system.as_ref().and_then(|s| s.hand_index(Hand::Right)),
+                    };
+                    // Relative poses need a world fallback for
+                    // the first frame / missing device.
+                    let world = dev
+                        .and_then(|d| device_pose(d, hmd.as_ref(), &controllers))
+                        .map_or(pose, |d| d * pose);
+                    win_seq += 1;
+                    let opened = match p.kind.as_str() {
+                        "widgets" => {
+                            let tabs: Vec<WidgetKind> = p.widgets.iter().filter_map(|s| WidgetKind::from_slug(s)).collect();
+                            (!tabs.is_empty()).then(|| new_widget(&overlay, &gpu, win_seq, tabs, world))
+                        }
+                        "monitor" => Some(open_window(&overlay, &gpu, win_seq, rsoverlay_ui::views::CaptureSource::Monitor(p.monitor), world, &dev_view.sources.icons)),
+                        _ => {
+                            // Exact title, else same leading text
+                            // (titles change: "Discord — #general").
+                            let head: String = p.title.chars().take(12).collect();
+                            sources
+                                .iter()
+                                .find(|s| s.label() == p.title)
+                                .or_else(|| sources.iter().find(|s| matches!(s, rsoverlay_ui::views::CaptureSource::Window { .. }) && !head.is_empty() && s.label().starts_with(&head)))
+                                .map(|src| open_window(&overlay, &gpu, win_seq, src.clone(), world, &dev_view.sources.icons))
+                        }
+                    };
+                    match opened {
+                        Some(Ok(mut w)) => {
+                            w.panel.set_width(&overlay, p.width);
+                            if let (Some(d), false) = (dev, attach == Attach::World) {
+                                if overlay.set_transform_device_relative(w.panel.handle, d, &from_affine(&pose)).is_ok() {
+                                    w.rel = Some((d, pose));
+                                    w.attach = attach;
+                                }
+                            }
+                            w.world = world;
+                            w.group = p.group.filter(|_| attach == Attach::World).map(|g| group_base + 1 + g);
+                            w.opacity = p.opacity.unwrap_or(1.0).clamp(window_panel::MIN_CONTENT_OPACITY, 1.0);
+                            next_group = next_group.max(w.group.unwrap_or(0));
+                            wins.push(w);
+                        }
+                        Some(Err(e)) => warn!("layout: reopening {:?}: {e:#}", p.title),
+                        None => warn!("layout: window {:?} isn't open — skipped", p.title),
+                    }
+                }
+                if let Some(k) = &layout.keyboard {
+                    let p = to_affine(&HmdMatrix34_t { m: k.pose });
+                    let _ = overlay.set_transform_absolute(kb.handle, &from_affine(&p));
+                    kb.set_width(&overlay, k.width);
+                    kb_pose = Some(p);
+                    dev_view.show_keyboard = true;
+                    kb.set_visible(&overlay, true);
+                }
+                // A docked partner whose window isn't open any more.
+                prune_groups(&mut wins);
+                info!("layout {what} loaded ({} panels)", wins.len());
+            }
+
+            // ── Session autosave: the open arrangement, every few seconds
+            // when it changed (and once more at shutdown).
+            if session_pending.is_none() && favorite_pending.is_none() && session_checked.elapsed() >= Duration::from_secs(3) {
+                session_checked = Instant::now();
+                let kbp = kb.visible.then_some(kb_pose).flatten().map(|p| (p, kb.width_m));
+                let now = capture_layout(&wins, kbp);
+                if !dev_view.layouts.last_session.as_ref().is_some_and(|l| l.same_arrangement(&now)) {
+                    dev_view.layouts.last_session = Some(now);
+                    if let Err(e) = dev_view.layouts.save(&layouts_path) {
+                        warn!("saving session: {e:#}");
+                    }
+                }
+            }
+
+            // Mirror hands-on state into the config (autosaved, debounced).
+            dev_view.vr_state = rsoverlay_core::config::VrState {
+                wrist_pose: Some(from_affine(&wrist_rel).m),
+                wrist_width: Some(wrist.width_m),
+                kb_pinned: keyboard.locked_pos,
+                kb_auto_repeat: keyboard.auto_repeat,
+                kb_full: keyboard.full,
+                kb_vrchat: keyboard.vrchat,
+            };
 
             // ── Haptic ticks for clicks on any panel.
             if let Some(sys) = &system {
@@ -1907,6 +1958,17 @@ mod imp {
             std::thread::sleep(Duration::from_millis(11));
         }
 
+        // Persist everything before tearing down: the debounced config
+        // write may still be pending, and the session should be exact.
+        persister.tick(&crate::preview::config_from_dev_view(&dev_view, &config_base));
+        persister.flush();
+        if session_pending.is_none() && favorite_pending.is_none() {
+            let kbp = kb.visible.then_some(kb_pose).flatten().map(|p| (p, kb.width_m));
+            dev_view.layouts.last_session = Some(capture_layout(&wins, kbp));
+            if let Err(e) = dev_view.layouts.save(&layouts_path) {
+                warn!("saving session: {e:#}");
+            }
+        }
         for mut w in wins.drain(..) {
             if let Some(m) = w.mirror.take() {
                 m.shutdown(&mut w.panel.egui);

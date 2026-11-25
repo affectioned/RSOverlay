@@ -296,6 +296,11 @@ pub struct DevView {
     pub scroll_speed: f32,
     /// Long-press + double-click assist (Settings › Pointer).
     pub pointer: PointerPrefs,
+    /// Reopen last session's windows at VR startup.
+    pub restore_session: bool,
+    /// Hands-on VR adjustments (wrist pose, keyboard toggles), mirrored
+    /// here by the VR shell so they autosave with the config.
+    pub vr_state: rsoverlay_core::config::VrState,
     /// Reset button armed at this egui time (two-step confirm — VR has
     /// no dialogs).
     reset_armed_at: Option<f64>,
@@ -387,6 +392,8 @@ impl Default for DevView {
             cursor_smoothing: 0.5,
             scroll_speed: 1.0,
             pointer: PointerPrefs::default(),
+            restore_session: true,
+            vr_state: Default::default(),
             night_light: crate::nightlight::NightLight::default(),
             tint: [1.0; 4],
             last_frame_time: None,
@@ -1001,6 +1008,9 @@ impl DevView {
             }
             Page::Macros => self.macros.card(ui, injector, accent),
             Page::Layouts => {
+                ui.checkbox(&mut self.restore_session, "Restore last session")
+                    .on_hover_text("Reopen the windows and widgets you had open when VR last closed. A ★ startup slot takes precedence.");
+                ui.add_space(6.0);
                 if let Some(a) = crate::layouts_page::page(ui, &self.layouts, self.dock_layout, accent) {
                     self.layout_request = Some(a);
                 }

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub render: Render,
@@ -15,6 +15,8 @@ pub struct Config {
     pub night_light: NightLightCfg,
     pub osc: OscCfg,
     pub vr: VrCfg,
+    /// Where things were left in VR, restored next session.
+    pub vr_state: VrState,
     /// Virtual StreamDeck buttons. Serialized as `[[macros]]` tables.
     /// Must stay the last field: TOML arrays of tables have to follow
     /// every plain table in the document.
@@ -70,6 +72,28 @@ pub struct VrCfg {
     pub long_press_s: f32,
     /// Laser double-click assist window, seconds (0 = off).
     pub double_click_s: f32,
+    /// Reopen the windows / widgets that were open when VR last closed
+    /// (a starred startup layout takes precedence).
+    pub restore_session: bool,
+}
+
+/// Where things were left in VR — not choices made in Settings, but
+/// hands-on adjustments restored so the next session starts the same.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VrState {
+    /// Wrist pose relative to its controller (row-major 3×4) after the
+    /// user grabbed and moved it. `None` = default mount.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wrist_pose: Option<[[f32; 4]; 3]>,
+    /// Wrist width, metres, after a grab-scale. `None` = default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wrist_width: Option<f32>,
+    /// VR keyboard toolbar toggles.
+    pub kb_pinned: bool,
+    pub kb_auto_repeat: bool,
+    pub kb_full: bool,
+    pub kb_vrchat: bool,
 }
 
 /// Folder holding user typing-sound packs (`sounds/<pack>/key.wav` …),
@@ -85,7 +109,7 @@ pub const DEFAULT_WRIST_COMPACT: u32 = 0x0F | (1 << 8) | (1 << 9) | (1 << 10) | 
 
 impl Default for VrCfg {
     fn default() -> Self {
-        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0x7F, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new(), long_press: false, long_press_s: 0.6, double_click_s: 0.4 }
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0x7F, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new(), long_press: false, long_press_s: 0.6, double_click_s: 0.4, restore_session: true }
     }
 }
 
@@ -153,7 +177,7 @@ impl Default for Macros {
 
 /// User-tweakable dashboard appearance. Persisted so your accent choice
 /// and card visibility toggles survive a restart.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Appearance {
     /// Accent color stored as `#rrggbb` hex. Falls back to the rose
@@ -218,7 +242,7 @@ pub enum PlacementAnchor {
 
 /// Spatial placement of the main overlay. Persisted so your position
 /// tweaks survive a restart.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Placement {
     pub anchor: PlacementAnchor,
@@ -250,7 +274,7 @@ impl Default for Placement {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Render {
     /// VSync in preview mode. In VR mode we align to the compositor.
@@ -274,7 +298,7 @@ pub struct Render {
     pub overlay_texture_size: u32,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Notify {
     pub enabled: bool,
@@ -283,7 +307,7 @@ pub struct Notify {
     pub token: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preview {
     /// When true, launch into desktop preview even if SteamVR is running.

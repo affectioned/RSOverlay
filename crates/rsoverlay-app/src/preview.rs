@@ -140,6 +140,8 @@ pub fn seed_dev_view(
     dev.pointer.long_press = cfg.vr.long_press;
     dev.pointer.long_press_s = cfg.vr.long_press_s.clamp(0.3, 1.5);
     dev.pointer.double_click_s = cfg.vr.double_click_s.clamp(0.0, 0.8);
+    dev.restore_session = cfg.vr.restore_session;
+    dev.vr_state = cfg.vr_state.clone();
     dev.kb_prefs.packs = rsoverlay_audio::typing::list_packs(&rsoverlay_core::config::sounds_dir());
     dev.elevated = rsoverlay_input::elevation::current_process_elevated();
     dev.battery_osc.enabled = cfg.osc.battery_params;
@@ -278,7 +280,9 @@ pub fn config_from_dev_view(
         long_press: dev.pointer.long_press,
         long_press_s: dev.pointer.long_press_s,
         double_click_s: dev.pointer.double_click_s,
+        restore_session: dev.restore_session,
     };
+    out.vr_state = dev.vr_state.clone();
     out.appearance.reduce_motion = dev.reduce_motion;
     out.macros = rsoverlay_core::config::Macros(
         dev.macros
@@ -434,35 +438,11 @@ impl ConfigPersister {
 /// Field-by-field compare of the two Config variants that matter for
 /// debouncing. Ignores Render / Notify / Preview defaults the user
 /// can't change from inside the UI yet.
+/// Structural: every config struct derives `PartialEq`, so a new field
+/// can never be silently left out of change detection (the hand-written
+/// field list this replaced had to be kept in sync by hand).
 fn configs_equivalent(a: &rsoverlay_core::Config, b: &rsoverlay_core::Config) -> bool {
-    a.appearance.accent_hex == b.appearance.accent_hex
-        && a.appearance.show_mirror == b.appearance.show_mirror
-        && a.appearance.show_media == b.appearance.show_media
-        && a.appearance.show_chat == b.appearance.show_chat
-        && a.appearance.show_keyboard == b.appearance.show_keyboard
-        && a.appearance.show_history == b.appearance.show_history
-        && a.appearance.forward_input == b.appearance.forward_input
-        && a.appearance.language == b.appearance.language
-        && a.appearance.keyboard_layout == b.appearance.keyboard_layout
-        && a.appearance.chat_now_playing == b.appearance.chat_now_playing
-        && a.appearance.show_battery == b.appearance.show_battery
-        && a.appearance.show_macros == b.appearance.show_macros
-        && a.appearance.show_volume == b.appearance.show_volume
-        && a.appearance.show_system == b.appearance.show_system
-        && a.appearance.reduce_motion == b.appearance.reduce_motion
-        && a.macros == b.macros
-        && a.appearance.battery_warn_pct == b.appearance.battery_warn_pct
-        && a.placement.anchor == b.placement.anchor
-        && (a.placement.offset_x - b.placement.offset_x).abs() < 0.001
-        && (a.placement.offset_y - b.placement.offset_y).abs() < 0.001
-        && (a.placement.offset_z - b.placement.offset_z).abs() < 0.001
-        && (a.placement.size_w - b.placement.size_w).abs() < 0.001
-        && (a.placement.size_h - b.placement.size_h).abs() < 0.001
-        && (a.placement.curvature - b.placement.curvature).abs() < 0.001
-        && (a.placement.opacity - b.placement.opacity).abs() < 0.001
-        && a.night_light == b.night_light
-        && a.osc == b.osc
-        && a.vr == b.vr
+    a == b
 }
 
 /// Save the given surface frame to a PNG. BGRA → RGBA swizzle, then
@@ -1016,6 +996,11 @@ pub fn run(
             Event::AboutToWait => {
                 window.request_redraw();
             }
+            // Closing within the save debounce must not lose the change.
+            Event::LoopExiting => {
+                persister.tick(&config_from_dev_view(&dev_view, &config_base));
+                persister.flush();
+            }
             _ => {}
         }
     })?;
@@ -1195,5 +1180,107 @@ impl BlitPipeline {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.draw(0..3, 0..1);
+    }
+}
+
+#[cfg(test)]
+mod config_roundtrip_tests {
+    use super::*;
+    use rsoverlay_core::config::{Macro, Macros, VrState};
+
+    /// A config with (nearly) every user-facing value moved off its default.
+    fn everything_changed() -> rsoverlay_core::Config {
+        let mut c = rsoverlay_core::Config::default();
+        let a = &mut c.appearance;
+        a.accent_hex = "#12AB34".into();
+        a.show_mirror = !a.show_mirror;
+        a.show_media = !a.show_media;
+        a.show_chat = !a.show_chat;
+        a.show_keyboard = !a.show_keyboard;
+        a.show_history = !a.show_history;
+        a.forward_input = !a.forward_input;
+        a.chat_now_playing = !a.chat_now_playing;
+        a.show_battery = !a.show_battery;
+        a.show_macros = !a.show_macros;
+        a.show_volume = !a.show_volume;
+        a.show_system = !a.show_system;
+        a.reduce_motion = !a.reduce_motion;
+        a.battery_warn_pct = 33;
+        let p = &mut c.placement;
+        p.anchor = rsoverlay_core::PlacementAnchor::World;
+        p.offset_x = 0.5;
+        p.offset_y = 1.1;
+        p.offset_z = -0.9;
+        p.size_w = 0.5;
+        p.size_h = 0.3;
+        p.curvature = 0.25;
+        p.opacity = 0.6;
+        c.night_light.mode = "on".into();
+        c.night_light.strength = 0.8;
+        c.osc.battery_params = true;
+        c.osc.battery_prefix = "My/Prefix".into();
+        let v = &mut c.vr;
+        v.left_handed = true;
+        v.clip_angle = 45.0;
+        v.wrist_opacity = 0.5;
+        v.run_as_admin = true;
+        v.ui_scale = 1.25;
+        v.show_lasers = false;
+        v.laser_angle = -10.0;
+        v.cursor_smoothing = 0.25;
+        v.scroll_speed = 2.0;
+        v.wrist_buttons = 0x15;
+        v.media_theme = true;
+        v.wrist_expanded = true;
+        v.wrist_compact = 0x1_0105;
+        v.keyboard_opacity = 0.7;
+        v.typing_sounds = false;
+        v.typing_volume = 0.9;
+        v.sound_pack = "Thocky".into();
+        v.long_press = true;
+        v.long_press_s = 0.9;
+        v.double_click_s = 0.2;
+        v.restore_session = false;
+        c.vr_state = VrState {
+            wrist_pose: Some([[1.0, 0.0, 0.0, 0.1], [0.0, 1.0, 0.0, 0.2], [0.0, 0.0, 1.0, 0.3]]),
+            wrist_width: Some(0.3),
+            kb_pinned: true,
+            kb_auto_repeat: true,
+            kb_full: true,
+            kb_vrchat: true,
+        };
+        c.macros = Macros(vec![Macro { label: "Mute".into(), keys: "ctrl+m".into() }]);
+        c
+    }
+
+    /// Every setting must survive config → dashboard state → config.
+    /// A setting that isn't wired through DevView would come back as its
+    /// default here — and be silently reset by the next autosave.
+    #[test]
+    fn every_setting_survives_the_dashboard_round_trip() {
+        let cfg = everything_changed();
+        let mut dev = rsoverlay_ui::views::DevView::default();
+        seed_dev_view(&mut dev, &cfg, &TestHooks::default());
+        let back = config_from_dev_view(&dev, &cfg);
+        assert_eq!(back, cfg);
+    }
+
+    #[test]
+    fn change_detection_is_structural() {
+        let a = everything_changed();
+        let mut b = a.clone();
+        assert!(configs_equivalent(&a, &b));
+        b.vr_state.kb_full = false;
+        assert!(!configs_equivalent(&a, &b));
+    }
+
+    #[test]
+    fn config_written_by_an_older_build_still_loads() {
+        let old = "[vr]\nleft_handed = true\n";
+        let c: rsoverlay_core::Config = toml::from_str(old).unwrap();
+        assert!(c.vr.left_handed);
+        assert_eq!(c.vr_state, VrState::default());
+        assert!(c.vr.restore_session);
+        assert_eq!(c.vr.wrist_compact, rsoverlay_core::config::DEFAULT_WRIST_COMPACT);
     }
 }
