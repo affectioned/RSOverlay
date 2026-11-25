@@ -194,28 +194,42 @@ pub fn frame(
         let bar_r = egui::Rect::from_min_max(egui::pos2(inner.left(), inner.bottom() - BAR_H), inner.max);
         let body_r = egui::Rect::from_min_max(egui::pos2(inner.left(), tab_r.bottom() + 6.0), egui::pos2(inner.right(), bar_r.top() - 6.0));
 
-        // Tabs.
-        let mut tui = ui.child_ui(tab_r, egui::Layout::left_to_right(egui::Align::Center));
-        for (i, k) in tabs.iter().enumerate() {
+        // Tabs. Split keeps a fixed slot on the right; the tabs share the
+        // rest and shrink (inactive → icon, then all narrower) to fit.
+        let split_w = if tabs.len() > 1 { SPLIT_W } else { 0.0 };
+        let strip = egui::Rect::from_min_max(tab_r.min, egui::pos2(tab_r.right() - split_w, tab_r.bottom()));
+        let full: Vec<f32> = tabs.iter().map(|k| tab_width(ui, k.label())).collect();
+        let widths = tab_widths(&full, active, strip.width(), TAB_GAP);
+        let mut x = strip.left();
+        for (i, (k, (w, label))) in tabs.iter().zip(widths).enumerate() {
             let sel = i == active;
-            let (r, resp) = tui.allocate_exact_size(egui::vec2(tab_width(&tui, k.label()), TAB_H - 6.0), egui::Sense::click());
-            let hover = motion::toggle(tui.ctx(), resp.id, resp.hovered(), motion::FAST);
+            let r = egui::Rect::from_min_size(egui::pos2(x, strip.center().y - (TAB_H - 6.0) / 2.0), egui::vec2(w, TAB_H - 6.0));
+            x += w + TAB_GAP;
+            let mut resp = ui.interact(r, ui.id().with(("tab", i)), egui::Sense::click());
+            if !label {
+                resp = resp.on_hover_text(k.label());
+            }
+            let hover = motion::toggle(ui.ctx(), resp.id, resp.hovered(), motion::FAST);
             let fill = if sel { accent.gamma_multiply(0.22) } else { motion::mix(crate::theme::BG_RAISED, crate::theme::BG_HOVER, hover) };
-            tui.painter().rect_filled(r, 12.0, fill);
+            ui.painter().rect_filled(r, 12.0, fill);
             let tint = if sel { accent } else { theme::FG_MUTED };
-            icon(k.icon(), 16.0, tint).paint_at(&tui, egui::Rect::from_center_size(egui::pos2(r.left() + 18.0, r.center().y), egui::vec2(16.0, 16.0)));
-            tui.painter().text(egui::pos2(r.left() + 32.0, r.center().y), egui::Align2::LEFT_CENTER, k.label(),
-                egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), if sel { theme::FG_PRIMARY } else { theme::FG_MUTED });
-            if resp.clicked() && !sel {
+            let icon_c = if label { egui::pos2(r.left() + 18.0, r.center().y) } else { r.center() };
+            icon(k.icon(), 16.0, tint).paint_at(ui, egui::Rect::from_center_size(icon_c, egui::vec2(16.0, 16.0)));
+            if label {
+                // Clipped to the tab: a squeezed label can never spill out.
+                ui.painter_at(r.shrink2(egui::vec2(4.0, 0.0))).text(egui::pos2(r.left() + 32.0, r.center().y), egui::Align2::LEFT_CENTER, k.label(),
+                    egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), if sel { theme::FG_PRIMARY } else { theme::FG_MUTED });
+            }
+            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !sel {
                 out.select = Some(i);
             }
         }
         if tabs.len() > 1 {
-            tui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if pill(ui, "Split", false, accent).on_hover_text("Pull this tab out into its own panel").clicked() {
-                    out.split = true;
-                }
-            });
+            let split_r = egui::Rect::from_min_max(egui::pos2(tab_r.right() - split_w + TAB_GAP, tab_r.top()), tab_r.max);
+            let mut sui = ui.child_ui(split_r, egui::Layout::right_to_left(egui::Align::Center));
+            if pill(&mut sui, "Split", false, accent).on_hover_text("Pull this tab out into its own panel").clicked() {
+                out.split = true;
+            }
         }
 
         // Body: the live card.
@@ -237,6 +251,33 @@ pub fn frame(
     out
 }
 
+/// Space reserved for the Split pill, and the gap between tabs.
+const SPLIT_W: f32 = 84.0;
+const TAB_GAP: f32 = 8.0;
+/// An icon-only tab.
+const ICON_TAB_W: f32 = 44.0;
+
+/// Width of each tab and whether it shows its label, so the strip fits
+/// `avail`: full labels if they fit; else the active tab keeps its label
+/// and the rest become icons; else every tab is an icon, shrunk evenly.
+/// O(n).
+fn tab_widths(full: &[f32], active: usize, avail: f32, gap: f32) -> Vec<(f32, bool)> {
+    let n = full.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let gaps = gap * (n as f32 - 1.0);
+    if full.iter().sum::<f32>() + gaps <= avail {
+        return full.iter().map(|w| (*w, true)).collect();
+    }
+    let active_w = full.get(active).copied().unwrap_or(ICON_TAB_W);
+    if active_w + ICON_TAB_W * (n as f32 - 1.0) + gaps <= avail {
+        return (0..n).map(|i| if i == active { (active_w, true) } else { (ICON_TAB_W, false) }).collect();
+    }
+    let w = ((avail - gaps) / n as f32).clamp(20.0, ICON_TAB_W);
+    vec![(w, false); n]
+}
+
 fn tab_width(ui: &egui::Ui, label: &str) -> f32 {
     let g = ui.painter().layout_no_wrap(label.to_string(), egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), theme::FG_PRIMARY);
     g.size().x + 46.0
@@ -245,6 +286,33 @@ fn tab_width(ui: &egui::Ui, label: &str) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn total(w: &[(f32, bool)]) -> f32 {
+        w.iter().map(|t| t.0).sum::<f32>() + TAB_GAP * (w.len().saturating_sub(1)) as f32
+    }
+
+    #[test]
+    fn tabs_keep_labels_when_they_fit() {
+        let w = tab_widths(&[100.0, 120.0], 0, 400.0, TAB_GAP);
+        assert!(w.iter().all(|t| t.1));
+    }
+
+    #[test]
+    fn crowded_tabs_shrink_to_icons_but_the_active_one_keeps_its_label() {
+        // Six labelled tabs (~130 each) in a 470-wide strip: what overflowed.
+        let full = [130.0; 6];
+        let w = tab_widths(&full, 4, 470.0, TAB_GAP);
+        assert!(total(&w) <= 470.0);
+        assert!(w[4].1, "active keeps its label");
+        assert!(w.iter().enumerate().all(|(i, t)| i == 4 || !t.1));
+    }
+
+    #[test]
+    fn very_crowded_tabs_all_fit_as_icons() {
+        let w = tab_widths(&[130.0; 7], 0, 250.0, TAB_GAP);
+        assert!(total(&w) <= 250.0 + 0.01);
+        assert!(w.iter().all(|t| !t.1));
+    }
 
     #[test]
     fn captions_map_both_ways() {
