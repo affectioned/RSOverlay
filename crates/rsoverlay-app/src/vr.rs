@@ -338,6 +338,8 @@ mod imp {
         seq: u32,
         /// Edge-docked group: members move together while one is grabbed.
         group: Option<u32>,
+        /// Captured-content opacity (toolbar slider), 0.1..=1.
+        opacity: f32,
     }
 
     impl WinOverlay {
@@ -445,6 +447,7 @@ mod imp {
             wheel_acc: 0.0,
             seq,
             group: None,
+            opacity: 1.0,
         })
     }
 
@@ -493,6 +496,7 @@ mod imp {
                     pose: from_affine(&pose).m,
                     width: w.panel.width_m,
                     group: w.group,
+                    opacity: (w.opacity < 1.0).then_some(w.opacity),
                 }
             })
             .collect();
@@ -530,6 +534,7 @@ mod imp {
             wheel_acc: 0.0,
             seq,
             group: None,
+            opacity: 1.0,
         })
     }
 
@@ -1595,10 +1600,10 @@ mod imp {
                     let (title, handle_m, attach, cursor, blocked) =
                         (mirror.source.label(), mirror.handle(), w.attach, lf.cursor, w.input_blocked);
                     let icon = w.icon.as_ref().map(|t| t.id());
-                    let linked = w.group.is_some();
+                    let (linked, opacity) = (w.group.is_some(), w.opacity);
                     let events = lf.events.clone();
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
-                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, accent);
+                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, opacity, accent);
                         if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
                             rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                         }
@@ -1660,6 +1665,9 @@ mod imp {
                 }
                 if act.unlink {
                     w.group = None;
+                }
+                if let Some(o) = act.opacity {
+                    w.opacity = o.clamp(window_panel::MIN_CONTENT_OPACITY, 1.0);
                 }
                 if let Some(a) = act.attach {
                     // Docked to head / hand → no longer part of a window wall.
@@ -1805,6 +1813,7 @@ mod imp {
                                         }
                                         w.world = world;
                                         w.group = p.group.filter(|_| attach == Attach::World).map(|g| group_base + 1 + g);
+                                        w.opacity = p.opacity.unwrap_or(1.0).clamp(window_panel::MIN_CONTENT_OPACITY, 1.0);
                                         next_group = next_group.max(w.group.unwrap_or(0));
                                         wins.push(w);
                                     }

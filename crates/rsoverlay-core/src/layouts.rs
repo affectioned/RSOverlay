@@ -30,6 +30,10 @@ pub struct LayoutPanel {
     /// meaningful within one layout; absent = not docked.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub group: Option<u32>,
+    /// Window content opacity. `None` (and layouts saved before this
+    /// existed) = fully opaque — deliberately not a 0.0 default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f32>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -129,6 +133,22 @@ mod tests {
         let back = Layouts::load(&p);
         assert_eq!(back, l);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn panels_saved_before_opacity_existed_load_fully_opaque() {
+        let old = "[slots.0]
+name = \"x\"
+
+[[slots.0.panels]]
+kind = \"window\"
+title = \"Game\"
+width = 0.9
+";
+        let l: Layouts = toml::from_str(old).unwrap();
+        let p = &l.slot(0).unwrap().panels[0];
+        assert_eq!(p.opacity, None);
+        assert_eq!(p.group, None);
     }
 
     #[test]

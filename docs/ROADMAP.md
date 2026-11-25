@@ -49,6 +49,9 @@ Last reviewed 2026-11-24. Parity detail lives in
   volume, swappable WAV packs in `sounds/<pack>/`).
 - **M63:** laser long-press → right click (opt-in) and double-click
   delay (a quick second click snaps onto the first).
+- **M64:** per-window opacity — a slider on every window toolbar fades
+  just the captured content (toolbar stays solid) so you can watch your
+  game and still see the world; saved with layouts.
 
 ## XSOverlay parity: remaining gaps
 

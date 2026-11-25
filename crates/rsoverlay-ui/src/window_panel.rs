@@ -48,7 +48,12 @@ pub struct WindowPanelAction {
     pub close: bool,
     /// Leave the edge-docked group this panel is linked into.
     pub unlink: bool,
+    /// Content opacity changed on the toolbar slider.
+    pub opacity: Option<f32>,
 }
+
+/// Lowest per-window content opacity: still visible enough to aim at.
+pub const MIN_CONTENT_OPACITY: f32 = 0.1;
 
 pub const TOOLBAR_H: f32 = 52.0;
 
@@ -61,6 +66,7 @@ pub fn show(
     input_blocked: bool,
     icon: Option<egui::TextureId>,
     linked: bool,
+    opacity: f32,
     accent: egui::Color32,
 ) -> WindowPanelAction {
     let mut out = WindowPanelAction::default();
@@ -75,10 +81,18 @@ pub fn show(
                 let aspect = m.width as f32 / m.height.max(1) as f32;
                 let (w, h) = fit(aspect, content.width(), content.height());
                 let rect = egui::Rect::from_center_size(content.center(), egui::vec2(w, h));
-                ui.painter().rect_filled(rect.expand(2.0), 10.0, theme::BG_ROOT);
+                // Per-window opacity fades only the content (the toolbar
+                // stays solid so it can always be found): OpenVR honours
+                // the texture's alpha.
+                let a = opacity.clamp(MIN_CONTENT_OPACITY, 1.0);
+                ui.painter().rect_filled(rect.expand(2.0), 10.0, theme::BG_ROOT.gamma_multiply(a));
                 let resp = ui.put(
                     rect,
-                    egui::Image::new((m.id, rect.size())).uv(m.uv).rounding(8.0).sense(egui::Sense::click()),
+                    egui::Image::new((m.id, rect.size()))
+                        .uv(m.uv)
+                        .rounding(8.0)
+                        .tint(egui::Color32::WHITE.gamma_multiply(a))
+                        .sense(egui::Sense::click()),
                 );
                 crate::views::paint_mirror_cursor(ui, rect, m.cursor);
                 out.image_rect = Some(rect);
@@ -101,13 +115,19 @@ pub fn show(
             }
         }
 
-        (out.attach, out.close, out.unlink) = toolbar(ui, bar, title, icon, attach, linked, accent);
+        let mut op = opacity;
+        (out.attach, out.close, out.unlink) = toolbar(ui, bar, title, icon, attach, linked, Some(&mut op), accent);
+        if (op - opacity).abs() > f32::EPSILON {
+            out.opacity = Some(op);
+        }
     });
     out
 }
 
 /// A window panel's bottom toolbar: app icon + title, dock + close, and
-/// Unlink while edge-docked to other windows. Returns (dock, close, unlink).
+/// Unlink while edge-docked to other windows, and the content-opacity
+/// slider when `opacity` is given. Returns (dock, close, unlink).
+#[allow(clippy::too_many_arguments)]
 pub fn toolbar(
     ui: &mut egui::Ui,
     bar: egui::Rect,
@@ -115,6 +135,7 @@ pub fn toolbar(
     icon: Option<egui::TextureId>,
     attach: Attach,
     linked: bool,
+    opacity: Option<&mut f32>,
     accent: egui::Color32,
 ) -> (Option<Attach>, bool, bool) {
     ui.painter().rect_filled(bar, 14.0, theme::BG_ROOT);
@@ -130,6 +151,20 @@ pub fn toolbar(
         if linked {
             ui.add_space(8.0);
             out.2 = unlink_pill(ui, accent);
+        }
+        if let Some(op) = opacity {
+            ui.add_space(12.0);
+            ui.spacing_mut().slider_width = 120.0;
+            let mut pct = (*op * 100.0).round();
+            let lo = (MIN_CONTENT_OPACITY * 100.0).round();
+            if ui
+                .add(egui::Slider::new(&mut pct, lo..=100.0).fixed_decimals(0).suffix("%").show_value(true))
+                .on_hover_text("Window opacity: see your game world through this window (the toolbar stays solid)")
+                .changed()
+            {
+                *op = pct / 100.0;
+            }
+            ui.label(theme::caption("Opacity"));
         }
     });
     out

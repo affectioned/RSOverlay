@@ -26,7 +26,7 @@ Last reviewed: M60 (2026-11-24).
 | Gather overlays + recenter | 🟡 | Recenter arcs every world panel (and the keyboard) in front of you; no grid view |
 | Curved overlays + curve bias | 🟡 | curvature ✅ (M24); bias ❌ |
 | Clip angle (hide when viewed edge-on) | ✅ | M44, default 60°, every panel |
-| Default overlay scale / opacity | ✅ | M35 |
+| Default overlay scale / opacity | ✅ | M35 (global); per-window content opacity on each window toolbar (M64) |
 | Per-overlay min/max capture FPS | 🟡 | automatic: panels you aren't looking at refresh ~5×/s (M55); no per-panel setting |
 | Force higher-quality overlays | 🟡 | `overlay_texture_size` config |
 | Layouts (save / load panel arrangements) | ✅ | M53: 8 slots, favourite slot auto-loads at startup, from the wrist or Layouts page |
