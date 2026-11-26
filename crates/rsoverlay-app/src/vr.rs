@@ -814,6 +814,7 @@ mod imp {
 
         let mut dev_view = DevView::default();
         crate::preview::seed_dev_view(&mut dev_view, &config, &crate::preview::TestHooks::default());
+        dev_view.updates.supported = crate::UPDATE_CHECKS;
         info!("elevated: {}", dev_view.elevated);
         dev_view.dock_layout = true;
         // VR mode persists like the desktop modes: edits in the headset

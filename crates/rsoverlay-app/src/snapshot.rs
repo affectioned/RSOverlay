@@ -25,6 +25,9 @@ pub fn settings_cards(dir: &Path, config: &rsoverlay_core::Config) -> Result<()>
     let mut dev = DevView::default();
     crate::preview::seed_dev_view(&mut dev, config, &hooks);
     dev.set_demo_media("Northern Lights", "Ambient Works");
+    // Show the GitHub build's Updates card, without a network check.
+    dev.updates.supported = crate::UPDATE_CHECKS;
+    dev.updates.prefs.check = false;
     let points = egui::vec2(SIZE.0 as f32, SIZE.1 as f32) / PPP;
     let mut time = 0.0;
     for index in 0.. {

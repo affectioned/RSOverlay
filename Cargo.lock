@@ -2212,6 +2212,7 @@ dependencies = [
  "thiserror 1.0.69",
  "toml",
  "tracing",
+ "windows",
 ]
 
 [[package]]

@@ -61,6 +61,7 @@ fn static_entries() -> Vec<Entry> {
         card("One stick action at a time", "Settings › VR panels", "push pull scale resize stick decouple axis grab", Settings, "VR panels"),
         card("Panel resolution", "Settings › VR panels", "sharp text blurry resolution supersampling bigscreen beyond pimax quality", Settings, "VR panels"),
         card("Pointer size", "Settings › Accessibility", "cursor laser dot beam size big", Settings, "Accessibility"),
+        card("Updates", "Settings > Updates", "update new version release download upgrade beta test build", Settings, "Updates"),
         card("Placement", "Settings", "position offset size curve curvature opacity anchor", Settings, "Placement"),
         card("RSOverlay performance", "Settings › RSOverlay performance", "overlay fps frame time own footprint memory light fast", Settings, "RSOverlay performance"),
         card("Volume mixer", "Audio", "sound mute master app volume", Audio, "Volume"),
@@ -162,7 +163,7 @@ mod tests {
         for e in static_entries() {
             if let Target::Card(_, cap) = e.target {
                 assert!(
-                    ["Appearance", "Night light", "VR", "VR panels", "Pointer", "Wrist toolbar", "Accessibility", "Administrator", "Reset", "Placement", "RSOverlay performance",
+                    ["Appearance", "Night light", "VR", "VR panels", "Updates", "Pointer", "Wrist toolbar", "Accessibility", "Administrator", "Reset", "Placement", "RSOverlay performance",
                         "Volume", "Now playing", "VRChat chatbox", "Macros", "Notifications", "Battery", "PC performance"]
                         .contains(&cap),
                     "{cap}"

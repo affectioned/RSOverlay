@@ -10,6 +10,11 @@ authors.workspace = true
 name = "rsoverlay"
 path = "src/main.rs"
 
+[features]
+# Steam build: Steam delivers updates, so the GitHub update notifier is
+# compiled out. Build with `--features steam`.
+steam = []
+
 [dependencies]
 serde_json.workspace = true
 anyhow.workspace = true

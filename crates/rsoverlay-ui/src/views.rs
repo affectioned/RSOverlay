@@ -261,6 +261,9 @@ pub struct DevView {
     pub toasts_external: bool,
     /// Settings › Discord: show RSOverlay on the Discord profile.
     pub discord_presence: bool,
+    /// Update notifier (Settings > Updates). The app enables it on
+    /// GitHub builds; Steam builds and tests leave it off.
+    pub updates: crate::updates::Updates,
     /// SteamVR frame stats (VR shell only; `None` on the desktop).
     pub vr_perf: Option<rsoverlay_core::perf::VrPerf>,
     /// Battery card: device icons from the user's SteamVR install.
@@ -409,6 +412,7 @@ impl Default for DevView {
             toasts_external: false,
             discord_presence: true,
             vr_perf: None,
+            updates: Default::default(),
             steamvr_icons: true,
             discord: Default::default(),
             vr_hide_wrist: false,
@@ -831,6 +835,10 @@ impl DevView {
                         Some("discord")
                     }
                     13 => {
+                        self.updates.card(ui, accent);
+                        Some("updates")
+                    }
+                    14 => {
                         let _ = reset_card(ui, &mut self.reset_armed_at);
                         Some("reset")
                     }
@@ -876,6 +884,16 @@ impl DevView {
     /// frame.
     fn tick_state(&mut self, ctx: &egui::Context) {
         crate::laser::set_cursor_scale(self.vr_pointer_size);
+        if let Some(r) = self.updates.tick() {
+            let kind = if r.prerelease { "Test build" } else { "Update" };
+            self.push_notification(Notification {
+                title: format!("{kind} available: RSOverlay {}", r.tag),
+                content: "Settings > Updates to get it (nothing installs by itself).".into(),
+                source_app: "RSOverlay".into(),
+                timeout: 8.0,
+                ..Default::default()
+            });
+        }
         let now = Instant::now();
         while matches!(self.toasts.front(), Some(t) if t.expires < now) {
             self.toasts.pop_front();
@@ -1243,6 +1261,8 @@ impl DevView {
                     performance_card(r, snap.as_ref(), self.frame_ms, &self.frame_ms_hist, self.last_fps, self.notifications_received, accent);
                     r.add_space(theme::GUTTER);
                     discord_card(r, &mut self.discord_presence, &mut self.discord, accent);
+                    r.add_space(theme::GUTTER);
+                    self.updates.card(r, accent);
                     r.add_space(theme::GUTTER);
                     if reset_card(r, &mut self.reset_armed_at) {
                         self.reset_requested = true;
@@ -1780,7 +1800,7 @@ fn media_controls(ui: &mut egui::Ui, playing: bool, accent: egui::Color32) {
     });
 }
 
-fn card_header(
+pub(crate) fn card_header(
     ui: &mut egui::Ui,
     source: egui::ImageSource<'static>,
     label: &str,

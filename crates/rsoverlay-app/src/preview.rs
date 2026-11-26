@@ -175,6 +175,7 @@ pub fn seed_dev_view(
     dev.discord_presence = cfg.appearance.discord_presence;
     dev.steamvr_icons = cfg.appearance.steamvr_icons;
     dev.discord = cfg.discord.clone();
+    dev.updates.prefs = cfg.updates.clone();
     if test.show_keyboard {
         dev.show_keyboard = true;
     }
@@ -332,6 +333,7 @@ pub fn config_from_dev_view(
     };
     out.vr_state = dev.vr_state.clone();
     out.discord = dev.discord.clone();
+    out.updates = dev.updates.prefs.clone();
     let [n, w, e, b] = dev.notif.sounds.clone();
     out.notifications = rsoverlay_core::config::NotificationsCfg {
         size_m: dev.notif.size_m,
@@ -762,6 +764,7 @@ pub fn run(
     );
     let mut dev_view = DevView::default();
     seed_dev_view(&mut dev_view, &app_config, &test);
+    dev_view.updates.supported = crate::UPDATE_CHECKS;
     // Show saved VR layouts (read-only here; saving/loading happens in VR).
     dev_view.layouts = rsoverlay_core::layouts::Layouts::load(&rsoverlay_core::layouts::Layouts::path());
     let mut persister = ConfigPersister::new(config_path.clone(), app_config.clone());

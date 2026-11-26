@@ -20,6 +20,10 @@ mod preview_vr;
 mod snapshot;
 mod vr;
 
+/// GitHub builds tell users about new releases; the Steam build doesn't
+/// (Steam updates it).
+pub(crate) const UPDATE_CHECKS: bool = !cfg!(feature = "steam");
+
 use anyhow::Result;
 use clap::Parser;
 use rsoverlay_core::RuntimeMode;

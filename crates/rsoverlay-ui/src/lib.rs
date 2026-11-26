@@ -24,6 +24,7 @@ pub mod search;
 pub mod shell;
 pub mod system;
 pub mod theme;
+pub mod updates;
 pub mod views;
 pub mod volume;
 pub mod widgets;

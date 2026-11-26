@@ -6,6 +6,7 @@ pub mod panel;
 pub mod perf;
 pub mod runtime;
 pub mod steamvr;
+pub mod update;
 
 pub use config::{Appearance, Config, Macro, Macros, Notify, Placement, PlacementAnchor, Preview, Render};
 pub use panel::{Anchor, Panel, PanelId, PanelKind};

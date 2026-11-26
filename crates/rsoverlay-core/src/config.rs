@@ -21,6 +21,8 @@ pub struct Config {
     pub notifications: NotificationsCfg,
     /// What Discord Rich Presence shares (on/off is `appearance.discord_presence`).
     pub discord: DiscordCfg,
+    /// Update notifier (GitHub builds only; Steam updates itself).
+    pub updates: UpdatesCfg,
     /// Virtual StreamDeck buttons. Serialized as `[[macros]]` tables.
     /// Must stay the last field: TOML arrays of tables have to follow
     /// every plain table in the document.
@@ -151,6 +153,24 @@ impl Default for NotificationsCfg {
             sound_error: "builtin".into(),
             sound_low_battery: "builtin".into(),
         }
+    }
+}
+
+/// Update notifier. Only ever *tells* you about a new version.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdatesCfg {
+    /// Ask GitHub for new versions at startup and every few hours.
+    pub check: bool,
+    /// Also offer test (pre-release) builds.
+    pub prereleases: bool,
+    /// A version the user chose to skip (its tag).
+    pub skipped: String,
+}
+
+impl Default for UpdatesCfg {
+    fn default() -> Self {
+        Self { check: true, prereleases: false, skipped: String::new() }
     }
 }
 

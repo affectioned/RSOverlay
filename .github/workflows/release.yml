@@ -1,0 +1,97 @@
+name: Release
+
+# Push a version tag to build and publish a release:
+#   git tag v0.2.0         && git push origin v0.2.0          -> stable release
+#   git tag v0.2.0-beta.1  && git push origin v0.2.0-beta.1   -> pre-release (testers)
+# The tag must match the workspace version in Cargo.toml (without the
+# pre-release suffix, e.g. v0.2.0-beta.1 needs version = "0.2.0").
+# See docs/RELEASING.md.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  github:
+    name: GitHub release (Windows x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check tag matches Cargo version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          core="${tag%%-*}"
+          version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+          if [ "$core" != "$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME doesn't match Cargo.toml version $version"
+            exit 1
+          fi
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Build
+        run: cargo build --release --locked -p rsoverlay-app
+
+      - name: Package
+        shell: bash
+        run: |
+          name="RSOverlay-${GITHUB_REF_NAME}-windows-x64"
+          mkdir -p "dist/$name"
+          cp target/release/rsoverlay.exe README.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          cp docs/SOUNDS.md "dist/$name/CUSTOM-SOUNDS.md"
+          cd dist
+          7z a -tzip "$name.zip" "$name" > /dev/null
+          sha256sum "$name.zip" > "$name.zip.sha256"
+          echo "ASSET=dist/$name.zip" >> "$GITHUB_ENV"
+
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=""
+          case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" \
+            --title "RSOverlay $GITHUB_REF_NAME" --generate-notes $pre
+
+  steam:
+    # Off until the Steam app exists. To turn on: set the repository
+    # variable STEAM_ENABLED=true plus STEAM_APP_ID / STEAM_DEPOT_ID, and
+    # the secrets STEAM_USERNAME / STEAM_CONFIG_VDF (docs/RELEASING.md).
+    # Uploads go to a beta branch only; going live stays a manual click
+    # in Steamworks.
+    name: Steam upload (beta branch)
+    if: vars.STEAM_ENABLED == 'true'
+    needs: github
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (Steam)
+        run: cargo build --release --locked -p rsoverlay-app --features steam
+      - name: Stage depot
+        shell: bash
+        run: |
+          mkdir -p steam-depot
+          cp target/release/rsoverlay.exe README.md LICENSE-MIT LICENSE-APACHE steam-depot/
+      - uses: game-ci/steam-deploy@v3
+        with:
+          username: ${{ secrets.STEAM_USERNAME }}
+          configVdf: ${{ secrets.STEAM_CONFIG_VDF }}
+          appId: ${{ vars.STEAM_APP_ID }}
+          buildDescription: ${{ github.ref_name }}
+          rootPath: steam-depot
+          depot1Path: .
+          releaseBranch: ${{ vars.STEAM_BETA_BRANCH || 'testers' }}
