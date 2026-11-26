@@ -15,7 +15,8 @@
 //! - **Drags survive leaving the panel**: release is always delivered
 //!   (at the last on-panel position), so a slider let go off-edge
 //!   doesn't stay grabbed.
-//! - **Scroll**: stick Y with a 0.2 dead zone, speed in points/second.
+//! - **Scroll**: stick Y (and X for sideways) with a 0.2 dead zone,
+//!   speed in points/second.
 //! - **Long-press** (opt-in, `long_press_s > 0`): a Primary press is held
 //!   back until it resolves — escape the drag slop → normal drag; let go
 //!   → normal click; hold still for `long_press_s` → right click.
@@ -46,6 +47,7 @@ pub struct HandSample {
     /// Hit position on the panel, already in egui points.
     pub hit: Option<egui::Pos2>,
     pub trigger: f32,
+    pub stick_x: f32,
     pub stick_y: f32,
     /// Which button a trigger press means this frame — Primary, or
     /// Secondary / Middle while an XSO-style click modifier is held.
@@ -216,11 +218,16 @@ impl LaserInput {
                 out.events.push(button(at, egui::PointerButton::Secondary, false));
                 out.haptic = Some(s.hand);
             }
-            if hit.is_some() && s.stick_y.abs() > DEAD_ZONE {
+            if hit.is_some() {
                 // Re-scale past the dead zone so scrolling starts at 0.
-                let mag = (s.stick_y.abs() - DEAD_ZONE) / (1.0 - DEAD_ZONE);
-                let mult = if self.scroll_mult > 0.0 { self.scroll_mult } else { 1.0 };
-                out.events.push(egui::Event::Scroll(egui::vec2(0.0, s.stick_y.signum() * mag * SCROLL_SPEED * mult * dt)));
+                let axis = |v: f32| if v.abs() > DEAD_ZONE { v.signum() * (v.abs() - DEAD_ZONE) / (1.0 - DEAD_ZONE) } else { 0.0 };
+                let (x, y) = (axis(s.stick_x), axis(s.stick_y));
+                if x != 0.0 || y != 0.0 {
+                    let k = if self.scroll_mult > 0.0 { self.scroll_mult } else { 1.0 } * SCROLL_SPEED * dt;
+                    // Stick right reads the content further right, so it
+                    // moves left (egui: negative x).
+                    out.events.push(egui::Event::Scroll(egui::vec2(-x * k, y * k)));
+                }
             }
         } else if self.pressed {
             // Owner lost tracking mid-drag: end the drag cleanly.
@@ -286,7 +293,7 @@ mod tests {
     use super::*;
 
     fn s(hand: Hand, hit: Option<(f32, f32)>, trigger: f32) -> HandSample {
-        HandSample { hand, hit: hit.map(|(x, y)| egui::pos2(x, y)), trigger, stick_y: 0.0, button: egui::PointerButton::Primary }
+        HandSample { hand, hit: hit.map(|(x, y)| egui::pos2(x, y)), trigger, stick_x: 0.0, stick_y: 0.0, button: egui::PointerButton::Primary }
     }
 
     fn buttons(f: &LaserFrame) -> Vec<bool> {
@@ -497,5 +504,10 @@ mod tests {
         smp.stick_y = 1.0;
         let f = l.update(&[smp], 0.1);
         assert!(f.events.contains(&egui::Event::Scroll(egui::vec2(0.0, SCROLL_SPEED * 0.1))));
+        // Sideways: stick right moves content left.
+        smp.stick_y = 0.0;
+        smp.stick_x = 1.0;
+        let f = l.update(&[smp], 0.1);
+        assert!(f.events.contains(&egui::Event::Scroll(egui::vec2(-SCROLL_SPEED * 0.1, 0.0))));
     }
 }

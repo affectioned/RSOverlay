@@ -187,6 +187,7 @@ fn pct(fraction: f32) -> u32 {
 pub fn card(
     ui: &mut egui::Ui,
     readings: &[BatteryReading],
+    hidden: &mut Vec<String>,
     estimates: &BatteryEstimator,
     warn_pct: &mut u8,
     sound: &mut bool,
@@ -206,9 +207,10 @@ pub fn card(
         if readings.is_empty() {
             ui.label(theme::body_muted("no battery-reporting devices"));
         }
-        for r in readings {
+        for r in readings.iter().filter(|r| !hidden.contains(&r.label)) {
             row(ui, r, estimates.estimate(r), *warn_pct, accent);
         }
+        device_toggles(ui, readings, hidden);
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.label(theme::body_muted("warn below"));
@@ -222,6 +224,29 @@ pub fn card(
             "OSC /avatar/parameters/{p}/HMD, {p}/LeftHand, {p}/Charging/HMD ... (float 0-1 / bool)",
             p = osc.prefix
         ));
+    });
+}
+
+/// "Devices": a checkbox per device to show / hide it. Hidden devices
+/// that aren't connected right now stay listed so they can be shown again.
+fn device_toggles(ui: &mut egui::Ui, readings: &[BatteryReading], hidden: &mut Vec<String>) {
+    let mut labels: Vec<String> = readings.iter().map(|r| r.label.clone()).collect();
+    labels.extend(hidden.iter().filter(|h| !labels.contains(h)).cloned().collect::<Vec<_>>());
+    if labels.is_empty() {
+        return;
+    }
+    let title = if hidden.is_empty() { "Devices".to_string() } else { format!("Devices ({} hidden)", hidden.len()) };
+    egui::CollapsingHeader::new(theme::body_muted(&title)).id_source("battery-devices").show(ui, |ui| {
+        for label in labels {
+            let mut shown = !hidden.contains(&label);
+            if ui.checkbox(&mut shown, label.as_str()).on_hover_text("Hidden devices don't show anywhere and don't raise low-battery alerts").changed() {
+                if shown {
+                    hidden.retain(|h| *h != label);
+                } else {
+                    hidden.push(label);
+                }
+            }
+        }
     });
 }
 

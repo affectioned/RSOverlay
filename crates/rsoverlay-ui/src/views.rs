@@ -251,6 +251,8 @@ pub struct DevView {
     pub show_history: bool,
     pub show_battery: bool,
     pub battery_warn_pct: u8,
+    /// Device labels hidden from battery displays and alerts.
+    pub battery_hidden: Vec<String>,
     /// Chime with the low-battery toast.
     pub battery_sound: bool,
     /// Alert sounds due, (kind, per-message volume); the app plays them.
@@ -406,6 +408,7 @@ impl Default for DevView {
             show_history: false,
             show_battery: true,
             battery_warn_pct: 20,
+            battery_hidden: Vec::new(),
             battery_sound: true,
             pending_sounds: Vec::new(),
             notif: NotificationPrefs::default(),
@@ -490,6 +493,15 @@ impl DevView {
     pub fn push_notification(&mut self, n: Notification) {
         const MAX_HISTORY: usize = 50;
         self.notifications_received += 1;
+        // Muted app: keep it in history, but no toast, sound or badge.
+        let muted = !n.source_app.is_empty() && self.notif.muted.contains(&n.source_app);
+        if muted {
+            self.history.push_back(HistoryEntry { n, received: Instant::now() });
+            while self.history.len() > MAX_HISTORY {
+                self.history.pop_front();
+            }
+            return;
+        }
         self.unread += 1;
         // The sender picks a category; the user's slot decides the file.
         if let Some(kind) = rsoverlay_audio::alerts::AlertKind::from_audio_path(&n.audio_path) {
@@ -569,7 +581,9 @@ impl DevView {
     /// seconds) and raise a toast for any device that just went low.
     /// Alerts fire even with the card hidden — that's the point of them.
     pub fn set_batteries(&mut self, readings: Vec<BatteryReading>) {
-        for mut n in self.low_battery.update(&readings, self.battery_warn_pct) {
+        // Hidden devices don't alert (still tracked for estimates / OSC).
+        let shown: Vec<BatteryReading> = readings.iter().filter(|r| !self.battery_hidden.contains(&r.label)).cloned().collect();
+        for mut n in self.low_battery.update(&shown, self.battery_warn_pct) {
             if self.battery_sound {
                 self.pending_sounds.push((rsoverlay_audio::alerts::AlertKind::LowBattery, 1.0));
             }
@@ -581,6 +595,11 @@ impl DevView {
         let msgs = self.battery_osc.messages(&readings, Instant::now());
         self.pending_osc.extend(msgs);
         self.batteries = readings;
+    }
+
+    /// Battery readings minus the devices the user hid.
+    fn shown_batteries(&self) -> Vec<BatteryReading> {
+        self.batteries.iter().filter(|r| !self.battery_hidden.contains(&r.label)).cloned().collect()
     }
 
     pub(crate) fn apply_search(&mut self, ctx: &egui::Context, t: crate::search::Target) {
@@ -629,7 +648,7 @@ impl DevView {
             K::NowPlaying => media_card(ui, self.media.as_ref(), accent),
             K::System => self.system.show(ui, self.vr_perf.as_ref(), accent),
             K::Volume => self.volume.show(ui, accent),
-            K::Battery => crate::battery::card(ui, &self.batteries, &self.battery_est, &mut self.battery_warn_pct, &mut self.battery_sound, &mut self.steamvr_icons, &mut self.battery_osc, accent),
+            K::Battery => crate::battery::card(ui, &self.batteries, &mut self.battery_hidden, &self.battery_est, &mut self.battery_warn_pct, &mut self.battery_sound, &mut self.steamvr_icons, &mut self.battery_osc, accent),
             K::Macros => self.macros.card(ui, injector, accent),
             K::Chat => {
                 if let Some(msg) = chatbox_card(ui, &mut self.chat_draft, &mut self.now_playing.enabled, accent) {
@@ -637,7 +656,7 @@ impl DevView {
                 }
             }
             K::Notifications => {
-                if history_card(ui, &self.history, accent) {
+                if history_card(ui, &self.history, &mut self.notif.muted, accent) {
                     self.clear_all_notifications();
                 }
             }
@@ -658,8 +677,9 @@ impl DevView {
         use crate::wrist::compact as wc;
         let wants_sys = self.wrist_editing || self.wrist_expanded || self.wrist_compact & (wc::PERF | wc::RAM | wc::VRAM) != 0;
         let sys = if wants_sys { self.system.snapshot() } else { None };
+        let shown_batteries = self.shown_batteries();
         let data = crate::wrist::WristData {
-            batteries: &self.batteries,
+            batteries: &shown_batteries,
             estimates: &est,
             title: media.map(|m| m.title.as_str()),
             artist: media.map(|m| m.artist.as_str()).filter(|a| !a.is_empty()),
@@ -1009,7 +1029,8 @@ impl DevView {
                 if !self.search.query.is_empty() && self.sources.choices.is_empty() {
                     self.sources.wants_refresh = true;
                 }
-                let act = crate::shell::header(ui, &self.batteries, self.unread, &mut self.search, &entries, accent);
+                let shown = self.shown_batteries();
+                let act = crate::shell::header(ui, &shown, self.unread, &mut self.search, &entries, accent);
                 if let Some(t) = act.search_pick {
                     self.apply_search(ui.ctx(), t);
                 }
@@ -1140,7 +1161,7 @@ impl DevView {
                         l.add_space(theme::GUTTER);
                     }
                     if self.show_battery {
-                        crate::battery::card(r, &self.batteries, &self.battery_est, &mut self.battery_warn_pct, &mut self.battery_sound, &mut self.steamvr_icons, &mut self.battery_osc, accent);
+                        crate::battery::card(r, &self.batteries, &mut self.battery_hidden, &self.battery_est, &mut self.battery_warn_pct, &mut self.battery_sound, &mut self.steamvr_icons, &mut self.battery_osc, accent);
                         r.add_space(theme::GUTTER);
                     }
                     if self.show_macros {
@@ -1193,7 +1214,7 @@ impl DevView {
                 }
             }
             Page::Notifications => {
-                if history_card(ui, &self.history, accent) {
+                if history_card(ui, &self.history, &mut self.notif.muted, accent) {
                     self.clear_all_notifications();
                 }
             }
@@ -1610,11 +1631,13 @@ pub struct NotificationPrefs {
     pub sounds: [String; 4],
     /// WAVs found in the sounds folder (rescanned on Refresh).
     pub files: Vec<String>,
+    /// Muted source apps: history only, no toast or sound.
+    pub muted: Vec<String>,
 }
 
 impl Default for NotificationPrefs {
     fn default() -> Self {
-        Self { size_m: 0.30, offset_y: -0.12, distance_m: 0.65, volume: 0.6, sounds: std::array::from_fn(|_| "builtin".into()), files: Vec::new() }
+        Self { size_m: 0.30, offset_y: -0.12, distance_m: 0.65, volume: 0.6, sounds: std::array::from_fn(|_| "builtin".into()), files: Vec::new(), muted: Vec::new() }
     }
 }
 
@@ -1939,9 +1962,13 @@ fn placement_slider(ui: &mut egui::Ui, label: &str, v: &mut f32, lo: f32, hi: f3
 /// Scrollable history of notifications received this session. Returns
 /// true when the user hit "Clear all" so the caller can wipe history +
 /// any still-visible toasts in one shot.
+/// Muted apps are capped so a misbehaving client can't grow the config.
+const MAX_MUTED: usize = 50;
+
 fn history_card(
     ui: &mut egui::Ui,
     history: &VecDeque<HistoryEntry>,
+    muted: &mut Vec<String>,
     accent: egui::Color32,
 ) -> bool {
     let mut cleared = false;
@@ -1969,6 +1996,21 @@ fn history_card(
             });
         });
         ui.add_space(6.0);
+        if !muted.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(theme::body_muted("Muted:"));
+                let mut unmute = None;
+                for app in muted.iter() {
+                    if ui.small_button(format!("{app}  ✕")).on_hover_text("Unmute: show toasts and play sounds again").clicked() {
+                        unmute = Some(app.clone());
+                    }
+                }
+                if let Some(a) = unmute {
+                    muted.retain(|m| *m != a);
+                }
+            });
+            ui.add_space(4.0);
+        }
         if history.is_empty() {
             ui.label(theme::body_muted("no notifications yet"));
             return;
@@ -1978,17 +2020,26 @@ fn history_card(
             .max_height(560.0)
             .auto_shrink([false, true])
             .show(ui, |ui| {
+                let mut mute = None;
                 for entry in history.iter().rev() {
-                    history_entry_row(ui, entry);
+                    if history_entry_row(ui, entry, muted) {
+                        mute = Some(entry.n.source_app.clone());
+                    }
                     ui.add_space(4.0);
+                }
+                if let Some(app) = mute.filter(|_| muted.len() < MAX_MUTED) {
+                    muted.push(app.chars().take(64).collect());
                 }
             });
     });
     cleared
 }
 
-fn history_entry_row(ui: &mut egui::Ui, entry: &HistoryEntry) {
+/// One history line. Returns true when "Mute <app>" was clicked.
+fn history_entry_row(ui: &mut egui::Ui, entry: &HistoryEntry, muted: &[String]) -> bool {
     let rel = relative_time(entry.received.elapsed());
+    let app = entry.n.source_app.as_str();
+    let mut mute = false;
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
             if !entry.n.title.is_empty() {
@@ -2004,12 +2055,22 @@ fn history_entry_row(ui: &mut egui::Ui, entry: &HistoryEntry) {
                         .size(theme::SIZE_CAPTION)
                         .color(theme::FG_MUTED),
                 );
+                if !app.is_empty() && !muted.iter().any(|m| m == app) {
+                    mute = ui
+                        .small_button("Mute")
+                        .on_hover_text(format!("Mute {app}: its notifications go to history only, no toast or sound"))
+                        .clicked();
+                }
+                if !app.is_empty() {
+                    ui.label(egui::RichText::new(app).size(theme::SIZE_CAPTION).color(theme::FG_MUTED));
+                }
             });
         });
         if !entry.n.content.is_empty() {
             ui.label(theme::body_muted(&entry.n.content));
         }
     });
+    mute
 }
 
 pub fn relative_time_secs(secs: u64) -> String {
@@ -2312,7 +2373,7 @@ mod laser_integration_tests {
 
     /// Run one frame fed only by laser samples.
     fn frame(ctx: &egui::Context, dev: &mut DevView, laser: &mut LaserInput, t: &mut f64, hit: Option<egui::Pos2>, trigger: f32) {
-        let lf = laser.update(&[HandSample { hand: Hand::Right, hit, trigger, stick_y: 0.0, button: egui::PointerButton::Primary }], 1.0 / 90.0);
+        let lf = laser.update(&[HandSample { hand: Hand::Right, hit, trigger, stick_x: 0.0, stick_y: 0.0, button: egui::PointerButton::Primary }], 1.0 / 90.0);
         *t += 1.0 / 90.0;
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, PANEL)),
@@ -2394,5 +2455,24 @@ mod search_integration_tests {
         // The card's header hook consumed the request and scrolled to it.
         let h = ctx.data(|d| d.get_temp::<(String, f64, bool)>(egui::Id::new("rso-highlight")));
         assert_eq!(h.map(|(c, _, scrolled)| (c, scrolled)), Some(("Accessibility".to_string(), true)));
+    }
+}
+
+#[cfg(test)]
+mod mute_tests {
+    use super::*;
+
+    #[test]
+    fn muted_app_goes_to_history_only() {
+        let mut dev = DevView::default();
+        dev.notif.muted = vec!["Chatty".into()];
+        dev.push_notification(Notification { title: "spam".into(), source_app: "Chatty".into(), ..Default::default() });
+        assert_eq!(dev.history.len(), 1);
+        assert!(dev.toasts.is_empty());
+        assert_eq!(dev.unread, 0);
+        assert!(dev.pending_sounds.is_empty());
+        dev.push_notification(Notification { title: "hi".into(), source_app: "Friend".into(), ..Default::default() });
+        assert_eq!(dev.toasts.len(), 1);
+        assert_eq!(dev.unread, 1);
     }
 }

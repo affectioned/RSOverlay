@@ -57,7 +57,13 @@ impl InputInjector {
     /// Vertical mouse wheel; `delta` in WHEEL_DELTA units (120 = one
     /// notch, positive = away from the user / scroll up).
     pub fn wheel(&self, delta: i32) -> Result<()> {
-        wheel_impl(delta)
+        wheel_impl(delta, false)
+    }
+
+    /// Horizontal wheel (tilt-wheel), WHEEL_DELTA units; positive
+    /// scrolls right.
+    pub fn hwheel(&self, delta: i32) -> Result<()> {
+        wheel_impl(delta, true)
     }
 
     /// Send a Unicode character to whatever has keyboard focus on the
@@ -164,8 +170,8 @@ fn button_impl(mon: &MonitorGeom, px: i32, py: i32, btn: MouseButton, down: bool
 }
 
 #[cfg(windows)]
-fn wheel_impl(delta: i32) -> Result<()> {
-    win::send_wheel(delta)
+fn wheel_impl(delta: i32, horizontal: bool) -> Result<()> {
+    win::send_wheel(delta, horizontal)
 }
 
 #[cfg(not(windows))]
@@ -174,7 +180,7 @@ fn button_impl(_mon: &MonitorGeom, _px: i32, _py: i32, _btn: MouseButton, _down:
 }
 
 #[cfg(not(windows))]
-fn wheel_impl(_delta: i32) -> Result<()> {
+fn wheel_impl(_delta: i32, _horizontal: bool) -> Result<()> {
     anyhow::bail!("input injection only implemented on Windows")
 }
 
@@ -212,7 +218,7 @@ mod win {
         KEYBD_EVENT_FLAGS, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_ABSOLUTE,
         MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN,
         MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN,
-        MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEINPUT, VIRTUAL_KEY, VK_BACK,
+        MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEEVENTF_HWHEEL, MOUSEINPUT, VIRTUAL_KEY, VK_BACK,
         VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LCONTROL, VK_LEFT,
         VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RETURN, VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
     };
@@ -419,8 +425,8 @@ mod win {
         Ok(())
     }
 
-    pub fn send_wheel(delta: i32) -> Result<()> {
-        let mut ev = mouse_input(0, 0, MOUSEEVENTF_WHEEL);
+    pub fn send_wheel(delta: i32, horizontal: bool) -> Result<()> {
+        let mut ev = mouse_input(0, 0, if horizontal { MOUSEEVENTF_HWHEEL } else { MOUSEEVENTF_WHEEL });
         // mouseData carries the signed wheel delta.
         ev.Anonymous.mi.mouseData = delta as u32;
         if unsafe { SendInput(&[ev], std::mem::size_of::<INPUT>() as i32) } != 1 {

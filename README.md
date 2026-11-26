@@ -1,9 +1,10 @@
 # RSOverlay
 
 An open-source SteamVR overlay written in Rust, for gamers and for people
-who work in VR. It behaves like **XSOverlay**: the same default bindings,
-wrist toolbar, grab and scale, layouts and keyboard, so moving over is
-easy. It has its own look, and it's built to be light.
+who work in VR. Bring your desktop windows into VR, keep a smartwatch-style
+toolbar on your wrist, type on a real keyboard layout, and see why your game
+is lagging, all from one native app that's built to stay out of your
+frame budget.
 
 ![Working in VR: editor, notes and terminal around you, stats widget, keyboard](docs/store/vr-work.png)
 
@@ -17,23 +18,29 @@ every setting: [settings-overview.png](docs/store/settings-overview.png).
 Screenshots are rendered by the built-in VR preview (`--vr-preview --scene …`)
 with mock window contents. See [docs/store](docs/store/README.md).</sub>
 
-> **Not affiliated with XSOverlay or OVR Toolkit.** Every line is written
-> from scratch against public Windows / OpenVR APIs. No code, assets or
-> strings are copied. Feature parity comes from a feature-level study of
-> how XSOverlay behaves ([XSO_PARITY.md](docs/XSO_PARITY.md)), and the
-> notification API matches XSOverlay's public JSON shape so existing
-> clients (VRCX etc.) keep working.
+> **Status:** early testing. Grab the latest test build from
+> [Releases](https://github.com/affectioned/RSOverlay/releases); a Steam
+> release is planned.
 
-> **Status:** in active development; Steam release planned.
+## Download
+
+1. Download `RSOverlay-<version>-windows-x64.zip` from
+   [Releases](https://github.com/affectioned/RSOverlay/releases) and unzip it
+   anywhere.
+2. Start SteamVR, then run `rsoverlay.exe --vr`. From then on SteamVR starts
+   RSOverlay by itself (toggle it in SteamVR › Settings › Startup / Shutdown).
+3. RSOverlay tells you when a new version is out (Settings › Updates). It
+   never updates itself: you download the new zip when you want to. Testers
+   can turn on **Include test builds**.
 
 ## Why
 
 The popular overlays are built on Unity, Mono and Chromium, and pay for it
 in RAM and CPU. RSOverlay is one native Rust binary: `wgpu` on DX12, GPU-to-GPU
 capture (no frame ever goes through the CPU), and `egui` for the UI. Panels
-you aren't looking at drop to ~5 fps, and hidden ones cost nothing. The
-built-in **Stats** card measures RSOverlay's own CPU, RAM, VRAM and frame
-time live, so you can check the claim yourself.
+you aren't looking at drop to ~5 fps, and hidden ones cost nothing.
+Settings › **RSOverlay performance** measures its own CPU, RAM, VRAM and
+frame time live, so you can check the claim yourself.
 
 ## Features
 
@@ -42,22 +49,36 @@ time live, so you can check the claim yourself.
   window (Windows Graphics Capture), several at once
 - Laser mouse on the real window: left, right and middle click, drag,
   stick scroll
+- Per-window opacity, so you can keep an eye on your game world through a
+  window
 - UAC aware: elevated windows show a clear "use your PC" notice, with an
   optional run-as-administrator mode
 
 **Panels in space**
-- Grab to carry, stick to push/pull and resize, two-hand scale, with a live
+- Grab to carry, stick to push/pull and resize (one at a time, or both),
+  two-hand scale, optional tilt with your controller, with a live
   size/distance readout while you do it
 - Every panel (windows, widgets, the dashboard) docks to world, head, left
   or right hand, and has a close button
+- Snap windows edge to edge into a wall that moves together
+- Closing the dashboard hides every window you haven't pinned; pinned ones
+  stay up. Everything steps aside while the SteamVR menu is open
 - Recenter gathers everything in front of you; panels fade when viewed
   edge-on
-- 8 layout slots, with one auto-loaded at startup
+- 8 layout slots, with one auto-loaded at startup, and your last session
+  restored
+- Resolution setting for sharp text on high-resolution headsets
 
 **Wrist toolbar**
-- Compact by default (Dashboard, Keyboard, Add, Recenter, More), plus clock
-  and media; More adds layout slots, views and device batteries
+- A smartwatch on your wrist: pick what it shows (clock, media, batteries,
+  layouts, status chips for VR fps, CPU/GPU, VRAM, RAM and alerts) and
+  arrange it in VR
 - Every button is labelled; tooltips name the rest
+
+**PC performance**
+- CPU, busiest core, GPU, RAM and VRAM, plus SteamVR frame timing in VR:
+  game fps vs your headset's refresh rate, GPU headroom and reprojection,
+  red when the game is falling behind
 
 **Dashboard**
 - Labelled sidebar; global search across settings, pages and windows
@@ -71,8 +92,10 @@ time live, so you can check the claim yourself.
   lockable modifiers, VRChat chatbox mode, compact or full
 
 **Everything else**
-- Notifications: XSOverlay-compatible WebSocket API on `127.0.0.1:42069`,
-  toasts + history
+- Notifications: WebSocket API on `127.0.0.1:42069`, toasts + history.
+  It accepts the same JSON as XSOverlay's notification API, so apps that
+  already send notifications (VRCX etc.) work unchanged
+  ([NOTIFICATION_API.md](docs/NOTIFICATION_API.md))
 - Media: now playing + controls (SMTC); optional accent from album art
 - Per-app volume mixer (WASAPI)
 - Batteries for HMD, controllers and trackers, with playtime estimates,
@@ -83,12 +106,12 @@ time live, so you can check the claim yourself.
   optionally your music), switched on / off live in Settings › Discord
 - Custom sounds for typing and every alert: drop in your own WAVs
   ([how-to](docs/SOUNDS.md))
-- Accessibility: VR text size, reduce motion, laser visibility, cursor
-  smoothing, scroll speed
+- Accessibility: VR text size, pointer size, reduce motion, laser
+  visibility, cursor smoothing, scroll speed
 
 **SteamVR integration**
-- SteamVR Input with XSOverlay-style default bindings (Index, Touch, Vive,
-  WMR), rebindable in SteamVR
+- SteamVR Input with default bindings for Index, Touch, Vive and WMR,
+  all rebindable in SteamVR
 - Registers itself as a SteamVR overlay app: starts with SteamVR (toggle in
   SteamVR › Startup) and exits with it
 
@@ -97,10 +120,13 @@ time live, so you can check the claim yourself.
 | Action | Input |
 |---|---|
 | Click / drag | Trigger |
-| Right / middle click | Hold trackpad down / up while clicking (Index, Vive, WMR) |
+| Right / middle click | Hold trackpad down / up while clicking (Index, Vive, WMR), or bind dedicated buttons in SteamVR |
 | Grab a panel | Grip |
 | Push / pull, resize (while grabbing) | Stick up/down, left/right |
 | Show / hide dashboard | Double-press left A / X (or the wrist Dashboard button) |
+
+Change any of these in SteamVR › Settings › Controllers › Manage Controller
+Bindings › RSOverlay.
 
 ## Run
 
@@ -159,7 +185,9 @@ Windows x64, Rust stable (edition 2021). Settings live in
 
 ## Privacy and security
 
-- Nothing leaves your PC: no telemetry (opt-in only, if ever)
+- No telemetry. The only things that go online: the update check (one
+  anonymous request to GitHub; switch it off in Settings › Updates) and
+  Discord Rich Presence if you turn it on
 - The notification API binds `127.0.0.1` only
 - No clipboard history or capture: Copy / Paste only send the keystrokes
 - `unsafe` only at FFI boundaries; OpenVR vtable slots are pinned by
@@ -175,7 +203,7 @@ Windows x64, Rust stable (edition 2021). Settings live in
 | Idle CPU | < 1 % |
 | Mirror latency | < 16 ms |
 
-Check them live on the dashboard's Stats card.
+Check them live in Settings › RSOverlay performance.
 
 ## Layout
 
@@ -187,19 +215,23 @@ crates/
 ├── rsoverlay-render/    wgpu context and render targets
 ├── rsoverlay-capture/   DXGI desktop + Windows Graphics Capture
 ├── rsoverlay-input/     SendInput, keyboard scan codes, elevation checks
-├── rsoverlay-notify/    XSOverlay-compatible notification WebSocket
+├── rsoverlay-notify/    notification WebSocket (VRCX-compatible)
 ├── rsoverlay-osc/       VRChat OSC
 ├── rsoverlay-discord/   opt-in Discord Rich Presence
 ├── rsoverlay-audio/     per-app volume (WASAPI)
 ├── rsoverlay-sysinfo/   CPU / GPU / RAM / VRAM sampling
 └── rsoverlay-core/      config, layouts, shared types
 docs/
-├── ROADMAP.md  XSO_PARITY.md  ARCHITECTURE.md  NOTIFICATION_API.md  OSC.md
-├── SOUNDS.md   custom typing / alert sounds (user guide)
+├── ROADMAP.md  ARCHITECTURE.md  NOTIFICATION_API.md  OSC.md
+├── SOUNDS.md     custom typing / alert sounds (user guide)
+├── RELEASING.md  GitHub + Steam release process
 └── store/      1920×1080 store screenshots
 ```
 
 ## License
+
+RSOverlay is an independent project, written from scratch against public
+Windows and OpenVR APIs. It isn't affiliated with any other overlay.
 
 Dual-licensed under either of [MIT](LICENSE-MIT) or
 [Apache-2.0](LICENSE-APACHE), at your option. Bundled fonts (Inter) are

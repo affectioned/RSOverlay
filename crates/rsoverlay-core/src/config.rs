@@ -139,6 +139,10 @@ pub struct NotificationsCfg {
     pub sound_warning: String,
     pub sound_error: String,
     pub sound_low_battery: String,
+    /// Apps (their `sourceApp`) whose notifications skip the toast and
+    /// sound; they still land in history.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub muted_apps: Vec<String>,
 }
 
 impl Default for NotificationsCfg {
@@ -152,6 +156,7 @@ impl Default for NotificationsCfg {
             sound_warning: "builtin".into(),
             sound_error: "builtin".into(),
             sound_low_battery: "builtin".into(),
+            muted_apps: Vec::new(),
         }
     }
 }
@@ -306,6 +311,10 @@ pub struct Appearance {
     pub battery_warn_pct: u8,
     /// Play a chime with the low-battery toast (VR).
     pub battery_sound: bool,
+    /// Devices (by label) hidden from the battery card, wrist and header;
+    /// they don't raise low-battery alerts either.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub battery_hidden: Vec<String>,
     /// Show "Using RSOverlay" on the user's Discord profile.
     pub discord_presence: bool,
     /// Use each device's icon from the user's SteamVR install (never
@@ -332,6 +341,7 @@ impl Default for Appearance {
             show_system: true,
             reduce_motion: false,
             battery_warn_pct: 20,
+            battery_hidden: Vec::new(),
             battery_sound: true,
             discord_presence: true,
             steamvr_icons: true,

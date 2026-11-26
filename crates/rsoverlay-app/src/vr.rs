@@ -385,6 +385,8 @@ mod imp {
         down: Option<rsoverlay_input::MouseButton>,
         /// Fractional wheel delta not yet sent (WHEEL_DELTA units).
         wheel_acc: f32,
+        /// Same, horizontal (tilt-wheel).
+        hwheel_acc: f32,
         /// Stable id (survives index shifts when others close).
         seq: u32,
         /// Edge-docked group: members move together while one is grabbed.
@@ -537,6 +539,7 @@ mod imp {
             icon,
             down: None,
             wheel_acc: 0.0,
+            hwheel_acc: 0.0,
             seq,
             group: None,
             opacity: 1.0,
@@ -626,6 +629,7 @@ mod imp {
             icon: None,
             down: None,
             wheel_acc: 0.0,
+            hwheel_acc: 0.0,
             seq,
             group: None,
             opacity: 1.0,
@@ -1120,7 +1124,7 @@ mod imp {
                         _ if mm => (c.trigger, egui::PointerButton::Middle),
                         _ => (c.trigger, egui::PointerButton::Primary),
                     };
-                    list.push(HandSample { hand, hit, trigger, stick_y: c.stick[1], button });
+                    list.push(HandSample { hand, hit, trigger, stick_x: c.stick[0], stick_y: c.stick[1], button });
                 }
             }
             let mut samples = samples.into_iter();
@@ -1389,6 +1393,7 @@ mod imp {
                 };
                 for list in std::iter::once(&mut wrist_samples).chain(std::iter::once(&mut dash_samples)).chain(win_samples.iter_mut()) {
                     for smp in list.iter_mut().filter(|s| s.hand == h) {
+                        smp.stick_x = 0.0;
                         smp.stick_y = 0.0;
                     }
                 }
@@ -1841,6 +1846,13 @@ mod imp {
                                     if send != 0.0 {
                                         let _ = inj.wheel(send as i32);
                                         w.wheel_acc -= send;
+                                    }
+                                    // Sideways: egui's -x is "scroll right".
+                                    w.hwheel_acc -= v.x * 2.0;
+                                    let send = (w.hwheel_acc / 30.0).trunc() * 30.0;
+                                    if send != 0.0 {
+                                        let _ = inj.hwheel(send as i32);
+                                        w.hwheel_acc -= send;
                                     }
                                 }
                                 egui::Event::PointerGone => w.last_hit = None,

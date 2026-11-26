@@ -154,6 +154,7 @@ pub fn seed_dev_view(
     dev.notif.distance_m = nc.distance_m.clamp(0.3, 1.5);
     dev.notif.volume = nc.volume.clamp(0.0, 1.0);
     dev.notif.sounds = [nc.sound_notification.clone(), nc.sound_warning.clone(), nc.sound_error.clone(), nc.sound_low_battery.clone()];
+    dev.notif.muted = nc.muted_apps.clone();
     dev.notif.files = rsoverlay_audio::alerts::list_sound_files(&rsoverlay_core::config::sounds_dir());
     dev.vr_state = cfg.vr_state.clone();
     dev.kb_prefs.packs = rsoverlay_audio::typing::list_packs(&rsoverlay_core::config::sounds_dir());
@@ -171,6 +172,7 @@ pub fn seed_dev_view(
         })
         .collect();
     dev.battery_warn_pct = cfg.appearance.battery_warn_pct.clamp(5, 50);
+    dev.battery_hidden = cfg.appearance.battery_hidden.clone();
     dev.battery_sound = cfg.appearance.battery_sound;
     dev.discord_presence = cfg.appearance.discord_presence;
     dev.steamvr_icons = cfg.appearance.steamvr_icons;
@@ -344,6 +346,7 @@ pub fn config_from_dev_view(
         sound_warning: w,
         sound_error: e,
         sound_low_battery: b,
+        muted_apps: dev.notif.muted.clone(),
     };
     out.appearance.reduce_motion = dev.reduce_motion;
     out.macros = rsoverlay_core::config::Macros(
@@ -357,6 +360,7 @@ pub fn config_from_dev_view(
             .collect(),
     );
     out.appearance.battery_warn_pct = dev.battery_warn_pct;
+    out.appearance.battery_hidden = dev.battery_hidden.clone();
     out.appearance.battery_sound = dev.battery_sound;
     out.appearance.discord_presence = dev.discord_presence;
     out.appearance.steamvr_icons = dev.steamvr_icons;
@@ -1362,6 +1366,7 @@ mod config_roundtrip_tests {
         a.show_system = !a.show_system;
         a.reduce_motion = !a.reduce_motion;
         a.battery_warn_pct = 33;
+        a.battery_hidden = vec!["Tracker · VIVE Tracker 3.0".into()];
         a.battery_sound = false;
         a.discord_presence = false;
         a.steamvr_icons = false;
@@ -1425,6 +1430,7 @@ mod config_roundtrip_tests {
             sound_warning: "none".into(),
             sound_error: "buzz.wav".into(),
             sound_low_battery: "none".into(),
+            muted_apps: vec!["VRCX".into()],
         };
         c.macros = Macros(vec![Macro { label: "Mute".into(), keys: "ctrl+m".into() }]);
         c
