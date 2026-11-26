@@ -99,7 +99,7 @@ Last reviewed: M77 (2026-11-26).
 | Do-not-disturb | ✅ | M73: Focus mode on the wrist (also dims the windows you aren't working in) |
 | OSC device events (battery etc. → VRChat) | ✅ | M37, see [OSC.md](OSC.md) |
 | Discord Rich Presence | ✅ | M25 + built-in app, live toggle and sharing choices in Settings › Discord |
-| Localization | ❌ | English only for now. Translation tables exist for 9 languages (~40 keys) but the UI doesn't use them yet, so the language picker is hidden. Planned: route every string through the tables, then translations (ideally checked by native speakers) |
+| Localization | ❌ | English only for now. Translation tables exist for 9 languages (~40 keys) but the UI doesn't use them yet, so the language picker is hidden. Planned: route every string through the tables, then translations (ideally checked by native speakers), with the language picked automatically from the Windows display language on first start (Settings can override) |
 | Updates | ✅ | M71: GitHub builds show an opt-in notice (never auto-install); Steam builds update through Steam |
 | Plugin applications | ❌ | WASM-only, see ROADMAP non-goals |
 | Analytics | ⛔ | no telemetry |
@@ -122,7 +122,8 @@ Last reviewed: M77 (2026-11-26).
 ## Remaining gaps (value ÷ cost)
 
 1. Translate the whole UI (move every string into the i18n tables), then
-   more languages.
+   more languages; pick the language automatically from the Windows
+   display language on first start.
 2. Headset-test the experimental input blocking; promote or replace it.
 3. Full colour themes (theme colours as runtime tokens, `themes/` files).
 4. HOTAS / DirectInput sim bindings.
