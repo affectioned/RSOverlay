@@ -61,6 +61,15 @@ mod imp {
     const WIN_PPP: f32 = 1.5;
     const WIN_WIDTH_M: f32 = 0.90;
     const MAX_WINDOWS: usize = 6;
+    /// Monitor wall: panel width, arc radius (eye to panel) and the gap
+    /// between neighbours along the arc.
+    const WALL_WIDTH_M: f32 = 1.1;
+    const WALL_RADIUS_M: f32 = 1.25;
+    const WALL_GAP_M: f32 = 0.04;
+    /// Big screen: main monitor, wide and gently curved, a little further.
+    const BIG_WIDTH_M: f32 = 2.2;
+    const BIG_DISTANCE_M: f32 = 1.6;
+    const BIG_CURVATURE: f32 = 0.15;
     /// Widget panels (popped-out cards): 600 × 500 pt, 34 cm wide.
     const WID_TEX: (u32, u32) = (1200, 1000);
     const WID_PPP: f32 = 2.0;
@@ -400,6 +409,8 @@ mod imp {
         opacity: f32,
         /// Stays up with the dashboard closed (XSO layout mode).
         pinned: bool,
+        /// Overlay curvature (0 = flat).
+        curvature: f32,
     }
 
     impl WinOverlay {
@@ -449,6 +460,25 @@ mod imp {
             true => (x, 0.0),
             false => (0.0, y),
         }
+    }
+
+    /// Panels on a horizontal arc around `eye`, centred on the flat
+    /// forward direction `fwd`, left to right, each `radius` from the eye,
+    /// upright and facing it. `widths` in metres, `gap` along the arc.
+    fn arc_poses(eye: Vec3A, fwd: Vec3A, widths: &[f32], radius: f32, gap: f32, drop: f32) -> Vec<Affine3A> {
+        let fwd = Vec3A::new(fwd.x, 0.0, fwd.z).try_normalize().unwrap_or(Vec3A::NEG_Z);
+        let total: f32 = widths.iter().sum::<f32>() + gap * widths.len().saturating_sub(1) as f32;
+        let mut along = -total / 2.0;
+        widths
+            .iter()
+            .map(|w| {
+                let a = (along + w / 2.0) / radius; // radians, + = to the right
+                along += w + gap;
+                let dir = glam::Quat::from_rotation_y(-a) * glam::Vec3::from(fwd);
+                let pos = eye + Vec3A::from(dir) * radius + Vec3A::new(0.0, drop, 0.0);
+                face(pos, Vec3A::new(eye.x, pos.y, eye.z))
+            })
+            .collect()
     }
 
     /// Degrees between the head's gaze and the direction to `p`.
@@ -570,6 +600,7 @@ mod imp {
             group: None,
             opacity: 1.0,
             pinned: false,
+            curvature: 0.0,
         })
     }
 
@@ -620,6 +651,7 @@ mod imp {
                     group: w.group,
                     opacity: (w.opacity < 1.0).then_some(w.opacity),
                     pinned: w.pinned,
+                    curvature: (w.curvature > 0.0).then_some(w.curvature),
                 }
             })
             .collect();
@@ -660,6 +692,7 @@ mod imp {
             group: None,
             opacity: 1.0,
             pinned: false,
+            curvature: 0.0,
         })
     }
 
@@ -1753,6 +1786,100 @@ mod imp {
                 thumbs.request(&dev_view.sources.choices);
             }
             thumbs.collect(&mut dev_view.sources);
+            // ── Monitor wall: every monitor, arced around you, left to
+            // right as they sit on the desk.
+            if std::mem::take(&mut dev_view.sources.wall_request) {
+                if let Some(h) = &hmd {
+                    let monitors: Vec<_> = list_sources()
+                        .into_iter()
+                        .filter(|s| matches!(s, rsoverlay_ui::views::CaptureSource::Monitor(_)))
+                        .collect();
+                    let base = summon_pose(h);
+                    for src in monitors {
+                        let open = wins.iter().any(|w| w.mirror.as_ref().is_some_and(|m| m.source == src));
+                        if open {
+                            continue;
+                        }
+                        if wins.iter().filter(|w| w.mirror.is_some()).count() >= MAX_WINDOWS || wins.len() >= MAX_FLOATING {
+                            warn!("monitor wall: window limit ({MAX_WINDOWS}) reached");
+                            break;
+                        }
+                        win_seq += 1;
+                        match open_window(&overlay, &gpu, win_seq, src, base, &dev_view.sources.icons) {
+                            Ok(w) => wins.push(w),
+                            Err(e) => warn!("monitor wall: {e:#}"),
+                        }
+                    }
+                    // Arrange every open monitor panel, by desktop x.
+                    let mut wall: Vec<(i32, usize)> = wins
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(k, w)| {
+                            let m = w.mirror.as_ref()?;
+                            matches!(m.source, rsoverlay_ui::views::CaptureSource::Monitor(_)).then(|| (m.geom().map_or(0, |g| g.origin_x), k))
+                        })
+                        .collect();
+                    wall.sort();
+                    let eye = to_affine(h).translation;
+                    let fwd = -to_affine(h).matrix3.z_axis;
+                    let widths = vec![WALL_WIDTH_M; wall.len()];
+                    for (pose, (_, k)) in arc_poses(eye, fwd, &widths, WALL_RADIUS_M, WALL_GAP_M, DASH_DROP_M).into_iter().zip(wall) {
+                        let w = &mut wins[k];
+                        w.rel = None;
+                        w.attach = Attach::World;
+                        w.group = None;
+                        w.world = pose;
+                        w.pinned = true;
+                        w.panel.set_width(&overlay, WALL_WIDTH_M);
+                        if let Err(e) = overlay.set_transform_absolute(w.panel.handle, &from_affine(&pose)) {
+                            warn!("monitor wall: place: {e:#}");
+                        }
+                    }
+                }
+            }
+            // ── Big screen: the main monitor, large and curved, ahead.
+            if std::mem::take(&mut dev_view.sources.big_screen_request) {
+                if let Some(h) = &hmd {
+                    let main = rsoverlay_ui::views::CaptureSource::Monitor(0);
+                    let k = match wins.iter().position(|w| w.mirror.as_ref().is_some_and(|m| m.source == main)) {
+                        Some(k) => Some(k),
+                        None if wins.iter().filter(|w| w.mirror.is_some()).count() < MAX_WINDOWS && wins.len() < MAX_FLOATING => {
+                            win_seq += 1;
+                            match open_window(&overlay, &gpu, win_seq, main, summon_pose(h), &dev_view.sources.icons) {
+                                Ok(w) => {
+                                    wins.push(w);
+                                    Some(wins.len() - 1)
+                                }
+                                Err(e) => {
+                                    warn!("big screen: {e:#}");
+                                    None
+                                }
+                            }
+                        }
+                        None => {
+                            warn!("big screen: window limit ({MAX_WINDOWS}) reached");
+                            None
+                        }
+                    };
+                    if let Some(k) = k {
+                        let eye = to_affine(h).translation;
+                        let fwd = -to_affine(h).matrix3.z_axis;
+                        let pose = arc_poses(eye, fwd, &[BIG_WIDTH_M], BIG_DISTANCE_M, 0.0, DASH_DROP_M)[0];
+                        let w = &mut wins[k];
+                        w.rel = None;
+                        w.attach = Attach::World;
+                        w.group = None;
+                        w.world = pose;
+                        w.pinned = true;
+                        w.curvature = BIG_CURVATURE;
+                        w.panel.set_width(&overlay, BIG_WIDTH_M);
+                        let _ = overlay.set_curvature(w.panel.handle, BIG_CURVATURE);
+                        if let Err(e) = overlay.set_transform_absolute(w.panel.handle, &from_affine(&pose)) {
+                            warn!("big screen: place: {e:#}");
+                        }
+                    }
+                }
+            }
             if let Some(src) = dev_view.sources.request.take() {
                 if wins.iter().filter(|w| w.mirror.is_some()).count() >= MAX_WINDOWS || wins.len() >= MAX_FLOATING {
                     warn!("window overlay limit ({MAX_WINDOWS}) reached");
@@ -2059,6 +2186,10 @@ mod imp {
                             w.group = p.group.filter(|_| attach == Attach::World).map(|g| group_base + 1 + g);
                             w.opacity = p.opacity.unwrap_or(1.0).clamp(window_panel::MIN_CONTENT_OPACITY, 1.0);
                             w.pinned = p.pinned;
+                            if let Some(c) = p.curvature.filter(|c| *c > 0.0) {
+                                w.curvature = c.min(1.0);
+                                let _ = overlay.set_curvature(w.panel.handle, w.curvature);
+                            }
                             next_group = next_group.max(w.group.unwrap_or(0));
                             wins.push(w);
                         }
@@ -2496,6 +2627,24 @@ mod imp {
                 p = smooth(p, b, 1.0 / 90.0);
             }
             assert!((p.translation - b.translation).length() < 1e-3);
+        }
+
+        #[test]
+        fn monitor_wall_arcs_around_you_left_to_right() {
+            let eye = Vec3A::new(0.0, 1.6, 0.0);
+            let p = arc_poses(eye, Vec3A::NEG_Z, &[1.0, 1.0, 1.0], 1.25, 0.05, 0.0);
+            assert_eq!(p.len(), 3);
+            for q in &p {
+                // Same distance, eye height, facing the viewer.
+                assert!(((q.translation - eye).length() - 1.25).abs() < 1e-4);
+                assert!((q.translation.y - 1.6).abs() < 1e-4);
+                let to_eye = (eye - q.translation).normalize();
+                assert!(q.matrix3.z_axis.dot(to_eye) > 0.999);
+            }
+            // Middle straight ahead; left then right, symmetric.
+            assert!(p[1].translation.x.abs() < 1e-4 && p[1].translation.z < 0.0);
+            assert!(p[0].translation.x < 0.0 && p[2].translation.x > 0.0);
+            assert!((p[0].translation.x + p[2].translation.x).abs() < 1e-4);
         }
 
         #[test]

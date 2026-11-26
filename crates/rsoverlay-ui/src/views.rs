@@ -74,6 +74,10 @@ pub struct SourcePicker {
     pub wants_refresh: bool,
     /// Set by the UI when the user picks a different source.
     pub request: Option<CaptureSource>,
+    /// "All monitors": open every monitor as a wall arced around you.
+    pub wall_request: bool,
+    /// "Big screen": the main monitor as one large curved screen.
+    pub big_screen_request: bool,
     /// Desktop-page filter text.
     pub filter: String,
     /// App icons per window (raw pixels from the app; textures are made

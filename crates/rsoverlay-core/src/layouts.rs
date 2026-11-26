@@ -37,6 +37,9 @@ pub struct LayoutPanel {
     /// Stays visible while the dashboard is closed (XSO layout mode).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub pinned: bool,
+    /// Overlay curvature (0 = flat), e.g. the Big screen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub curvature: Option<f32>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

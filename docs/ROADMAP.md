@@ -11,7 +11,7 @@ scratch against public Windows / OpenVR APIs.
 
 ---
 
-## What's shipped (M0 → M74)
+## What's shipped (M0 → M75)
 
 Last reviewed 2026-11-26. Parity detail lives in
 [XSO_PARITY.md](XSO_PARITY.md).
@@ -84,6 +84,9 @@ Last reviewed 2026-11-26. Parity detail lives in
 - **M73:** Focus mode on the wrist: notifications wait in history, the
   windows you aren't working in dim.
 - **M74:** resize the real window from its VR toolbar (Size menu).
+- **M75:** All monitors (every monitor on an arc around you, left to
+  right as on the desk, pinned) and Big screen (main monitor, 2.2 m and
+  curved, pinned; curvature saved with layouts).
 
 ## XSOverlay parity: remaining gaps
 
@@ -100,19 +103,14 @@ physical-style keyboard that types in any language, global search,
 macros, DPI-correct input, dock-anywhere panels. The VR preview's
 "work" scene (`--vr-preview --scene work`) shows the target setup.
 
-1. **Work layout preset** — one tap builds a large curved main screen
-   plus side windows at reading distance (a built-in layout template
-   users can then tweak and save to a slot).
-2. **Multi-monitor wall** — every monitor at once, arranged in an arc
-   around you, with per-monitor docking and recenter.
-3. **Focus mode follow-ups** — auto-off when you leave the window, and
+1. **Focus mode follow-ups** — auto-off when you leave the window, and
    optional throttling of the dimmed panels.
 
 ## Mid-term
 
-- **Notifications polish.** History, clear-all, VR size / offset and
-  per-app mute shipped; next: history as a pop-out widget.
-  *XSO #127/#128/#131.*
+- **Notifications polish.** History (also as a pop-out widget),
+  clear-all, VR size / offset and per-app mute shipped; next: per-app
+  sounds. *XSO #127/#128/#131.*
 - **Per-layout keyboard presets.** Layout slots already store the
   keyboard pose (M53); next: favourites + quick-switch.
   *XSO #185/#316/#337; OVR #6.*

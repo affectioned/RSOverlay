@@ -318,6 +318,23 @@ pub fn source_grid(ui: &mut egui::Ui, sources: &mut SourcePicker, open: &[Captur
         if !sources.filter.is_empty() && pill(ui, "✕", false, accent).on_hover_text("Clear").clicked() {
             sources.filter.clear();
         }
+        let monitors = sources.choices.iter().filter(|s| matches!(s, CaptureSource::Monitor(_))).count();
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if monitors > 1
+                && pill(ui, "All monitors", false, accent)
+                    .on_hover_text("Open every monitor at once, arranged in an arc around you (left to right as on your desk)")
+                    .clicked()
+            {
+                sources.wall_request = true;
+            }
+            if monitors > 0
+                && pill(ui, "Big screen", false, accent)
+                    .on_hover_text("Your main monitor as one large curved screen in front of you, pinned")
+                    .clicked()
+            {
+                sources.big_screen_request = true;
+            }
+        });
     });
     ui.add_space(theme::GUTTER);
     let needle = sources.filter.trim().to_lowercase();
