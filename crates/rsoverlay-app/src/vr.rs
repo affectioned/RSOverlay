@@ -17,6 +17,7 @@ mod imp {
     use anyhow::{anyhow, Context, Result};
     use rsoverlay_notify::NotifyChannel;
     use glam::{Affine3A, Vec3A};
+    use crate::vr_logic::*;
     use rsoverlay_openvr::{pose_offset_pitch, DeviceBattery, DeviceKind, Hand, HmdMatrix34_t, OpenVr};
     use rsoverlay_ui::laser::{self, HandSample, LaserInput};
     use rsoverlay_render::GpuCtx;
@@ -108,13 +109,8 @@ mod imp {
     const PUSH_RATE: f32 = 1.4;
     /// Stick X: scale, same exponential feel.
     const SCALE_RATE: f32 = 1.2;
-    const STICK_DEAD: f32 = 0.2;
     const GRAB_DIST: (f32, f32) = (0.20, 8.0);
     const PANEL_WIDTH: (f32, f32) = (0.15, 4.0);
-    /// Grab smoothing time constant range (Settings › Pointer › Grab
-    /// smoothing 0..1); the default 0.3 ≈ 0.05 s kills hand tremor on big
-    /// panels without feeling laggy.
-    const GRAB_TAU: (f32, f32) = (0.005, 0.15);
     // Panels outside your view cone re-render at Settings › VR panels ›
     // Unwatched panels fps instead of every frame (XSO: "active"
     // overlays are the ones you look at).
@@ -127,13 +123,8 @@ mod imp {
 
     /// View-angle fade time constant (XSO-style auto-hide).
     const FADE_TAU: f32 = 0.08;
-    /// Auto-hidden window toolbars stay up this long after the laser leaves.
-    const TOOLBAR_LINGER_S: f64 = 1.5;
     /// Focus mode: opacity of the windows you aren't working in.
     const FOCUS_DIM: f32 = 0.3;
-    /// Focus moves to another window only when it's this many degrees
-    /// closer to your gaze (no flicker between neighbours).
-    const FOCUS_HYSTERESIS_DEG: f32 = 6.0;
 
     /// How often to re-check which controller the wrist is parented to
     /// (controllers connect late / swap roles).
@@ -458,113 +449,15 @@ mod imp {
         axis: Option<bool>,
     }
 
-    /// Stick (x, y) after the one-action-at-a-time lock: the axis that
-    /// leaves the dead zone first wins until the stick recentres.
-    fn lock_axis(axis: &mut Option<bool>, x: f32, y: f32) -> (f32, f32) {
-        if x == 0.0 && y == 0.0 {
-            *axis = None;
-            return (0.0, 0.0);
-        }
-        match *axis.get_or_insert(x.abs() > y.abs()) {
-            true => (x, 0.0),
-            false => (0.0, y),
-        }
-    }
 
-    /// Panels on a horizontal arc around `eye`, centred on the flat
-    /// forward direction `fwd`, left to right, each `radius` from the eye,
-    /// upright and facing it. `widths` in metres, `gap` along the arc.
-    fn arc_poses(eye: Vec3A, fwd: Vec3A, widths: &[f32], radius: f32, gap: f32, drop: f32) -> Vec<Affine3A> {
-        let fwd = Vec3A::new(fwd.x, 0.0, fwd.z).try_normalize().unwrap_or(Vec3A::NEG_Z);
-        let total: f32 = widths.iter().sum::<f32>() + gap * widths.len().saturating_sub(1) as f32;
-        let mut along = -total / 2.0;
-        widths
-            .iter()
-            .map(|w| {
-                let a = (along + w / 2.0) / radius; // radians, + = to the right
-                along += w + gap;
-                let dir = glam::Quat::from_rotation_y(-a) * glam::Vec3::from(fwd);
-                let pos = eye + Vec3A::from(dir) * radius + Vec3A::new(0.0, drop, 0.0);
-                face(pos, Vec3A::new(eye.x, pos.y, eye.z))
-            })
-            .collect()
-    }
 
-    /// Degrees between the head's gaze and the direction to `p`.
-    fn gaze_angle(hmd: &Affine3A, p: Vec3A) -> f32 {
-        let gaze = -hmd.matrix3.z_axis;
-        let to = (p - hmd.translation).try_normalize().unwrap_or(gaze);
-        gaze.dot(to).clamp(-1.0, 1.0).acos().to_degrees()
-    }
 
-    /// Focus mode: which window (by seq) you're working in. The laser
-    /// wins; otherwise the window nearest your gaze, switching only when
-    /// another is clearly nearer than the current one.
-    fn pick_focus(current: Option<u32>, laser: Option<u32>, by_gaze: &[(u32, f32)]) -> Option<u32> {
-        if laser.is_some() {
-            return laser;
-        }
-        let best = by_gaze.iter().copied().min_by(|a, b| a.1.total_cmp(&b.1))?;
-        match current.and_then(|c| by_gaze.iter().find(|(s, _)| *s == c)) {
-            Some(&(c, a)) if a <= best.1 + FOCUS_HYSTERESIS_DEG => Some(c),
-            _ => Some(best.0),
-        }
-    }
 
-    /// XSO-style auto-hide: shown while the angle between the head's
-    /// gaze and the panel's facing direction stays under `clip_deg`.
-    /// Panels face the viewer along +Z, so straight-on is gaze == −Z.
-    fn in_view(hmd: &Affine3A, panel: &Affine3A, clip_deg: f32) -> bool {
-        let gaze = -hmd.matrix3.z_axis;
-        let toward = -panel.matrix3.z_axis;
-        gaze.dot(toward).clamp(-1.0, 1.0).acos().to_degrees() < clip_deg
-    }
 
-    /// Upright pose at `pos` whose +Z (visible face) points at `eye`.
-    /// No roll — panels stay level however you twist the controller.
-    fn face(pos: Vec3A, eye: Vec3A) -> Affine3A {
-        let z = (eye - pos).try_normalize().unwrap_or(Vec3A::Z);
-        let x = Vec3A::Y.cross(z).try_normalize().unwrap_or(Vec3A::X);
-        let y = z.cross(x);
-        Affine3A::from_cols(x, y, z, pos)
-    }
 
-    /// Frame-rate-independent exponential approach for poses.
-    fn smooth(from: Affine3A, to: Affine3A, dt: f32, smoothing: f32) -> Affine3A {
-        let tau = GRAB_TAU.0 + (GRAB_TAU.1 - GRAB_TAU.0) * smoothing.clamp(0.0, 1.0);
-        let k = 1.0 - (-dt.max(0.0) / tau).exp();
-        let (_, r0, t0) = from.to_scale_rotation_translation();
-        let (_, r1, t1) = to.to_scale_rotation_translation();
-        Affine3A::from_rotation_translation(r0.slerp(r1, k), t0.lerp(t1, k))
-    }
 
-    /// SteamVR draws overlays by sort order, not depth. Each panel gets
-    /// an explicit layer (higher = drawn on top), and the laser picks the
-    /// top layer where panels overlap, so it hits what you see.
-    /// Windows 0, dashboard 10, keyboard 20, wrist 30 (toasts 60,
-    /// beams 100).
-    fn layer(panel: usize) -> u32 {
-        match panel {
-            0 => 30,
-            1 => 10,
-            2 => 20,
-            _ => 0,
-        }
-    }
 
-    /// Does hit `a` (panel, distance) beat `b`? Top layer first, then
-    /// nearest.
-    fn hit_beats(a: (usize, f32), b: (usize, f32)) -> bool {
-        (layer(a.0), -a.1) > (layer(b.0), -b.1)
-    }
 
-    fn stick(v: f32) -> f32 {
-        if v.abs() < STICK_DEAD {
-            0.0
-        } else {
-            v.signum() * (v.abs() - STICK_DEAD) / (1.0 - STICK_DEAD)
-        }
-    }
 
     fn open_window(
         overlay: &rsoverlay_openvr::Overlay<'_>,
@@ -1159,8 +1052,7 @@ mod imp {
                 kb.update_fade(up && (grabbed == Some(2) || kb_pose.is_some_and(|p| in_view(&h, &p, clip))), dt);
                 for (k, w) in wins.iter_mut().enumerate() {
                     let p = win_world(w, hmd.as_ref(), &controllers);
-                    let shown = up && (!follow || w.pinned || dash.visible);
-                    w.panel.update_fade(shown && (grabbed == Some(k + WIN0) || in_view(&h, &p, clip)), dt);
+                    w.panel.update_fade(window_shown(steamvr_menu, follow, w.pinned, dash.visible, grabbed == Some(k + WIN0), in_view(&h, &p, clip)), dt);
                 }
             }
 
@@ -1341,19 +1233,8 @@ mod imp {
                         let hit = Vec3A::from(c.origin) + Vec3A::from(c.dir) * g.dist;
                         // Orient first (from the grab point), then hang the
                         // panel off it by the scaled grab offset.
-                        let mut target = match g.tilt {
-                            // Rotates with the hand (roll/pitch/yaw), from
-                            // wherever it was relative to the hand at grab.
-                            Some(rel) => {
-                                let (_, hand_rot, _) = to_affine(&c.pose).to_scale_rotation_translation();
-                                Affine3A::from_rotation_translation(hand_rot * rel, hit.into())
-                            }
-                            None => face(hit, eye.unwrap_or(hit + Vec3A::Z)),
-                        };
-                        target.translation = hit + target.matrix3 * (g.offset * width);
-                        if let (Some(e), None) = (eye, g.tilt) {
-                            target = Affine3A { translation: target.translation, ..face(target.translation, e) };
-                        }
+                        let (_, hand_rot, _) = to_affine(&c.pose).to_scale_rotation_translation();
+                        let target = grab_target(hit, g.offset, width, g.tilt, hand_rot, eye);
                         g.smoothed = smooth(g.smoothed, target, dt, dev_view.pointer.grab_smoothing);
                         let p = g.smoothed;
                         if g.panel == 0 {
@@ -1975,7 +1856,7 @@ mod imp {
                 let background_s = 1.0 / f64::from(dev_view.vr_background_fps.clamp(1.0, 90.0));
                 // Focus mode: dimmed windows are background too.
                 let dimmed = focus_win.is_some_and(|f| f != w.seq);
-                if !w.smooth && (!w.panel.in_view || dimmed) && time - w.panel.last_render < background_s && lf.events.is_empty() {
+                if !should_render(w.panel.in_view, dimmed, w.smooth, time - w.panel.last_render, background_s, !lf.events.is_empty()) {
                     continue;
                 }
                 let accent = dev_view.effective_accent();
@@ -2018,7 +1899,7 @@ mod imp {
                     if lf.cursor.is_some() || grab.as_ref().is_some_and(|g| g.panel == k + WIN0) {
                         w.toolbar_seen = time;
                     }
-                    let show_toolbar = !dev_view.pointer.autohide_toolbars || time - w.toolbar_seen < TOOLBAR_LINGER_S;
+                    let show_toolbar = toolbar_visible(dev_view.pointer.autohide_toolbars, time, w.toolbar_seen);
                     let events = lf.events.clone();
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
                         act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, opacity, pinned, show_toolbar, smooth, accent);

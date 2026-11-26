@@ -23,6 +23,7 @@ mod preview_mock;
 mod preview_vr;
 mod snapshot;
 mod vr;
+mod vr_logic;
 
 /// GitHub builds tell users about new releases; the Steam build doesn't
 /// (Steam updates it).
