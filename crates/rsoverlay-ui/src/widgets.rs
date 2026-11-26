@@ -26,7 +26,7 @@ impl WidgetKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::NowPlaying => "Now playing",
-            Self::System => "System",
+            Self::System => "PC performance",
             Self::Volume => "Volume",
             Self::Battery => "Battery",
             Self::Macros => "Macros",
@@ -63,7 +63,7 @@ impl WidgetKind {
     pub fn from_slug(s: &str) -> Option<Self> {
         Self::from_caption(match s {
             "now-playing" | "media" => "Now playing",
-            "system" => "System",
+            "system" => "PC performance",
             "volume" => "Volume",
             "battery" => "Battery",
             "macros" => "Macros",
@@ -77,7 +77,7 @@ impl WidgetKind {
     pub fn from_caption(caption: &str) -> Option<Self> {
         Some(match caption {
             "Now playing" => Self::NowPlaying,
-            "System" => Self::System,
+            "PC performance" => Self::System,
             "Volume" => Self::Volume,
             "Battery" => Self::Battery,
             "Macros" => Self::Macros,

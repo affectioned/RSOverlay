@@ -35,9 +35,9 @@ mod imp {
     const CLICK_HAPTIC_US: u16 = 1200;
 
     /// Wrist watch: small texture, 2 texels/pt → 512 × 256 pt face.
-    /// Wrist toolbar stack: 600 × 460 pt at 2 texels/pt (room for every
-    /// module at once in edit mode).
-    const WRIST_TEX: (u32, u32) = (1200, 920);
+    /// Wrist toolbar stack: 600 × 520 pt at 2 texels/pt (room for every
+    /// module at once in edit mode, including two rows of status chips).
+    const WRIST_TEX: (u32, u32) = (1200, 1040);
     const WRIST_PPP: f32 = 2.0;
     const WRIST_WIDTH_M: f32 = 0.24;
     /// Wrist mount, in the left controller's frame (−Z = pointing
@@ -825,6 +825,10 @@ mod imp {
         let mut thumbs = crate::mirror_source::ThumbWorker::spawn();
         // Device icons from the user's SteamVR install (decoded once each).
         let mut device_icons = crate::device_icons::DeviceIcons::default();
+        // SteamVR frame timing (game fps, GPU time, reprojection). Only the
+        // layout-verified compositor table is used; None = no VR stats.
+        let compositor = vr.compositor().map_err(|e| info!("frame stats unavailable: {e}")).ok();
+        let mut last_perf: Option<Instant> = None;
         // Head-locked toast panel, shown only while toasts are up.
         let mut toasts = VrPanel::new(&overlay, &gpu, "rsoverlay.toasts", "RSOverlay Notifications", TOAST_TEX, TOAST_PPP, 0.30, 0.0)?;
         let _ = overlay.set_sort_order(toasts.handle, 60);
@@ -1976,6 +1980,18 @@ mod imp {
                 }
             }
             crate::preview::play_alert_sounds(&mut dev_view);
+            if last_perf.is_none_or(|t| t.elapsed() >= Duration::from_millis(500)) {
+                last_perf = Some(Instant::now());
+                let hz = system.as_ref().and_then(|s| s.display_hz());
+                dev_view.vr_perf = compositor.as_ref().zip(hz).and_then(|(c, hz)| {
+                    let frames: Vec<rsoverlay_core::perf::Frame> = c
+                        .frame_samples(90)
+                        .into_iter()
+                        .map(|f| rsoverlay_core::perf::Frame { interval_ms: f.interval_ms, gpu_ms: f.gpu_ms, presents: f.presents, dropped: f.dropped })
+                        .collect();
+                    rsoverlay_core::perf::summarize(&frames, hz)
+                });
+            }
             let want_toasts = dev_view.has_toasts() && hmd.is_some();
             if want_toasts {
                 let place = (dev_view.notif.size_m, dev_view.notif.offset_y, dev_view.notif.distance_m);

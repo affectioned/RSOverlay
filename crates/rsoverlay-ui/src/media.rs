@@ -11,6 +11,56 @@ pub struct MediaInfo {
     pub playing: bool,
 }
 
+/// Polls SMTC on its own thread. The WinRT calls block until the
+/// system media service answers, and that service can stall: polling
+/// on the UI thread would freeze the whole overlay with it.
+pub struct MediaWorker {
+    shared: std::sync::Arc<WorkerShared>,
+}
+
+#[derive(Default)]
+struct WorkerShared {
+    /// Latest track + album-art accent (art only while `want_art`).
+    latest: std::sync::Mutex<(Option<MediaInfo>, Option<egui::Color32>)>,
+    want_art: std::sync::atomic::AtomicBool,
+}
+
+impl MediaWorker {
+    pub fn spawn() -> Self {
+        let shared = std::sync::Arc::new(WorkerShared::default());
+        let weak = std::sync::Arc::downgrade(&shared);
+        let _ = std::thread::Builder::new().name("rso-media".into()).spawn(move || {
+            let mut art_for = String::new();
+            let mut art = None;
+            // Exits once the worker (the only strong owner) is dropped.
+            while let Some(s) = weak.upgrade() {
+                let info = poll();
+                let want = s.want_art.load(std::sync::atomic::Ordering::Relaxed);
+                let title = info.as_ref().map(|m| m.title.clone()).unwrap_or_default();
+                if !want {
+                    art_for.clear();
+                    art = None;
+                } else if title != art_for {
+                    art_for = title;
+                    art = if art_for.is_empty() { None } else { art_color() };
+                }
+                if let Ok(mut l) = s.latest.lock() {
+                    *l = (info, art);
+                }
+                drop(s);
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        });
+        Self { shared }
+    }
+
+    /// Latest result; never blocks on the media service.
+    pub fn latest(&self, want_art: bool) -> (Option<MediaInfo>, Option<egui::Color32>) {
+        self.shared.want_art.store(want_art, std::sync::atomic::Ordering::Relaxed);
+        self.shared.latest.lock().map(|l| l.clone()).unwrap_or_default()
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum MediaCommand {
     PlayPause,

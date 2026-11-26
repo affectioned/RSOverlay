@@ -18,34 +18,76 @@ impl SystemCard {
         Some(self.sampler.get_or_insert_with(Sampler::spawn).snapshot())
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, overlay_fps: f32, accent: egui::Color32) {
+    /// The *PC's* performance (game + machine). RSOverlay's own numbers
+    /// live separately in Settings › RSOverlay performance.
+    pub fn show(&mut self, ui: &mut egui::Ui, vr: Option<&rsoverlay_core::perf::VrPerf>, accent: egui::Color32) {
         let s = self.sampler.get_or_insert_with(Sampler::spawn).snapshot();
         theme::card().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.add(icon(icons::PULSE, 18.0, crate::theme::FG_MUTED));
                 ui.add_space(6.0);
-                ui.label(theme::card_title("System"));
-                crate::widgets::popout_button(ui, "System", accent);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(format!("{overlay_fps:.0} fps"))
-                            .monospace()
-                            .size(theme::SIZE_CAPTION + 1.0)
-                            .color(theme::FG_MUTED),
-                    );
-                });
+                ui.label(theme::card_title("PC performance"));
+                crate::widgets::popout_button(ui, "PC performance", accent);
+                // The game's frame rate (VR), never RSOverlay's own.
+                if let Some(v) = vr {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let behind = v.fps < v.hz * 0.9;
+                        ui.label(
+                            egui::RichText::new(format!("{:.0} / {:.0} fps", v.fps, v.hz))
+                                .monospace()
+                                .size(theme::SIZE_CAPTION + 1.0)
+                                .color(if behind { theme::DANGER } else { theme::FG_MUTED }),
+                        )
+                        .on_hover_text("Game frame rate / headset refresh rate (SteamVR)");
+                    });
+                }
             });
             ui.add_space(6.0);
             meter(ui, "CPU", s.cpu_pct, None, accent);
+            // Busiest core: games like VRChat hit one main thread's limit
+            // long before the average looks high.
+            meter(ui, "Core", s.cpu_max_core_pct, None, accent);
             meter(ui, "GPU", s.gpu_pct, None, accent);
             let ram = (s.ram_total > 0).then(|| 100.0 * s.ram_used as f32 / s.ram_total as f32);
             meter(ui, "RAM", ram, Some(format_bytes(s.ram_used)), accent);
             if let (Some(u), Some(t)) = (s.vram_used, s.vram_total) {
                 meter(ui, "VRAM", Some(100.0 * u as f32 / t as f32), Some(format_bytes(u)), accent);
             }
+            if let Some(v) = vr {
+                ui.add_space(8.0);
+                vr_rows(ui, v, accent);
+            }
         });
     }
+}
+
+/// SteamVR frame stats: frame rate vs refresh, GPU time + headroom,
+/// reprojection. Red when the game is falling behind.
+fn vr_rows(ui: &mut egui::Ui, v: &rsoverlay_core::perf::VrPerf, accent: egui::Color32) {
+    let line = |ui: &mut egui::Ui, label: &str, value: String, bad: bool, tip: &str| {
+        ui.horizontal(|ui| {
+            ui.allocate_ui_with_layout(egui::vec2(44.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.set_width(44.0);
+                ui.label(theme::body_muted(label));
+            });
+            ui.label(egui::RichText::new(value).monospace().size(theme::SIZE_CAPTION + 1.0).color(if bad { theme::DANGER } else { theme::FG_PRIMARY }));
+        })
+        .response
+        .on_hover_text(tip);
+    };
+    let behind = v.fps < v.hz * 0.9;
+    let dot = if behind { theme::DANGER } else { accent };
+    ui.horizontal(|ui| {
+        ui.painter().circle_filled(ui.cursor().min + egui::vec2(4.0, 10.0), 3.5, dot);
+        ui.add_space(12.0);
+        ui.label(theme::body_muted("VR · SteamVR frame timing"));
+    });
+    line(ui, "FPS", format!("{:.0} / {:.0}", v.fps, v.hz), behind, "Game frames per second / your headset's refresh rate");
+    line(ui, "Frame", format!("{:.1} ms GPU · {:+.1} ms", v.gpu_ms, v.headroom_ms), v.headroom_ms < 0.0,
+        "GPU time per frame, and how much of the frame budget is left (negative = over budget)");
+    line(ui, "Reproj", format!("{:.0}% · {} dropped", v.reprojected_pct, v.dropped), v.reprojected_pct > 10.0,
+        "Frames SteamVR had to reuse because the game wasn't ready in time (lower is better)");
 }
 
 /// `label ▕████░░░░▏ value`. `detail` replaces the % readout (e.g. GB).

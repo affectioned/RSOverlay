@@ -56,7 +56,7 @@ fn static_entries() -> Vec<Entry> {
         card("Cursor smoothing", "Settings › Pointer", "jitter steady laser", Settings, "Pointer"),
         card("Scroll speed", "Settings › Pointer", "wheel scrolling", Settings, "Pointer"),
         card("Placement", "Settings", "position offset size curve curvature opacity anchor", Settings, "Placement"),
-        card("Performance stats", "Settings › Stats", "fps frame time cpu ram vram memory footprint light fast", Settings, "Stats"),
+        card("RSOverlay performance", "Settings › RSOverlay performance", "overlay fps frame time own footprint memory light fast", Settings, "RSOverlay performance"),
         card("Volume mixer", "Audio", "sound mute master app volume", Audio, "Volume"),
         card("Now playing", "Audio", "music media spotify song track play pause", Audio, "Now playing"),
         card("VRChat chatbox", "Chat", "osc message type send", Chat, "VRChat chatbox"),
@@ -64,7 +64,7 @@ fn static_entries() -> Vec<Entry> {
         card("Macros", "Macros", "shortcut hotkey streamdeck button obs discord", Macros, "Macros"),
         card("Notification history", "Notifications", "alerts toasts clear", Notifications, "Notifications"),
         card("Battery", "Home", "controller headset charge warn osc avatar", Home, "Battery"),
-        card("System stats", "Home", "cpu gpu ram vram performance", Home, "System"),
+        card("PC performance", "Home", "cpu core gpu ram vram fps frame time reprojection lag stutter performance", Home, "PC performance"),
     ]);
     v
 }
@@ -156,8 +156,8 @@ mod tests {
         for e in static_entries() {
             if let Target::Card(_, cap) = e.target {
                 assert!(
-                    ["Appearance", "Night light", "VR", "Pointer", "Wrist toolbar", "Accessibility", "Administrator", "Reset", "Placement", "Stats",
-                        "Volume", "Now playing", "VRChat chatbox", "Macros", "Notifications", "Battery", "System"]
+                    ["Appearance", "Night light", "VR", "Pointer", "Wrist toolbar", "Accessibility", "Administrator", "Reset", "Placement", "RSOverlay performance",
+                        "Volume", "Now playing", "VRChat chatbox", "Macros", "Notifications", "Battery", "PC performance"]
                         .contains(&cap),
                     "{cap}"
                 );

@@ -212,6 +212,58 @@ impl OpenVr {
     }
 }
 
+impl OpenVr {
+    /// Acquire IVRCompositor (frame timing). Only the verified 029 table
+    /// is requested; `Err` = no frame stats on this runtime.
+    pub fn compositor(&self) -> Result<Compositor<'_>, OpenVrError> {
+        let mut err: sys::EVRInitError = 0;
+        let ptr = unsafe { (self.fns.vr_get_generic_interface)(sys::IVRCompositor_FnTable_Version.as_ptr() as *const _, &mut err) };
+        if ptr.is_null() || err != sys::EVRInitError_None {
+            return Err(OpenVrError::InterfaceMissing(err));
+        }
+        Ok(Compositor { table: ptr as *const sys::IVRCompositorFnTable, _parent: std::marker::PhantomData })
+    }
+}
+
+/// One compositor frame, as far as performance stats need it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FrameSample {
+    /// Time between the game's frames, ms.
+    pub interval_ms: f32,
+    /// GPU time for the frame (game + compositor), ms.
+    pub gpu_ms: f32,
+    /// Times the compositor showed this frame (> 1 = reprojected).
+    pub presents: u32,
+    pub dropped: u32,
+}
+
+pub struct Compositor<'a> {
+    table: *const sys::IVRCompositorFnTable,
+    _parent: std::marker::PhantomData<&'a OpenVr>,
+}
+
+impl<'a> Compositor<'a> {
+    /// The last `n` frames (newest first), at most 128.
+    pub fn frame_samples(&self, n: u32) -> Vec<FrameSample> {
+        let n = n.clamp(1, 128);
+        let size = std::mem::size_of::<sys::Compositor_FrameTiming>() as u32;
+        let mut buf = vec![sys::Compositor_FrameTiming { m_nSize: size, ..Default::default() }; n as usize];
+        // SAFETY: `table` is the runtime's IVRCompositor_029 table (layout
+        // pinned in sys.rs); `buf` holds `n` initialised entries with
+        // m_nSize set, and the runtime writes at most `n` of them.
+        let got = unsafe { ((*self.table).GetFrameTimings)(buf.as_mut_ptr(), n) }.min(n) as usize;
+        buf[..got]
+            .iter()
+            .map(|t| FrameSample {
+                interval_ms: t.m_flClientFrameIntervalMs,
+                gpu_ms: t.m_flTotalRenderGpuMs,
+                presents: t.m_nNumFramePresents,
+                dropped: t.m_nNumDroppedFrames,
+            })
+            .collect()
+    }
+}
+
 impl Drop for OpenVr {
     fn drop(&mut self) {
         unsafe { (self.fns.vr_shutdown_internal)() };
@@ -475,6 +527,11 @@ impl<'a> System<'a> {
     /// Every connected device that reports battery status, in OpenVR
     /// index order (HMD is always index 0 when present). Lighthouse base
     /// stations are skipped — they're mains-powered.
+    /// Headset refresh rate (Hz), if the HMD reports it.
+    pub fn display_hz(&self) -> Option<f32> {
+        self.float_prop(0, sys::Prop_DisplayFrequency_Float).filter(|hz| *hz > 1.0)
+    }
+
     pub fn batteries(&self) -> Vec<DeviceBattery> {
         let t = self.table();
         let mut out = Vec::new();

@@ -58,7 +58,7 @@ const HEAD: Vec3 = Vec3::new(0.0, 1.6, 0.0);
 // Panel textures, pixels-per-point and widths: the VR shell's values
 // (`vr.rs`), so text and layout match the headset exactly.
 const DASH: PanelSize = PanelSize { tex: (2048, 1280), ppp: 2.0 };
-const WRIST: PanelSize = PanelSize { tex: (1200, 920), ppp: 2.0 };
+const WRIST: PanelSize = PanelSize { tex: (1200, 1040), ppp: 2.0 };
 const WIN: PanelSize = PanelSize { tex: (1920, 1200), ppp: 1.5 };
 const WID: PanelSize = PanelSize { tex: (1200, 1000), ppp: 2.0 };
 const KB: PanelSize = PanelSize { tex: (2048, 800), ppp: 2.0 };

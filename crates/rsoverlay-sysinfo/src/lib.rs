@@ -23,6 +23,9 @@ pub const INTERVAL: Duration = Duration::from_secs(1);
 pub struct Snapshot {
     /// 0..=100. `None` until two samples exist.
     pub cpu_pct: Option<f32>,
+    /// Busiest single logical core, 0..=100. Games like VRChat are often
+    /// limited by one main thread long before the average looks high.
+    pub cpu_max_core_pct: Option<f32>,
     pub gpu_pct: Option<f32>,
     pub ram_used: u64,
     pub ram_total: u64,
@@ -124,6 +127,7 @@ mod imp {
 
     pub(super) fn worker(shared: Arc<Mutex<Snapshot>>, stop: Arc<AtomicBool>) {
         let pdh = Pdh::open();
+        let core_pdh = CorePdh::open();
         let vram_total = largest_dedicated_vram();
         let adapter3 = largest_adapter3();
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
@@ -152,6 +156,11 @@ mod imp {
                 if unsafe { PdhCollectQueryData(p.query) } == 0 {
                     snap.gpu_pct = sum_counter(p.gpu).map(|v| v.clamp(0.0, 100.0) as f32);
                     snap.vram_used = sum_counter(p.vram).map(|v| v as u64);
+                }
+            }
+            if let Some(c) = &core_pdh {
+                if unsafe { PdhCollectQueryData(c.query) } == 0 {
+                    snap.cpu_max_core_pct = max_counter(c.cores).map(|v| v.clamp(0.0, 100.0) as f32);
                 }
             }
             // Our own footprint.
@@ -254,6 +263,49 @@ mod imp {
         }
     }
 
+    /// Per-core CPU load, in its own query so a missing GPU counter can't
+    /// take it down (and vice versa).
+    struct CorePdh {
+        query: isize,
+        cores: isize,
+    }
+
+    impl CorePdh {
+        fn open() -> Option<Self> {
+            unsafe {
+                let mut query = 0isize;
+                if PdhOpenQueryW(PCWSTR::null(), 0, &mut query) != 0 {
+                    return None;
+                }
+                // "Processor Information" covers every processor group
+                // (the plain "Processor" object stops at 64 cores).
+                let mut cores = 0isize;
+                if PdhAddEnglishCounterW(query, w!("\\Processor Information(*)\\% Processor Time"), 0, &mut cores) != 0 {
+                    tracing::info!("sysinfo: per-core CPU counter unavailable");
+                    PdhCloseQuery(query);
+                    return None;
+                }
+                PdhCollectQueryData(query);
+                Some(Self { query, cores })
+            }
+        }
+    }
+
+    impl Drop for CorePdh {
+        fn drop(&mut self) {
+            unsafe {
+                PdhCloseQuery(self.query);
+            }
+        }
+    }
+
+    /// Largest wildcard instance of a counter. For per-core load the
+    /// "_Total" instances are averages, so they never exceed the busiest
+    /// core and can stay in.
+    fn max_counter(counter: isize) -> Option<f64> {
+        fold_counter(counter, f64::NEG_INFINITY, f64::max).filter(|v| v.is_finite())
+    }
+
     impl Drop for Pdh {
         fn drop(&mut self) {
             unsafe {
@@ -262,8 +314,14 @@ mod imp {
         }
     }
 
-    /// Sum every wildcard instance of a counter (two-call size/fill).
+    /// Sum every wildcard instance of a counter.
     fn sum_counter(counter: isize) -> Option<f64> {
+        fold_counter(counter, 0.0, |a, b| a + b)
+    }
+
+    /// Fold every valid wildcard instance of a counter (two-call
+    /// size/fill). O(instances).
+    fn fold_counter(counter: isize, init: f64, f: impl Fn(f64, f64) -> f64) -> Option<f64> {
         unsafe {
             let (mut bytes, mut count) = (0u32, 0u32);
             if PdhGetFormattedCounterArrayW(counter, PDH_FMT_DOUBLE, &mut bytes, &mut count, None) != PDH_MORE_DATA {
@@ -276,13 +334,15 @@ mod imp {
             if PdhGetFormattedCounterArrayW(counter, PDH_FMT_DOUBLE, &mut bytes, &mut count, Some(items)) != 0 {
                 return None;
             }
+            // SAFETY: PDH wrote `count` items at the start of `buf`, which
+            // is u64-aligned and `bytes` long (checked by the fill call).
             let items = std::slice::from_raw_parts(items, count as usize);
             Some(
                 items
                     .iter()
                     .filter(|it| it.FmtValue.CStatus == PDH_CSTATUS_VALID_DATA)
                     .map(|it| it.FmtValue.Anonymous.doubleValue)
-                    .sum(),
+                    .fold(init, f),
             )
         }
     }
@@ -354,5 +414,7 @@ mod tests {
         println!("{snap:#?}");
         assert!(snap.ram_total > 0);
         assert!(snap.cpu_pct.is_some());
+        let (avg, max) = (snap.cpu_pct.unwrap(), snap.cpu_max_core_pct.expect("per-core counter"));
+        assert!(max + 0.5 >= avg, "busiest core {max} can't be below the average {avg}");
     }
 }

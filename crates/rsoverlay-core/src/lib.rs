@@ -3,6 +3,7 @@
 pub mod config;
 pub mod layouts;
 pub mod panel;
+pub mod perf;
 pub mod runtime;
 pub mod steamvr;
 

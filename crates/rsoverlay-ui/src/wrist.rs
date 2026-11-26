@@ -43,6 +43,9 @@ pub mod compact {
     pub const PERF: u32 = 1 << 14;
     pub const RAM: u32 = 1 << 15;
     pub const ALERTS: u32 = 1 << 16;
+    pub const VRAM: u32 = 1 << 17;
+    /// SteamVR frame rate vs refresh + reprojection.
+    pub const VR_FPS: u32 = 1 << 18;
     /// Non-action sections, in settings order.
     pub const SECTIONS: &[(u32, &str)] = &[
         (CLOCK, "Clock"),
@@ -53,7 +56,7 @@ pub mod compact {
         (VIEWS, "Views"),
     ];
     /// Status-chip modules, in row order.
-    pub const CHIPS: &[(u32, &str)] = &[(PERF, "CPU / GPU"), (RAM, "RAM"), (ALERTS, "Alerts")];
+    pub const CHIPS: &[(u32, &str)] = &[(VR_FPS, "VR FPS"), (PERF, "CPU / GPU"), (VRAM, "VRAM"), (RAM, "RAM"), (ALERTS, "Alerts")];
     /// Compact action order: reach order, everyday four first.
     pub const ORDER: [usize; 7] = [3, 2, 0, 1, 4, 5, 6];
 }
@@ -82,6 +85,8 @@ pub struct WristData<'a> {
     pub editing: bool,
     /// Latest machine load (only sampled when a chip needs it).
     pub system: Option<&'a rsoverlay_sysinfo::Snapshot>,
+    /// SteamVR frame stats (VR only).
+    pub vr_perf: Option<&'a rsoverlay_core::perf::VrPerf>,
     /// Notifications not yet looked at.
     pub unread: usize,
 }
@@ -107,6 +112,7 @@ pub struct WristAction {
 }
 
 const ROW_GAP: f32 = 8.0;
+const CHIPS_PER_ROW: usize = 3;
 
 pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
     let mut act = WristAction::default();
@@ -348,11 +354,12 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             .filter(|&&(bit, _)| has(bit))
             .map(|&(bit, _)| chip_content(bit, d, accent))
             .collect();
-        if !chips.is_empty() {
-            let r6 = row(&mut y, 48.0, full.width() * 0.16);
+        // Up to three chips per row (wider rows of 48 pt each).
+        for line in chips.chunks(CHIPS_PER_ROW) {
+            let r6 = row(&mut y, 48.0, full.width() * 0.06);
             slab(ui, r6, accent);
-            let cw = r6.width() / chips.len() as f32;
-            for (i, (bit, text, src, tint)) in chips.into_iter().enumerate() {
+            let cw = r6.width() / line.len() as f32;
+            for (i, (bit, text, src, tint)) in line.iter().cloned().enumerate() {
                 let c = egui::Rect::from_min_size(egui::pos2(r6.left() + i as f32 * cw, r6.top()), egui::vec2(cw, r6.height())).shrink(5.0);
                 if d.editing {
                     edits.push((c, bit));
@@ -424,10 +431,30 @@ fn chip_content(bit: u32, d: &WristData, accent: egui::Color32) -> (u32, String,
     let hot = |v: Option<f32>| if v.is_some_and(|v| v >= 90.0) { theme::DANGER } else { accent };
     match bit {
         compact::PERF => {
-            let (cpu, gpu) = (d.system.and_then(|s| s.cpu_pct), d.system.and_then(|s| s.gpu_pct));
-            let worst = cpu.into_iter().chain(gpu).reduce(f32::max);
+            let (cpu, core, gpu) = (d.system.and_then(|s| s.cpu_pct), d.system.and_then(|s| s.cpu_max_core_pct), d.system.and_then(|s| s.gpu_pct));
+            // Red on a pegged busiest core too: that's what stalls VRChat.
+            let worst = cpu.into_iter().chain(core).chain(gpu).reduce(f32::max);
             (bit, format!("CPU {} · GPU {}", pct(cpu), pct(gpu)), icons::CHART, hot(worst))
         }
+        compact::VRAM => {
+            let gb = |b: u64| b as f64 / (1u64 << 30) as f64;
+            match d.system.and_then(|s| s.vram_used.zip(s.vram_total)).filter(|(_, t)| *t > 0) {
+                Some((u, t)) => (bit, format!("VRAM {:.1}/{:.0} GB", gb(u), gb(t)), icons::LAYERS, hot(Some(100.0 * u as f32 / t as f32))),
+                None => (bit, "VRAM --".into(), icons::LAYERS, accent),
+            }
+        }
+        compact::VR_FPS => match d.vr_perf {
+            Some(v) => {
+                let bad = v.fps < v.hz * 0.9 || v.reprojected_pct > 10.0;
+                let text = if v.reprojected_pct >= 1.0 {
+                    format!("{:.0}/{:.0} fps · {:.0}% reproj", v.fps, v.hz, v.reprojected_pct)
+                } else {
+                    format!("{:.0}/{:.0} fps", v.fps, v.hz)
+                };
+                (bit, text, icons::HEADSET, if bad { theme::DANGER } else { accent })
+            }
+            None => (bit, "VR fps --".into(), icons::HEADSET, theme::FG_MUTED),
+        },
         compact::RAM => {
             let gb = |b: u64| b as f64 / (1u64 << 30) as f64;
             let text = match d.system.filter(|s| s.ram_total > 0) {
@@ -531,6 +558,7 @@ mod tests {
             expanded: false,
             editing: false,
             system,
+            vr_perf: None,
             unread,
         }
     }

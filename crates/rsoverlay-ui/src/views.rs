@@ -261,6 +261,8 @@ pub struct DevView {
     pub toasts_external: bool,
     /// Settings › Discord: show RSOverlay on the Discord profile.
     pub discord_presence: bool,
+    /// SteamVR frame stats (VR shell only; `None` on the desktop).
+    pub vr_perf: Option<rsoverlay_core::perf::VrPerf>,
     /// Battery card: device icons from the user's SteamVR install.
     pub steamvr_icons: bool,
     /// What the presence shares.
@@ -330,7 +332,8 @@ pub struct DevView {
     /// Media theme: accent follows the album art while something plays.
     pub media_theme: bool,
     art_accent: Option<egui::Color32>,
-    art_for: String,
+    /// Background SMTC poller (spawned on first use).
+    media_worker: Option<media::MediaWorker>,
     /// Wrist toolbar: which of the 7 action buttons show (bit i).
     pub wrist_buttons: u8,
     /// Compact wrist contents (see `wrist::compact`).
@@ -359,7 +362,6 @@ pub struct DevView {
     notifications_received: u64,
     media: Option<MediaInfo>,
     demo_media: bool,
-    last_media_poll: Instant,
     chat_draft: String,
     pending_chat: Option<rsoverlay_osc::ChatMessage>,
 }
@@ -394,6 +396,7 @@ impl Default for DevView {
             notif: NotificationPrefs::default(),
             toasts_external: false,
             discord_presence: true,
+            vr_perf: None,
             steamvr_icons: true,
             discord: Default::default(),
             vr_hide_wrist: false,
@@ -439,7 +442,7 @@ impl Default for DevView {
             wrist_slot: 0,
             media_theme: false,
             art_accent: None,
-            art_for: String::new(),
+            media_worker: None,
             wrist_buttons: 0x7F,
             wrist_compact: rsoverlay_core::config::DEFAULT_WRIST_COMPACT,
             kb_prefs: KeyboardPrefs::default(),
@@ -455,7 +458,6 @@ impl Default for DevView {
             notifications_received: 0,
             media: None,
             demo_media: false,
-            last_media_poll: Instant::now() - Duration::from_secs(10),
             chat_draft: String::new(),
             pending_chat: None,
         }
@@ -601,7 +603,7 @@ impl DevView {
         }
         crate::widgets::frame(ctx, tabs, active, attach, linked, accent, |ui, k| match k {
             K::NowPlaying => media_card(ui, self.media.as_ref(), accent),
-            K::System => self.system.show(ui, self.last_fps, accent),
+            K::System => self.system.show(ui, self.vr_perf.as_ref(), accent),
             K::Volume => self.volume.show(ui, accent),
             K::Battery => crate::battery::card(ui, &self.batteries, &self.battery_est, &mut self.battery_warn_pct, &mut self.battery_sound, &mut self.steamvr_icons, &mut self.battery_osc, accent),
             K::Macros => self.macros.card(ui, injector, accent),
@@ -630,7 +632,7 @@ impl DevView {
         let media = self.media.as_ref().filter(|m| !m.title.is_empty());
         // System load only when a chip needs it: the sampler is a thread.
         use crate::wrist::compact as wc;
-        let wants_sys = self.wrist_editing || self.wrist_expanded || self.wrist_compact & (wc::PERF | wc::RAM) != 0;
+        let wants_sys = self.wrist_editing || self.wrist_expanded || self.wrist_compact & (wc::PERF | wc::RAM | wc::VRAM) != 0;
         let sys = if wants_sys { self.system.snapshot() } else { None };
         let data = crate::wrist::WristData {
             batteries: &self.batteries,
@@ -649,6 +651,7 @@ impl DevView {
             expanded: self.wrist_expanded,
             editing: self.wrist_editing,
             system: sys.as_ref(),
+            vr_perf: self.vr_perf.as_ref(),
             unread: self.unread,
         };
         let act = crate::wrist::show(ctx, &data);
@@ -829,17 +832,9 @@ impl DevView {
         if self.demo_media {
             return;
         }
-        if self.last_media_poll.elapsed() < Duration::from_millis(500) {
-            return;
-        }
-        self.last_media_poll = Instant::now();
-        self.media = media::poll();
-        // Media theme: recompute only when the track changes.
-        let title = self.media.as_ref().map(|m| m.title.clone()).unwrap_or_default();
-        if self.media_theme && title != self.art_for {
-            self.art_for = title;
-            self.art_accent = if self.art_for.is_empty() { None } else { media::art_color() };
-        }
+        // Off the UI thread: the media service can stall indefinitely.
+        let worker = self.media_worker.get_or_insert_with(media::MediaWorker::spawn);
+        (self.media, self.art_accent) = worker.latest(self.media_theme);
     }
 
     pub fn ui(&mut self, ctx: &egui::Context) {
@@ -1094,7 +1089,7 @@ impl DevView {
                         l.add_space(theme::GUTTER);
                     }
                     if self.show_system {
-                        self.system.show(l, self.last_fps, accent);
+                        self.system.show(l, self.vr_perf.as_ref(), accent);
                         l.add_space(theme::GUTTER);
                     }
                     if self.show_volume {
@@ -1736,7 +1731,8 @@ fn performance_card(
     use rsoverlay_sysinfo::format_bytes;
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        card_header(ui, icons::PULSE, "Stats", accent);
+        card_header(ui, icons::PULSE, "RSOverlay performance", accent);
+        ui.label(theme::body_muted("RSOverlay's own footprint, for the curious. Your PC and game: the PC performance card."));
         ui.add_space(8.0);
         let own = snap.map(|s| s.own).unwrap_or_default();
         let tiles = [
@@ -2009,7 +2005,7 @@ fn appearance_card(
             ui.checkbox(show_battery, "Battery");
             ui.checkbox(show_macros, "Macros");
             ui.checkbox(show_volume, "Volume");
-            ui.checkbox(show_system, "System");
+            ui.checkbox(show_system, "PC performance");
         });
         ui.add_space(8.0);
         // Language picker — shows the native-script name so a Russian

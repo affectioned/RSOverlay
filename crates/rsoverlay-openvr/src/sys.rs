@@ -148,6 +148,8 @@ pub const ETrackedControllerRole_RightHand: ETrackedControllerRole = 2;
 
 pub type ETrackedDeviceProperty = i32;
 pub const Prop_ModelNumber_String: ETrackedDeviceProperty = 1001;
+/// Headset refresh rate, Hz.
+pub const Prop_DisplayFrequency_Float: ETrackedDeviceProperty = 2002;
 /// Driver resource folder name, e.g. "indexcontroller".
 pub const Prop_ResourceRoot_String: ETrackedDeviceProperty = 1035;
 /// Icon SteamVR shows for the device when it's ready, e.g.
@@ -396,4 +398,86 @@ const _: () = {
     assert!(std::mem::offset_of!(IVRInputFnTable, GetPoseActionDataRelativeToNow) == 7 * P);
     assert!(std::mem::offset_of!(InputPoseActionData_t, pose) == 16);
     assert!(std::mem::size_of::<InputPoseActionData_t>() == 96);
+};
+
+// ── IVRCompositor (frame timing only) ──────────────────────────────────
+// Verbatim from ValveSoftware/openvr headers/openvr_capi.h,
+// `struct VR_IVRCompositor_FnTable`, IVRCompositor_029. We only call
+// GetFrameTimings (slot 11); earlier slots are opaque pointers so the
+// offsets match. Only the 029 table is requested: if the runtime doesn't
+// offer it, frame stats are simply unavailable (no layout guessing).
+
+pub const IVRCompositor_FnTable_Version: &[u8] = b"FnTable:IVRCompositor_029\0";
+
+#[repr(C)]
+#[allow(non_snake_case)]
+pub struct IVRCompositorFnTable {
+    pub SetTrackingSpace: *const c_void,                 // 0
+    pub GetTrackingSpace: *const c_void,                 // 1
+    pub WaitGetPoses: *const c_void,                     // 2
+    pub GetLastPoses: *const c_void,                     // 3
+    pub GetLastPoseForTrackedDeviceIndex: *const c_void, // 4
+    pub GetSubmitTexture: *const c_void,                 // 5
+    pub Submit: *const c_void,                           // 6
+    pub SubmitWithArrayIndex: *const c_void,             // 7
+    pub ClearLastSubmittedFrame: *const c_void,          // 8
+    pub PostPresentHandoff: *const c_void,               // 9
+    pub GetFrameTiming: unsafe extern "system" fn(pTiming: *mut Compositor_FrameTiming, unFramesAgo: u32) -> bool, // 10
+    pub GetFrameTimings: unsafe extern "system" fn(pTiming: *mut Compositor_FrameTiming, nFrames: u32) -> u32, // 11
+}
+
+/// `Compositor_FrameTiming` (natural alignment: no #pragma pack in the
+/// header for it). `m_nSize` must be set before the call.
+#[repr(C)]
+#[derive(Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct Compositor_FrameTiming {
+    pub m_nSize: u32,
+    pub m_nFrameIndex: u32,
+    pub m_nNumFramePresents: u32,
+    pub m_nNumMisPresented: u32,
+    pub m_nNumDroppedFrames: u32,
+    pub m_nReprojectionFlags: u32,
+    pub m_flSystemTimeInSeconds: f64,
+    pub m_flPreSubmitGpuMs: f32,
+    pub m_flPostSubmitGpuMs: f32,
+    pub m_flTotalRenderGpuMs: f32,
+    pub m_flCompositorRenderGpuMs: f32,
+    pub m_flCompositorRenderCpuMs: f32,
+    pub m_flCompositorIdleCpuMs: f32,
+    pub m_flClientFrameIntervalMs: f32,
+    pub m_flPresentCallCpuMs: f32,
+    pub m_flWaitForPresentCpuMs: f32,
+    pub m_flSubmitFrameMs: f32,
+    pub m_flWaitGetPosesCalledMs: f32,
+    pub m_flNewPosesReadyMs: f32,
+    pub m_flNewFrameReadyMs: f32,
+    pub m_flCompositorUpdateStartMs: f32,
+    pub m_flCompositorUpdateEndMs: f32,
+    pub m_flCompositorRenderStartMs: f32,
+    pub m_HmdPose: TrackedDevicePose_t,
+    pub m_nNumVSyncsReadyForUse: u32,
+    pub m_nNumVSyncsToFirstView: u32,
+    pub m_flTransferLatencyMs: f32,
+}
+
+impl Default for Compositor_FrameTiming {
+    fn default() -> Self {
+        // SAFETY: plain-old-data (ints, floats, bools inside the pose);
+        // all-zero is a valid value for every field.
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+const _: () = {
+    const P: usize = std::mem::size_of::<*const c_void>();
+    assert!(std::mem::offset_of!(IVRCompositorFnTable, GetFrameTiming) == 10 * P);
+    assert!(std::mem::offset_of!(IVRCompositorFnTable, GetFrameTimings) == 11 * P);
+    // 6 × u32, then the f64 at 24 (8-aligned), 16 × f32 → pose at 96,
+    // 80-byte pose → 176, 2 × u32 + f32 → 188, padded to 8 → 192.
+    assert!(std::mem::offset_of!(Compositor_FrameTiming, m_flSystemTimeInSeconds) == 24);
+    assert!(std::mem::offset_of!(Compositor_FrameTiming, m_flClientFrameIntervalMs) == 56);
+    assert!(std::mem::offset_of!(Compositor_FrameTiming, m_HmdPose) == 96);
+    assert!(std::mem::offset_of!(Compositor_FrameTiming, m_flTransferLatencyMs) == 184);
+    assert!(std::mem::size_of::<Compositor_FrameTiming>() == 192);
 };
