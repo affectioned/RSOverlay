@@ -121,10 +121,11 @@ macros, DPI-correct input, dock-anywhere panels. The VR preview's
 1. **Translate the UI** — route every string through the i18n tables,
    then translations checked by native speakers (the language picker is
    hidden until then).
-   - **Automatic language:** on first start, pick the UI language from
-     the user's Windows display language (falling back to English when
-     it isn't translated yet). Choosing a language in Settings overrides
-     it and is kept.
+   - **Automatic language:** on first start, use the language Windows
+     itself is displayed in (the Windows display / UI language), not the
+     user's region or location. Falls back to English when that language
+     isn't translated yet. Choosing a language in Settings overrides it
+     and is kept.
 
 ## Mid-term
 
