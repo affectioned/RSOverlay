@@ -45,6 +45,11 @@ struct Args {
     #[arg(long, alias = "desktop", conflicts_with_all = ["vr", "vr_preview"])]
     preview: bool,
 
+    /// Internal: started by the updater; wait for the old process (this
+    /// pid) to exit before starting.
+    #[arg(long, hide = true, value_name = "PID")]
+    after_update: Option<u32>,
+
     /// VR only: fail instead of falling back to the desktop window.
     #[arg(long, conflicts_with_all = ["preview", "vr_preview"])]
     vr: bool,
@@ -324,6 +329,12 @@ fn main() -> Result<()> {
 fn run_main() -> Result<()> {
 
     let args = Args::parse();
+    // Restarted by the updater: let the old copy close first (two copies
+    // would fight over SteamVR's overlay keys), then drop its old exe.
+    if let Some(pid) = args.after_update {
+        rsoverlay_core::update::wait_for_previous(pid);
+    }
+    rsoverlay_core::update::cleanup_after_update();
 
     // Per-monitor DPI awareness before anything reads coordinates: on a
     // scaled display (125 %/150 %) an unaware process gets virtualised

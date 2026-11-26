@@ -1122,6 +1122,14 @@ pub fn run(
                             seed_dev_view(&mut dev_view, &base, &TestHooks::default());
                             dev_view.reset_requested = false;
                         }
+                        if std::mem::take(&mut dev_view.updates.restart_requested) {
+                            persister.tick(&config_from_dev_view(&dev_view, &config_base));
+                            persister.flush();
+                            match rsoverlay_core::update::spawn_updated() {
+                                Ok(()) => elwt.exit(),
+                                Err(e) => warn!("restart after update: {e:#}"),
+                            }
+                        }
                         if std::mem::take(&mut dev_view.restart_elevated_requested) {
                             persister.tick(&config_from_dev_view(&dev_view, &config_base));
                             persister.flush();

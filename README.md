@@ -31,9 +31,11 @@ with mock window contents. See [docs/store](docs/store/README.md).</sub>
    starts in VR; otherwise it opens the desktop settings window. From then
    on SteamVR starts RSOverlay by itself (toggle it in SteamVR › Settings ›
    Startup / Shutdown). (`v0.1.0-beta.1` still needs `rsoverlay.exe --vr`.)
-3. RSOverlay tells you when a new version is out (Settings › Updates). It
-   never updates itself: you download the new zip when you want to. Testers
-   can turn on **Include test builds**.
+3. RSOverlay tells you when a new version is out (Settings › Updates) and
+   shows what's new. Nothing updates by itself: click **Install update** and
+   it downloads, checks and swaps in the new version, then restart when it
+   suits you (or grab the zip yourself). Testers can turn on **Include test
+   builds**.
 
 ## Why
 
@@ -188,9 +190,12 @@ Windows x64, Rust stable (edition 2021). Settings live in
 
 ## Privacy and security
 
-- No telemetry. The only things that go online: the update check (one
-  anonymous request to GitHub; switch it off in Settings › Updates) and
-  Discord Rich Presence if you turn it on
+- No telemetry. The only things that go online: the update check and,
+  when you click Install, the download (anonymous requests to GitHub;
+  switch checking off in Settings › Updates), and Discord Rich Presence
+  if you turn it on
+- Updates are verified against the release's SHA-256 checksum before
+  they're installed
 - The notification API binds `127.0.0.1` only
 - No clipboard history or capture: Copy / Paste only send the keystrokes
 - `unsafe` only at FFI boundaries; OpenVR vtable slots are pinned by

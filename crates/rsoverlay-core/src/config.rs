@@ -213,11 +213,14 @@ pub struct UpdatesCfg {
     pub prereleases: bool,
     /// A version the user chose to skip (its tag).
     pub skipped: String,
+    /// The version that ran last; a different one now means "just
+    /// updated" (shows what's new once).
+    pub last_version: String,
 }
 
 impl Default for UpdatesCfg {
     fn default() -> Self {
-        Self { check: true, prereleases: false, skipped: String::new() }
+        Self { check: true, prereleases: false, skipped: String::new(), last_version: String::new() }
     }
 }
 

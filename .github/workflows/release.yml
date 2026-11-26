@@ -47,6 +47,10 @@ jobs:
         run: |
           export RSO_VERSION="${GITHUB_REF_NAME#v}"
           export RSO_COMMIT="${GITHUB_SHA::7}"
+          # This version's notes, shown in-app as "What's new".
+          if [ -f "docs/releases/${GITHUB_REF_NAME}.md" ]; then
+            export RSO_NOTES="$(cat "docs/releases/${GITHUB_REF_NAME}.md")"
+          fi
           cargo build --release --locked -p rsoverlay-app
 
       - name: Package
@@ -59,7 +63,11 @@ jobs:
           cd dist
           7z a -tzip "$name.zip" "$name" > /dev/null
           sha256sum "$name.zip" > "$name.zip.sha256"
+          # The bare exe + checksum: what the in-app updater downloads.
+          cp "$name/rsoverlay.exe" "$name.exe"
+          sha256sum "$name.exe" > "$name.exe.sha256"
           echo "ASSET=dist/$name.zip" >> "$GITHUB_ENV"
+          echo "EXE=dist/$name.exe" >> "$GITHUB_ENV"
 
       - name: Publish
         shell: bash
@@ -76,7 +84,7 @@ jobs:
           else
             notes_arg=(--generate-notes)
           fi
-          gh release create "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" \
+          gh release create "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" "$EXE" "$EXE.sha256" \
             --title "RSOverlay $GITHUB_REF_NAME" "${notes_arg[@]}" $pre
 
   steam:
@@ -98,6 +106,9 @@ jobs:
         run: |
           export RSO_VERSION="${GITHUB_REF_NAME#v}"
           export RSO_COMMIT="${GITHUB_SHA::7}"
+          if [ -f "docs/releases/${GITHUB_REF_NAME}.md" ]; then
+            export RSO_NOTES="$(cat "docs/releases/${GITHUB_REF_NAME}.md")"
+          fi
           cargo build --release --locked -p rsoverlay-app --features steam
       - name: Stage depot
         shell: bash

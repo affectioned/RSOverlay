@@ -957,6 +957,15 @@ impl DevView {
         crate::laser::set_cursor_scale(self.vr_pointer_size);
         crate::locale::set_formats(&self.clock_format, &self.date_format);
         self.wrist_bg.tick();
+        if let Some(v) = self.updates.take_updated_notice() {
+            self.push_notification(Notification {
+                title: format!("Updated to RSOverlay {v}"),
+                content: "See what's new in Settings > Updates.".into(),
+                source_app: "RSOverlay".into(),
+                timeout: 8.0,
+                ..Default::default()
+            });
+        }
         if let Some(r) = self.updates.tick() {
             let kind = if r.prerelease { "Test build" } else { "Update" };
             self.push_notification(Notification {

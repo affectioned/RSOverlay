@@ -14,7 +14,14 @@ There are two channels:
 1. Set the version in the root `Cargo.toml` (`[workspace.package] version`).
 2. Write the release notes in `docs/releases/<tag>.md` (e.g.
    `docs/releases/v0.2.0-beta.1.md`), for testers and users, not a commit
-   list: install steps, what's new, what to test, known issues. Copy the
+   list: install steps, what's new, known issues, how to report problems
+   (no "please test" checklists: testers report what they find).
+   **Visual changes get screenshots**: render them (`--vr-preview --scene …
+   --screenshot`, `--settings-cards`, see `docs/store/README.md`), commit
+   them (refresh `docs/store/` or add `docs/releases/<tag>/`), and link them
+   with the URL pinned to the tag so the release keeps its own pictures:
+   `![Caption](https://raw.githubusercontent.com/affectioned/RSOverlay/<tag>/docs/store/<file>.png)`.
+   The in-app "What's new" skips image lines. Copy the
    shape of an earlier one. Commit both.
 3. Tag and push:
 

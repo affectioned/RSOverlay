@@ -1,10 +1,11 @@
-//! Update notifier (non-Steam builds): asks GitHub Releases whether a
-//! newer RSOverlay exists. It only *tells* the user; nothing is ever
-//! downloaded or installed automatically. Steam builds don't use this
-//! (Steam updates them).
+//! Updates (non-Steam builds): asks GitHub Releases whether a newer
+//! RSOverlay exists and, only when the user clicks Install, downloads the
+//! new exe, checks its SHA-256 against the release's checksum file and
+//! swaps it in. Nothing happens automatically. Steam builds don't use
+//! this (Steam updates them).
 //!
-//! Privacy: one anonymous HTTPS GET to api.github.com with a generic
-//! User-Agent. Nothing about the user or their machine is sent.
+//! Privacy: anonymous HTTPS GETs to github.com with a generic User-Agent.
+//! Nothing about the user or their machine is sent.
 
 /// GitHub `owner/repo` the releases come from.
 pub const REPO: &str = "affectioned/RSOverlay";
@@ -27,6 +28,13 @@ pub const CURRENT: &str = match option_env!("RSO_VERSION") {
 
 /// Short commit the build came from (release builds), if known.
 pub const COMMIT: Option<&str> = option_env!("RSO_COMMIT");
+
+/// This version's release notes (Markdown), built in by the release
+/// workflow so "What's new" works offline after an update.
+pub const NOTES: Option<&str> = option_env!("RSO_NOTES");
+
+/// Downloads must come from this repository's release assets.
+pub const DOWNLOAD_PREFIX: &str = "https://github.com/affectioned/RSOverlay/releases/download/";
 
 /// "RSOverlay 0.1.0-beta.3 (d8843e6)" — what to quote in a bug report.
 pub fn version_line() -> String {
@@ -51,6 +59,12 @@ pub struct Release {
     pub url: String,
     /// A tester (pre-release) build.
     pub prerelease: bool,
+    /// Release notes (Markdown), shown as "What's new".
+    pub notes: String,
+    /// The bare exe + its `.sha256` (releases from v0.2.0-beta.2 on).
+    /// `None` → the update can only be fetched from the release page.
+    pub exe_url: Option<String>,
+    pub sha_url: Option<String>,
 }
 
 /// Semver-ish version: major.minor.patch plus an optional pre-release
@@ -118,6 +132,11 @@ impl Ord for Version {
 /// `prereleases` is on. Links outside [`RELEASES_URL`] are rejected.
 pub fn newest_from_json(json: &str, current: &str, prereleases: bool) -> Option<Release> {
     #[derive(serde::Deserialize)]
+    struct Asset {
+        name: String,
+        browser_download_url: String,
+    }
+    #[derive(serde::Deserialize)]
     struct Gh {
         tag_name: String,
         html_url: String,
@@ -125,6 +144,10 @@ pub fn newest_from_json(json: &str, current: &str, prereleases: bool) -> Option<
         draft: bool,
         #[serde(default)]
         prerelease: bool,
+        #[serde(default)]
+        body: Option<String>,
+        #[serde(default)]
+        assets: Vec<Asset>,
     }
     let list: Vec<Gh> = serde_json::from_str(json).ok()?;
     let current = Version::parse(current)?;
@@ -134,14 +157,147 @@ pub fn newest_from_json(json: &str, current: &str, prereleases: bool) -> Option<
         .filter_map(|r| Version::parse(&r.tag_name).map(|v| (v, r)))
         .filter(|(v, _)| *v > current)
         .max_by(|a, b| a.0.cmp(&b.0))
-        .map(|(_, r)| Release { tag: r.tag_name, url: r.html_url, prerelease: r.prerelease })
+        .map(|(_, r)| {
+            let asset = |suffix: &str| {
+                r.assets
+                    .iter()
+                    .find(|a| a.name.ends_with(suffix) && a.browser_download_url.starts_with(DOWNLOAD_PREFIX))
+                    .map(|a| a.browser_download_url.clone())
+            };
+            let (exe_url, sha_url) = (asset("-windows-x64.exe"), asset("-windows-x64.exe.sha256"));
+            let both = exe_url.is_some() && sha_url.is_some();
+            Release {
+                notes: r.body.unwrap_or_default(),
+                exe_url: exe_url.filter(|_| both),
+                sha_url: sha_url.filter(|_| both),
+                tag: r.tag_name,
+                url: r.html_url,
+                prerelease: r.prerelease,
+            }
+        })
 }
 
 /// Ask GitHub for the newest release above this build. Blocking (run it
 /// off the UI thread); ~1 request, 10 s timeout.
 pub fn check(prereleases: bool) -> anyhow::Result<Option<Release>> {
-    let body = fetch(&format!("/repos/{REPO}/releases?per_page=20"))?;
-    Ok(newest_from_json(&body, CURRENT, prereleases))
+    let body = http_get("api.github.com", &format!("/repos/{REPO}/releases?per_page=20"), MAX_BODY, &mut |_, _| {})?;
+    Ok(newest_from_json(&String::from_utf8(body)?, CURRENT, prereleases))
+}
+
+/// Largest exe we'll download.
+const MAX_EXE: usize = 64 << 20;
+
+/// Download `r`'s exe, reporting (bytes so far, total if known), and
+/// check it against the release's SHA-256 file. Returns the verified
+/// bytes; nothing is written to disk.
+pub fn download(r: &Release, progress: &mut dyn FnMut(u64, Option<u64>)) -> anyhow::Result<Vec<u8>> {
+    let (Some(exe_url), Some(sha_url)) = (&r.exe_url, &r.sha_url) else {
+        anyhow::bail!("this release has no in-app download");
+    };
+    let sha_text = String::from_utf8(get_url(sha_url, 4096, &mut |_, _| {})?)?;
+    let want = parse_sha256(&sha_text).ok_or_else(|| anyhow::anyhow!("checksum file unreadable"))?;
+    let bytes = get_url(exe_url, MAX_EXE, progress)?;
+    let got = sha256(&bytes)?;
+    anyhow::ensure!(got == want, "download is damaged (checksum mismatch)");
+    anyhow::ensure!(bytes.starts_with(b"MZ"), "download isn't a Windows program");
+    Ok(bytes)
+}
+
+/// First 64-hex-digit token of a `sha256sum` / `certutil` style file.
+fn parse_sha256(text: &str) -> Option<[u8; 32]> {
+    let hex = text.split_whitespace().find(|t| t.len() == 64 && t.chars().all(|c| c.is_ascii_hexdigit()))?;
+    let mut out = [0u8; 32];
+    for (i, b) in out.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()?;
+    }
+    Some(out)
+}
+
+/// Swap the running exe for `bytes`: the current one is renamed to
+/// `rsoverlay.old.exe` (Windows allows renaming a running exe) and the new
+/// one written in its place. On any failure the original is put back.
+pub fn install(bytes: &[u8]) -> anyhow::Result<()> {
+    let exe = std::env::current_exe()?;
+    let old = exe.with_extension("old.exe");
+    let tmp = exe.with_extension("new.exe");
+    std::fs::write(&tmp, bytes).map_err(|e| anyhow::anyhow!("can't write next to {}: {e}", exe.display()))?;
+    let _ = std::fs::remove_file(&old);
+    if let Err(e) = std::fs::rename(&exe, &old) {
+        let _ = std::fs::remove_file(&tmp);
+        anyhow::bail!("can't replace {}: {e}", exe.display());
+    }
+    if let Err(e) = std::fs::rename(&tmp, &exe) {
+        let _ = std::fs::rename(&old, &exe);
+        let _ = std::fs::remove_file(&tmp);
+        anyhow::bail!("can't install the new version: {e}");
+    }
+    Ok(())
+}
+
+/// Remove the previous exe left by an update (call at startup).
+pub fn cleanup_after_update() {
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::fs::remove_file(exe.with_extension("old.exe"));
+        let _ = std::fs::remove_file(exe.with_extension("new.exe"));
+    }
+}
+
+/// Start the (new) exe with this process's arguments plus
+/// `--after-update <pid>`, so it waits for us to exit before starting
+/// (two copies would fight over the SteamVR overlay keys).
+pub fn spawn_updated() -> anyhow::Result<()> {
+    let exe = std::env::current_exe()?;
+    let mut args: Vec<String> = Vec::new();
+    let mut it = std::env::args().skip(1);
+    while let Some(a) = it.next() {
+        if a == "--after-update" {
+            it.next();
+        } else {
+            args.push(a);
+        }
+    }
+    std::process::Command::new(exe).args(args).arg("--after-update").arg(std::process::id().to_string()).spawn()?;
+    Ok(())
+}
+
+/// `--after-update <pid>`: wait (up to 15 s) for the old process to exit.
+pub fn wait_for_previous(pid: u32) {
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
+        // SAFETY: a process handle we own and close.
+        unsafe {
+            if let Ok(h) = OpenProcess(PROCESS_SYNCHRONIZE, false, pid) {
+                WaitForSingleObject(h, 15_000);
+                let _ = CloseHandle(h);
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = pid;
+}
+
+/// GET a full https:// URL (only this repo's release downloads).
+fn get_url(url: &str, max: usize, progress: &mut dyn FnMut(u64, Option<u64>)) -> anyhow::Result<Vec<u8>> {
+    anyhow::ensure!(url.starts_with(DOWNLOAD_PREFIX), "refusing to download from {url}");
+    let path = &url["https://github.com".len()..];
+    http_get("github.com", path, max, progress)
+}
+
+#[cfg(windows)]
+fn sha256(data: &[u8]) -> anyhow::Result<[u8; 32]> {
+    use windows::Win32::Security::Cryptography::{BCryptHash, BCRYPT_SHA256_ALG_HANDLE};
+    let mut out = [0u8; 32];
+    // SAFETY: CNG one-shot hash with the SHA-256 pseudo-handle (Win10+).
+    let st = unsafe { BCryptHash(BCRYPT_SHA256_ALG_HANDLE, None, data, &mut out) };
+    anyhow::ensure!(st.is_ok(), "SHA-256 failed: {st:?}");
+    Ok(out)
+}
+
+#[cfg(not(windows))]
+fn sha256(_data: &[u8]) -> anyhow::Result<[u8; 32]> {
+    anyhow::bail!("updates are Windows-only")
 }
 
 /// Open a release page in the default browser. Refuses anything that
@@ -181,11 +337,13 @@ fn open_url(_url: &str) -> bool {
     false
 }
 
-/// Largest response accepted (the release list is a few tens of KB).
+/// Largest API response accepted (the release list is a few tens of KB).
 const MAX_BODY: usize = 2 << 20;
 
+/// HTTPS GET `host` + `path` (redirects followed, e.g. to GitHub's
+/// download CDN), up to `max` bytes, reporting progress.
 #[cfg(windows)]
-fn fetch(path: &str) -> anyhow::Result<String> {
+fn http_get(host: &str, path: &str, max: usize, progress: &mut dyn FnMut(u64, Option<u64>)) -> anyhow::Result<Vec<u8>> {
     use windows::core::{w, HSTRING, PCWSTR};
     use windows::Win32::Networking::WinHttp::*;
 
@@ -212,8 +370,8 @@ fn fetch(path: &str) -> anyhow::Result<String> {
             WinHttpOpen(w!("RSOverlay-update-check"), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, PCWSTR::null(), PCWSTR::null(), 0),
             "WinHttpOpen",
         )?;
-        WinHttpSetTimeouts(session.0, 5_000, 5_000, 10_000, 10_000)?;
-        let conn = nonnull(WinHttpConnect(session.0, w!("api.github.com"), INTERNET_DEFAULT_HTTPS_PORT, 0), "WinHttpConnect")?;
+        WinHttpSetTimeouts(session.0, 5_000, 5_000, 15_000, 15_000)?;
+        let conn = nonnull(WinHttpConnect(session.0, &HSTRING::from(host), INTERNET_DEFAULT_HTTPS_PORT, 0), "WinHttpConnect")?;
         let req = nonnull(
             WinHttpOpenRequest(conn.0, w!("GET"), &HSTRING::from(path), PCWSTR::null(), PCWSTR::null(), std::ptr::null(), WINHTTP_FLAG_SECURE),
             "WinHttpOpenRequest",
@@ -232,8 +390,22 @@ fn fetch(path: &str) -> anyhow::Result<String> {
             std::ptr::null_mut(),
         )?;
         anyhow::ensure!(status == 200, "GitHub answered HTTP {status}");
+        // Content-Length, when the server sends it (for the progress bar).
+        let mut total = 0u32;
+        let mut len = std::mem::size_of::<u32>() as u32;
+        let total = WinHttpQueryHeaders(
+            req.0,
+            WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
+            PCWSTR::null(),
+            Some(&mut total as *mut u32 as *mut _),
+            &mut len,
+            std::ptr::null_mut(),
+        )
+        .ok()
+        .map(|()| u64::from(total));
         let mut body = Vec::new();
-        let mut buf = [0u8; 16 * 1024];
+        let mut buf = [0u8; 64 * 1024];
+        progress(0, total);
         loop {
             let mut read = 0u32;
             WinHttpReadData(req.0, buf.as_mut_ptr() as *mut _, buf.len() as u32, &mut read)?;
@@ -241,15 +413,16 @@ fn fetch(path: &str) -> anyhow::Result<String> {
                 break;
             }
             body.extend_from_slice(&buf[..read as usize]);
-            anyhow::ensure!(body.len() <= MAX_BODY, "response too large");
+            anyhow::ensure!(body.len() <= max, "response too large");
+            progress(body.len() as u64, total);
         }
-        Ok(String::from_utf8(body)?)
+        Ok(body)
     }
 }
 
 #[cfg(not(windows))]
-fn fetch(_path: &str) -> anyhow::Result<String> {
-    anyhow::bail!("update check is Windows-only")
+fn http_get(_host: &str, _path: &str, _max: usize, _progress: &mut dyn FnMut(u64, Option<u64>)) -> anyhow::Result<Vec<u8>> {
+    anyhow::bail!("updates are Windows-only")
 }
 
 #[cfg(test)]
@@ -267,6 +440,48 @@ mod tests {
         let list = r#"[{"tag_name":"v0.1.0-beta.3","html_url":"https://github.com/affectioned/RSOverlay/releases/tag/v0.1.0-beta.3","draft":false,"prerelease":true}]"#;
         assert!(newest_from_json(list, "0.1.0-beta.2", true).is_some());
         assert!(newest_from_json(list, "0.1.0", true).is_none());
+    }
+
+    #[test]
+    fn release_assets_and_notes_are_read_only_from_this_repo() {
+        let list = r##"[{"tag_name":"v9.0.0","html_url":"https://github.com/affectioned/RSOverlay/releases/tag/v9.0.0","body":"New\n- thing",
+            "assets":[
+              {"name":"RSOverlay-v9.0.0-windows-x64.exe","browser_download_url":"https://github.com/affectioned/RSOverlay/releases/download/v9.0.0/RSOverlay-v9.0.0-windows-x64.exe"},
+              {"name":"RSOverlay-v9.0.0-windows-x64.exe.sha256","browser_download_url":"https://github.com/affectioned/RSOverlay/releases/download/v9.0.0/RSOverlay-v9.0.0-windows-x64.exe.sha256"}]},
+          {"tag_name":"v8.0.0","html_url":"https://github.com/affectioned/RSOverlay/releases/tag/v8.0.0",
+            "assets":[
+              {"name":"RSOverlay-v8.0.0-windows-x64.exe","browser_download_url":"https://evil.example/x.exe"},
+              {"name":"RSOverlay-v8.0.0-windows-x64.exe.sha256","browser_download_url":"https://github.com/affectioned/RSOverlay/releases/download/v8.0.0/x.sha256"}]}]"##;
+        let r = newest_from_json(list, "1.0.0", false).unwrap();
+        assert_eq!(r.tag, "v9.0.0");
+        assert!(r.notes.contains("thing"));
+        assert!(r.exe_url.is_some() && r.sha_url.is_some());
+        // An off-site exe means no in-app install at all for that release.
+        let l8 = list.replace("v9.0.0", "v7.0.0");
+        let r8 = newest_from_json(&l8, "1.0.0", false).unwrap();
+        assert_eq!(r8.tag, "v8.0.0");
+        assert!(r8.exe_url.is_none() && r8.sha_url.is_none());
+    }
+
+    #[test]
+    fn checksum_files_parse() {
+        let h = "a".repeat(64);
+        assert_eq!(parse_sha256(&format!("{h}  RSOverlay.exe\n")).unwrap(), [0xaa; 32]);
+        assert!(parse_sha256("nope").is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sha256_matches_known_vector() {
+        // SHA-256("abc").
+        let d = sha256(b"abc").unwrap();
+        assert_eq!(d[..4], [0xba, 0x78, 0x16, 0xbf]);
+        assert_eq!(d[28..], [0xf2, 0x00, 0x15, 0xad]);
+    }
+
+    #[test]
+    fn downloads_refuse_other_hosts() {
+        assert!(get_url("https://evil.example/x.exe", 10, &mut |_, _| {}).is_err());
     }
 
     #[test]
@@ -319,5 +534,18 @@ mod live {
     fn live_check_reaches_github() {
         let r = super::check(true).expect("GitHub reachable");
         println!("newest above {}: {r:?}", super::CURRENT);
+    }
+
+    /// Real release-asset download through GitHub's redirect (run with --ignored).
+    #[test]
+    #[ignore]
+    fn live_download_follows_the_redirect() {
+        let url = "https://github.com/affectioned/RSOverlay/releases/download/v0.2.0-beta.1/RSOverlay-v0.2.0-beta.1-windows-x64.zip.sha256";
+        let mut seen = Vec::new();
+        let body = super::get_url(url, 4096, &mut |d, t| seen.push((d, t))).expect("downloaded");
+        let text = String::from_utf8(body).unwrap();
+        println!("{text}");
+        assert!(super::parse_sha256(&text).is_some());
+        assert!(!seen.is_empty());
     }
 }
