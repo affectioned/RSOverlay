@@ -64,9 +64,15 @@ pub struct Gamepads {
 
 impl Gamepads {
     pub fn poll(&mut self) -> u16 {
-        let rescan = self.rescan.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(2));
+        self.poll_with(std::time::Instant::now(), read)
+    }
+
+    /// [`Self::poll`] with the clock and the pad reader passed in (tests
+    /// feed a scripted fake pad).
+    pub fn poll_with(&mut self, now: std::time::Instant, mut read: impl FnMut(u32) -> Option<u16>) -> u16 {
+        let rescan = self.rescan.is_none_or(|t| now.duration_since(t) >= std::time::Duration::from_secs(2));
         if rescan {
-            self.rescan = Some(std::time::Instant::now());
+            self.rescan = Some(now);
         }
         let mut held = 0;
         for (slot, connected) in self.connected.iter_mut().enumerate() {
@@ -112,6 +118,63 @@ mod tests {
         assert!(!chord_pressed(b::BACK | b::LB, b::BACK | b::LB | b::A, chord));
         // Unset chord never fires.
         assert!(!chord_pressed(0, 0xFFFF, 0));
+    }
+
+    /// A scripted pad set: which slots are plugged in and what they hold;
+    /// counts how often each slot was asked.
+    struct FakePads {
+        held: [Option<u16>; 4],
+        asked: [u32; 4],
+    }
+
+    impl FakePads {
+        fn reader(&mut self) -> impl FnMut(u32) -> Option<u16> + '_ {
+            |slot| {
+                self.asked[slot as usize] += 1;
+                self.held[slot as usize]
+            }
+        }
+    }
+
+    #[test]
+    fn pads_combine_and_empty_slots_are_rescanned_only_every_two_seconds() {
+        let t0 = std::time::Instant::now();
+        let at = |ms| t0 + std::time::Duration::from_millis(ms);
+        let mut fake = FakePads { held: [Some(b::BACK), None, Some(b::LB), None], asked: [0; 4] };
+        let mut pads = Gamepads::default();
+        // First poll scans everything; two pads' buttons combine.
+        assert_eq!(pads.poll_with(at(0), fake.reader()), b::BACK | b::LB);
+        assert_eq!(fake.asked, [1, 1, 1, 1]);
+        // Next frames: only the connected slots are read.
+        for ms in [11, 22, 33] {
+            pads.poll_with(at(ms), fake.reader());
+        }
+        assert_eq!(fake.asked, [4, 1, 4, 1]);
+        // A pad plugged into slot 1 shows up at the 2 s rescan.
+        fake.held[1] = Some(b::A);
+        assert_eq!(pads.poll_with(at(1000), fake.reader()), b::BACK | b::LB);
+        assert_eq!(pads.poll_with(at(2100), fake.reader()), b::BACK | b::LB | b::A);
+        // Unplugged: dropped immediately.
+        fake.held[0] = None;
+        assert_eq!(pads.poll_with(at(2111), fake.reader()), b::LB | b::A);
+    }
+
+    #[test]
+    fn scripted_session_fires_each_shortcut_once() {
+        // Back+LB (dashboard) held for several frames, released, pressed again.
+        let chord = b::BACK | b::LB;
+        let frames = [0, b::BACK, chord, chord, chord, b::BACK, 0, chord, 0];
+        let mut prev = 0;
+        let fired: Vec<usize> = frames
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &now)| {
+                let f = chord_pressed(prev, now, chord);
+                prev = now;
+                f.then_some(i)
+            })
+            .collect();
+        assert_eq!(fired, [2, 7]);
     }
 
     #[test]

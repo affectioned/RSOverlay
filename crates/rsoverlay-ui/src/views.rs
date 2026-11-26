@@ -2781,3 +2781,56 @@ mod mute_tests {
         assert_eq!(dev.unread, 1);
     }
 }
+
+#[cfg(test)]
+mod gamepad_capture_tests {
+    use super::*;
+    use rsoverlay_input::gamepad::button as b;
+
+    /// Draw the Gamepad settings card once with `held` as the live pad state.
+    fn frame(ctx: &egui::Context, dev: &mut DevView, t: &mut f64, held: u16) {
+        dev.gamepad_held = held;
+        *t += 1.0 / 60.0;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 900.0))),
+            time: Some(*t),
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |c| {
+            egui::CentralPanel::default().show(c, |ui| {
+                gamepad_card(ui, &mut dev.gamepad, dev.gamepad_held, &mut dev.gamepad_capture, egui::Color32::WHITE);
+            });
+        });
+    }
+
+    #[test]
+    fn set_captures_the_combination_pressed_together() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut dev = DevView::default();
+        let mut t = 0.0;
+        dev.gamepad.enabled = true;
+        // "Set" on Recenter, then press Back, add Start, let go.
+        dev.gamepad_capture = Some((1, 0));
+        for held in [0, b::BACK, b::BACK | b::START, b::START, 0] {
+            frame(&ctx, &mut dev, &mut t, held);
+        }
+        assert_eq!(dev.gamepad.recenter, b::BACK | b::START);
+        assert_eq!(dev.gamepad_capture, None, "capture ends on release");
+        // The other shortcuts are untouched.
+        assert_eq!(dev.gamepad.dashboard, rsoverlay_core::config::GamepadCfg::default().dashboard);
+    }
+
+    #[test]
+    fn turning_shortcuts_off_cancels_a_capture() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut dev = DevView::default();
+        let mut t = 0.0;
+        dev.gamepad.enabled = false;
+        dev.gamepad_capture = Some((0, 0));
+        frame(&ctx, &mut dev, &mut t, b::A);
+        assert_eq!(dev.gamepad_capture, None);
+        assert_eq!(dev.gamepad.dashboard, rsoverlay_core::config::GamepadCfg::default().dashboard);
+    }
+}
