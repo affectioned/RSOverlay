@@ -1,11 +1,11 @@
 //! RSOverlay application entry point.
 //!
-//! Two run modes:
-//! - `--preview` (default): no HMD required. Opens a desktop window and
-//!   presents the overlay texture into it so the full pipeline can be
-//!   iterated on without SteamVR.
-//! - `--vr`: initializes OpenVR, registers an overlay, positions it 2m in
-//!   front of the HMD. Texture submission lands next milestone.
+//! Run modes:
+//! - no flag (default): VR when SteamVR and a headset are available,
+//!   otherwise the desktop window — so double-clicking the exe just works.
+//! - `--vr`: VR only (fails without SteamVR / a headset).
+//! - `--desktop` (alias `--preview`): the desktop window, no HMD needed.
+//! - `--vr-preview`: every VR panel in 3D on the desktop.
 //!
 //! A tokio runtime is started once in `main` and lives for the entire
 //! process. It hosts the notification websocket server (and any other async
@@ -36,11 +36,12 @@ use tracing_subscriber::EnvFilter;
 #[derive(Parser, Debug)]
 #[command(name = "rsoverlay", version, about = "Open-source SteamVR overlay")]
 struct Args {
-    /// Force desktop preview mode (no HMD required). Default.
-    #[arg(long, conflicts_with_all = ["vr", "vr_preview"])]
+    /// Desktop window (no headset needed). Without any mode flag,
+    /// RSOverlay picks VR when SteamVR and a headset are available.
+    #[arg(long, alias = "desktop", conflicts_with_all = ["vr", "vr_preview"])]
     preview: bool,
 
-    /// Run in SteamVR. Requires a running compositor + HMD.
+    /// VR only: fail instead of falling back to the desktop window.
     #[arg(long, conflicts_with_all = ["preview", "vr_preview"])]
     vr: bool,
 
@@ -217,8 +218,34 @@ impl Args {
             RuntimeMode::Vr
         } else if self.vr_preview {
             RuntimeMode::VrPreview
-        } else {
+        } else if self.preview || self.test_run() {
             RuntimeMode::Preview
+        } else if vr_ready() {
+            RuntimeMode::Vr
+        } else {
+            info!("SteamVR or a headset isn't available: opening the desktop window");
+            RuntimeMode::Preview
+        }
+    }
+
+    /// Screenshot / scripted runs stay on the desktop window.
+    fn test_run(&self) -> bool {
+        self.screenshot.is_some() || self.exit_after.is_some()
+    }
+}
+
+/// Can we run in VR right now? Probes OpenVR (runtime installed, a
+/// headset present, an overlay session starts), then shuts the probe
+/// down again; the real session is opened by `vr::run`.
+fn vr_ready() -> bool {
+    match rsoverlay_openvr::OpenVr::init() {
+        Ok(vr) => {
+            drop(vr);
+            true
+        }
+        Err(e) => {
+            info!("VR not available: {e}");
+            false
         }
     }
 }

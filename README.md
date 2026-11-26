@@ -27,8 +27,10 @@ with mock window contents. See [docs/store](docs/store/README.md).</sub>
 1. Download `RSOverlay-<version>-windows-x64.zip` from
    [Releases](https://github.com/affectioned/RSOverlay/releases) and unzip it
    anywhere.
-2. Start SteamVR, then run `rsoverlay.exe --vr`. From then on SteamVR starts
-   RSOverlay by itself (toggle it in SteamVR › Settings › Startup / Shutdown).
+2. Double-click `rsoverlay.exe`. With SteamVR and your headset available it
+   starts in VR; otherwise it opens the desktop settings window. From then
+   on SteamVR starts RSOverlay by itself (toggle it in SteamVR › Settings ›
+   Startup / Shutdown). (`v0.1.0-beta.1` still needs `rsoverlay.exe --vr`.)
 3. RSOverlay tells you when a new version is out (Settings › Updates). It
    never updates itself: you download the new zip when you want to. Testers
    can turn on **Include test builds**.
@@ -131,8 +133,9 @@ Bindings › RSOverlay.
 ## Run
 
 ```bash
-cargo run -p rsoverlay-app -- --vr           # SteamVR (needs SteamVR running)
-cargo run -p rsoverlay-app                   # desktop window + dev harness
+cargo run -p rsoverlay-app                   # VR if SteamVR + headset are available, else desktop
+cargo run -p rsoverlay-app -- --vr           # VR only
+cargo run -p rsoverlay-app -- --desktop      # desktop window + dev harness
 cargo run -p rsoverlay-app -- --vr-preview   # the headset view, on your desktop
 ```
 
@@ -147,12 +150,12 @@ design work doesn't need a headset. Keys **1–6** switch layout presets (work,
 gaming, social, dashboard, wrist compact, wrist expanded); drag to look,
 scroll to move, R resets the view.
 
-After the first `--vr` run, SteamVR launches RSOverlay automatically.
+After the first VR run, SteamVR launches RSOverlay automatically.
 
 ### Common flags
 
 ```
---vr / --preview / --vr-preview   mode (default: --preview)
+--vr / --desktop / --vr-preview   mode (default: VR when available, else desktop)
 --list-monitors / --list-windows  print capture sources and exit
 --monitor <idx>                   monitor to mirror in the preview (default 0)
 --window <title>                  mirror a window instead of a monitor
