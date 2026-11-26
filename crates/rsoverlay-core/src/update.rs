@@ -191,12 +191,25 @@ const MAX_EXE: usize = 64 << 20;
 /// check it against the release's SHA-256 file. Returns the verified
 /// bytes; nothing is written to disk.
 pub fn download(r: &Release, progress: &mut dyn FnMut(u64, Option<u64>)) -> anyhow::Result<Vec<u8>> {
+    download_via(r, &mut |url, max, p| get_url(url, max, p), progress)
+}
+
+/// A download transport: (url, max bytes, progress) → body. Real
+/// downloads use HTTPS to GitHub; tests pass a fake.
+pub type Transport<'a> = dyn FnMut(&str, usize, &mut dyn FnMut(u64, Option<u64>)) -> anyhow::Result<Vec<u8>> + 'a;
+
+/// [`download`] over any transport: URLs are checked against this repo's
+/// release downloads *before* the transport is asked for them.
+pub fn download_via(r: &Release, get: &mut Transport<'_>, progress: &mut dyn FnMut(u64, Option<u64>)) -> anyhow::Result<Vec<u8>> {
     let (Some(exe_url), Some(sha_url)) = (&r.exe_url, &r.sha_url) else {
         anyhow::bail!("this release has no in-app download");
     };
-    let sha_text = String::from_utf8(get_url(sha_url, 4096, &mut |_, _| {})?)?;
+    for u in [exe_url, sha_url] {
+        anyhow::ensure!(u.starts_with(DOWNLOAD_PREFIX), "refusing to download from {u}");
+    }
+    let sha_text = String::from_utf8(get(sha_url, 4096, &mut |_, _| {})?)?;
     let want = parse_sha256(&sha_text).ok_or_else(|| anyhow::anyhow!("checksum file unreadable"))?;
-    let bytes = get_url(exe_url, MAX_EXE, progress)?;
+    let bytes = get(exe_url, MAX_EXE, progress)?;
     let got = sha256(&bytes)?;
     anyhow::ensure!(got == want, "download is damaged (checksum mismatch)");
     anyhow::ensure!(bytes.starts_with(b"MZ"), "download isn't a Windows program");
@@ -217,7 +230,12 @@ fn parse_sha256(text: &str) -> Option<[u8; 32]> {
 /// `rsoverlay.old.exe` (Windows allows renaming a running exe) and the new
 /// one written in its place. On any failure the original is put back.
 pub fn install(bytes: &[u8]) -> anyhow::Result<()> {
-    let exe = std::env::current_exe()?;
+    install_at(&std::env::current_exe()?, bytes)
+}
+
+/// [`install`] for any exe path (tests use a throwaway copy).
+pub fn install_at(exe: &std::path::Path, bytes: &[u8]) -> anyhow::Result<()> {
+    let exe = exe.to_path_buf();
     let old = exe.with_extension("old.exe");
     let tmp = exe.with_extension("new.exe");
     std::fs::write(&tmp, bytes).map_err(|e| anyhow::anyhow!("can't write next to {}: {e}", exe.display()))?;
@@ -237,9 +255,14 @@ pub fn install(bytes: &[u8]) -> anyhow::Result<()> {
 /// Remove the previous exe left by an update (call at startup).
 pub fn cleanup_after_update() {
     if let Ok(exe) = std::env::current_exe() {
-        let _ = std::fs::remove_file(exe.with_extension("old.exe"));
-        let _ = std::fs::remove_file(exe.with_extension("new.exe"));
+        cleanup_at(&exe);
     }
+}
+
+/// [`cleanup_after_update`] for any exe path.
+pub fn cleanup_at(exe: &std::path::Path) {
+    let _ = std::fs::remove_file(exe.with_extension("old.exe"));
+    let _ = std::fs::remove_file(exe.with_extension("new.exe"));
 }
 
 /// Start the (new) exe with this process's arguments plus
@@ -247,17 +270,25 @@ pub fn cleanup_after_update() {
 /// (two copies would fight over the SteamVR overlay keys).
 pub fn spawn_updated() -> anyhow::Result<()> {
     let exe = std::env::current_exe()?;
-    let mut args: Vec<String> = Vec::new();
-    let mut it = std::env::args().skip(1);
+    std::process::Command::new(exe).args(restart_args(std::env::args().skip(1), std::process::id())).spawn()?;
+    Ok(())
+}
+
+/// The arguments the restarted copy gets: ours, minus any earlier
+/// `--after-update <pid>`, plus `--after-update <our pid>`.
+pub fn restart_args(args: impl IntoIterator<Item = String>, pid: u32) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut it = args.into_iter();
     while let Some(a) = it.next() {
         if a == "--after-update" {
             it.next();
         } else {
-            args.push(a);
+            out.push(a);
         }
     }
-    std::process::Command::new(exe).args(args).arg("--after-update").arg(std::process::id().to_string()).spawn()?;
-    Ok(())
+    out.push("--after-update".into());
+    out.push(pid.to_string());
+    out
 }
 
 /// `--after-update <pid>`: wait (up to 15 s) for the old process to exit.
@@ -547,5 +578,168 @@ mod live {
         println!("{text}");
         assert!(super::parse_sha256(&text).is_some());
         assert!(!seen.is_empty());
+    }
+}
+
+
+/// Sandbox tests for the whole updater: fake release server (transport),
+/// throwaway exe in a temp folder, real hashing / swapping / waiting.
+#[cfg(all(test, windows))]
+mod sandbox {
+    use super::*;
+    use std::path::PathBuf;
+
+    const BASE: &str = "https://github.com/affectioned/RSOverlay/releases/download/v9.9.9/";
+
+    fn release() -> Release {
+        Release {
+            tag: "v9.9.9".into(),
+            url: format!("{RELEASES_URL}/tag/v9.9.9"),
+            prerelease: true,
+            notes: String::new(),
+            exe_url: Some(format!("{BASE}RSOverlay-v9.9.9-windows-x64.exe")),
+            sha_url: Some(format!("{BASE}RSOverlay-v9.9.9-windows-x64.exe.sha256")),
+        }
+    }
+
+    /// A "new version": MZ header + filler, and its checksum file.
+    fn new_exe() -> (Vec<u8>, String) {
+        let mut exe = b"MZ".to_vec();
+        exe.extend((0..200_000u32).map(|i| (i % 251) as u8));
+        let hex: String = sha256(&exe).unwrap().iter().map(|b| format!("{b:02x}")).collect();
+        (exe, format!("{hex} *RSOverlay-v9.9.9-windows-x64.exe\n"))
+    }
+
+    /// Fake release server: serves `exe` / `sha` in 64 KB chunks with
+    /// progress, records what was asked for.
+    fn server<'a>(exe: &'a [u8], sha: &'a str, asked: &'a mut Vec<String>) -> Box<Transport<'a>> {
+        Box::new(move |url: &str, max: usize, progress: &mut dyn FnMut(u64, Option<u64>)| {
+            asked.push(url.to_string());
+            let body = if url.ends_with(".sha256") { sha.as_bytes() } else { exe };
+            anyhow::ensure!(body.len() <= max, "too large");
+            let total = Some(body.len() as u64);
+            for end in (0..=body.len()).step_by(64 * 1024).chain([body.len()]) {
+                progress(end as u64, total);
+            }
+            Ok(body.to_vec())
+        })
+    }
+
+    fn temp_install() -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("rso-updater-{}-{}", std::process::id(), rand_suffix()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("rsoverlay.exe");
+        std::fs::write(&exe, b"MZ old version").unwrap();
+        (dir, exe)
+    }
+
+    fn rand_suffix() -> u128 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    }
+
+    #[test]
+    fn full_update_flow_download_verify_swap_cleanup() {
+        let (exe_bytes, sha) = new_exe();
+        let mut asked = Vec::new();
+        let mut seen = Vec::new();
+        let bytes = {
+            let mut get = server(&exe_bytes, &sha, &mut asked);
+            download_via(&release(), &mut *get, &mut |d, t| seen.push((d, t))).expect("verified download")
+        };
+        assert_eq!(bytes, exe_bytes);
+        assert_eq!(asked.len(), 2, "checksum + exe");
+        assert!(asked[0].ends_with(".sha256"), "checksum fetched first");
+        // Progress ran from 0 to the full size, with the total known.
+        assert_eq!(seen.first(), Some(&(0, Some(exe_bytes.len() as u64))));
+        assert_eq!(seen.last(), Some(&(exe_bytes.len() as u64, Some(exe_bytes.len() as u64))));
+
+        let (dir, exe) = temp_install();
+        install_at(&exe, &bytes).expect("installed");
+        assert_eq!(std::fs::read(&exe).unwrap(), exe_bytes, "new version in place");
+        assert_eq!(std::fs::read(exe.with_extension("old.exe")).unwrap(), b"MZ old version", "old kept until restart");
+        assert!(!exe.with_extension("new.exe").exists());
+        // Next start tidies up.
+        cleanup_at(&exe);
+        assert!(!exe.with_extension("old.exe").exists());
+        assert!(exe.exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tampered_or_wrong_downloads_are_rejected() {
+        let (exe_bytes, sha) = new_exe();
+        // One byte changed in transit.
+        let mut bad = exe_bytes.clone();
+        bad[1000] ^= 1;
+        let mut asked = Vec::new();
+        let mut get = server(&bad, &sha, &mut asked);
+        let e = download_via(&release(), &mut *get, &mut |_, _| {}).unwrap_err();
+        assert!(e.to_string().contains("checksum"), "{e}");
+
+        // Matching checksum, but not a Windows program.
+        let junk = b"not an exe".to_vec();
+        let hex: String = sha256(&junk).unwrap().iter().map(|b| format!("{b:02x}")).collect();
+        let mut asked = Vec::new();
+        let mut get = server(&junk, &hex, &mut asked);
+        assert!(download_via(&release(), &mut *get, &mut |_, _| {}).is_err());
+
+        // Unreadable checksum file.
+        let mut asked = Vec::new();
+        let mut get = server(&exe_bytes, "garbage", &mut asked);
+        assert!(download_via(&release(), &mut *get, &mut |_, _| {}).is_err());
+    }
+
+    #[test]
+    fn off_site_urls_never_reach_the_transport() {
+        let mut r = release();
+        r.exe_url = Some("https://evil.example/RSOverlay.exe".into());
+        let called = std::cell::Cell::new(false);
+        let mut get = |_: &str, _: usize, _: &mut dyn FnMut(u64, Option<u64>)| -> anyhow::Result<Vec<u8>> {
+            called.set(true);
+            Ok(Vec::new())
+        };
+        assert!(download_via(&r, &mut get, &mut |_, _| {}).is_err());
+        // No assets at all: nothing to download.
+        let mut r = release();
+        r.exe_url = None;
+        assert!(download_via(&r, &mut get, &mut |_, _| {}).is_err());
+        assert!(!called.get(), "the transport was never asked");
+    }
+
+    #[test]
+    fn failed_swap_leaves_the_original_untouched() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let (dir, exe) = temp_install();
+        // Hold the exe open without FILE_SHARE_DELETE: renaming it fails,
+        // like an exe locked by antivirus or another process.
+        let lock = std::fs::OpenOptions::new().read(true).share_mode(0).open(&exe).unwrap();
+        let e = install_at(&exe, b"MZ new").unwrap_err();
+        drop(lock);
+        assert!(e.to_string().contains("can't replace"), "{e}");
+        assert_eq!(std::fs::read(&exe).unwrap(), b"MZ old version", "original intact");
+        assert!(!exe.with_extension("new.exe").exists(), "temp file removed");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn restart_args_carry_ours_and_replace_the_wait_pid() {
+        let args = ["--vr", "--after-update", "111", "--no-osc"].map(String::from);
+        assert_eq!(restart_args(args, 222), ["--vr", "--no-osc", "--after-update", "222"].map(String::from));
+    }
+
+    #[test]
+    fn restarted_copy_waits_for_the_old_one_to_exit() {
+        // A real process that lives ~1 s.
+        let mut child = std::process::Command::new("cmd").args(["/C", "ping -n 2 127.0.0.1 >NUL"]).spawn().unwrap();
+        let t = std::time::Instant::now();
+        wait_for_previous(child.id());
+        let waited = t.elapsed();
+        let _ = child.wait();
+        assert!(waited >= std::time::Duration::from_millis(500), "returned before the process exited: {waited:?}");
+        assert!(waited < std::time::Duration::from_secs(10));
+        // A pid that's gone: no wait at all.
+        let t = std::time::Instant::now();
+        wait_for_previous(u32::MAX - 7);
+        assert!(t.elapsed() < std::time::Duration::from_millis(200));
     }
 }

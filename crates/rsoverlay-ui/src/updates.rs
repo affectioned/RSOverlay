@@ -111,9 +111,20 @@ fn set<T>(slot: &Mutex<T>, v: T) {
 }
 
 fn run_install(s: &Shared, r: &Release) {
-    let result = update::download(r, &mut |done, total| set(&s.install, Install::Downloading { done, total })).and_then(|bytes| {
+    run_install_with(s, r, update::download, update::install);
+}
+
+/// The install steps, with the download / swap passed in (tests fake
+/// them; the app uses the real ones).
+fn run_install_with(
+    s: &Shared,
+    r: &Release,
+    download: impl FnOnce(&Release, &mut dyn FnMut(u64, Option<u64>)) -> anyhow::Result<Vec<u8>>,
+    install: impl FnOnce(&[u8]) -> anyhow::Result<()>,
+) {
+    let result = download(r, &mut |done, total| set(&s.install, Install::Downloading { done, total })).and_then(|bytes| {
         set(&s.install, Install::Installing);
-        update::install(&bytes)
+        install(&bytes)
     });
     match result {
         Ok(()) => {
@@ -361,6 +372,53 @@ pub fn notes_ui(ui: &mut egui::Ui, md: &str, id: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn release() -> Release {
+        Release { tag: "v9.9.9".into(), url: String::new(), prerelease: true, notes: String::new(), exe_url: None, sha_url: None }
+    }
+
+    fn state(s: &Shared) -> Install {
+        s.install.lock().unwrap().clone()
+    }
+
+    #[test]
+    fn install_walks_download_progress_then_ready() {
+        let s = Shared::default();
+        let mut mid = None;
+        run_install_with(
+            &s,
+            &release(),
+            |_, progress| {
+                progress(5, Some(10));
+                mid = Some(state(&s));
+                progress(10, Some(10));
+                Ok(b"MZ new".to_vec())
+            },
+            |bytes| {
+                assert_eq!(bytes, b"MZ new");
+                assert_eq!(state(&s), Install::Installing, "installing shown while swapping");
+                Ok(())
+            },
+        );
+        assert_eq!(mid, Some(Install::Downloading { done: 5, total: Some(10) }), "progress reaches the card");
+        assert_eq!(state(&s), Install::Ready("v9.9.9".into()));
+    }
+
+    #[test]
+    fn install_failures_end_in_failed_and_skip_the_swap() {
+        let s = Shared::default();
+        let mut swapped = false;
+        run_install_with(&s, &release(), |_, _| Err(anyhow::anyhow!("download is damaged (checksum mismatch)")), |_| {
+            swapped = true;
+            Ok(())
+        });
+        assert!(!swapped, "a bad download is never installed");
+        assert!(matches!(state(&s), Install::Failed(e) if e.contains("checksum")));
+
+        let s = Shared::default();
+        run_install_with(&s, &release(), |_, _| Ok(b"MZ".to_vec()), |_| Err(anyhow::anyhow!("can't replace")));
+        assert!(matches!(state(&s), Install::Failed(e) if e.contains("replace")));
+    }
 
     #[test]
     fn notice_only_once_and_only_after_a_real_version_change() {
