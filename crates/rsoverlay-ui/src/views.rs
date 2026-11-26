@@ -1778,11 +1778,14 @@ pub struct PointerPrefs {
     /// Windows get touch input (the trigger is a finger) instead of
     /// mouse clicks.
     pub touch_input: bool,
+    /// Experimental: the game doesn't get controller input while the
+    /// laser is on a panel.
+    pub block_game_input: bool,
 }
 
 impl Default for PointerPrefs {
     fn default() -> Self {
-        Self { long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, mouse_follows: true, touch_input: false }
+        Self { long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, mouse_follows: true, touch_input: false, block_game_input: false }
     }
 }
 
@@ -1926,6 +1929,8 @@ fn pointer_card(ui: &mut egui::Ui, smoothing: &mut f32, scroll: &mut f32, ptr: &
         })
         .response
         .on_hover_text("Steadier panels while you carry them (higher = calmer, a little more lag)");
+        ui.checkbox(&mut ptr.block_game_input, "Block game input while pointing (experimental)")
+            .on_hover_text("While your laser is on a panel, the game doesn't get your trigger / button presses (no accidental shots or menu clicks). Uses SteamVR's laser-mouse mode, which may show SteamVR's own pointer too. Please report how it behaves.");
         ui.checkbox(&mut ptr.touch_input, "Touch input for windows")
             .on_hover_text("The trigger touches the window like a finger (tap, drag, swipe) instead of clicking a mouse. For touch-friendly apps; right / middle click and scrolling still use the mouse.");
         ui.checkbox(&mut ptr.mouse_follows, "Mouse follows the laser")

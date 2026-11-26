@@ -69,7 +69,10 @@ pub struct IVROverlayFnTable {
     pub FindOverlay: unsafe extern "system" fn(pchOverlayKey: *const c_char, pOverlayHandle: *mut VROverlayHandle_t) -> EVROverlayError,
     pub CreateOverlay: unsafe extern "system" fn(pchOverlayKey: *const c_char, pchOverlayName: *const c_char, pOverlayHandle: *mut VROverlayHandle_t) -> EVROverlayError,
     pub DestroyOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
-    pub _pad_01: [*const c_void; 10], // 3..=12
+    pub _pad_01: [*const c_void; 7], // 3..=9
+    /// `VROverlayFlags` is a C enum (int-sized).
+    pub SetOverlayFlag: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, eOverlayFlag: i32, bEnabled: bool) -> EVROverlayError, // 10
+    pub _pad_01a: [*const c_void; 2], // 11..=12
     pub SetOverlayColor: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fRed: f32, fGreen: f32, fBlue: f32) -> EVROverlayError, // 13
     pub _pad_01b: [*const c_void; 1], // 14 GetOverlayColor
     pub SetOverlayAlpha: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fAlpha: f32) -> EVROverlayError, // 15
@@ -104,6 +107,7 @@ pub struct IVROverlayFnTable {
 const _: () = {
     const P: usize = std::mem::size_of::<*const c_void>();
     assert!(std::mem::offset_of!(IVROverlayFnTable, DestroyOverlay) == 2 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayFlag) == 10 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayColor) == 13 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayAlpha) == 15 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayTexelAspect) == 17 * P);
@@ -134,6 +138,11 @@ pub type FnVR_GetGenericInterface = unsafe extern "system" fn(pchInterfaceVersio
 // `ComputeDistortionSet` at slot 4 and shifts everything after it, so we
 // pin the request string to 022 — every SteamVR since 2019 serves it.
 // ---------------------------------------------------------------------------
+
+/// `VROverlayFlags_MakeOverlaysInteractiveIfVisible`: while such an
+/// overlay is visible SteamVR enters laser-mouse mode and the game loses
+/// input focus.
+pub const VROverlayFlags_MakeOverlaysInteractiveIfVisible: i32 = 65536;
 
 pub const IVRSystem_FnTable_Version: &[u8] = b"FnTable:IVRSystem_022\0";
 

@@ -304,6 +304,14 @@ impl<'a> Overlay<'a> {
         check(r, "HideOverlay")
     }
 
+    /// Block / unblock the game's controller input while this overlay is
+    /// visible (`MakeOverlaysInteractiveIfVisible`).
+    pub fn set_input_capture(&self, handle: VROverlayHandle_t, on: bool) -> Result<(), OpenVrError> {
+        // SAFETY: IVROverlay_024 slot 10 (pinned in sys.rs).
+        let r = unsafe { (self.table().SetOverlayFlag)(handle, sys::VROverlayFlags_MakeOverlaysInteractiveIfVisible, on) };
+        check(r, "SetOverlayFlag")
+    }
+
     /// SteamVR's own dashboard (system menu) is open.
     pub fn is_dashboard_visible(&self) -> bool {
         // SAFETY: IVROverlay_024 slot 64 (pinned in sys.rs), no arguments.

@@ -992,6 +992,9 @@ mod imp {
         let mut device_icons = crate::device_icons::DeviceIcons::default();
         // Focus mode: the window being worked in (by seq).
         let mut focus_win: Option<u32> = None;
+        // Block game input: the panel whose overlay currently carries the
+        // input-capture flag.
+        let mut capture_on: Option<rsoverlay_openvr::VROverlayHandle_t> = None;
         // Gamepad shortcuts (only polled while enabled).
         let mut gamepads = rsoverlay_input::gamepad::Gamepads::default();
         let mut pad_prev: u16 = 0;
@@ -1467,6 +1470,31 @@ mod imp {
                         smp.stick_y = 0.0;
                     }
                 }
+            }
+
+            // ── Block game input while the laser is on a panel (opt-in):
+            // the flag sits only on the panel being pointed at.
+            let want_capture = dev_view
+                .pointer
+                .block_game_input
+                .then(|| hand_hit.iter().flatten().next().map(|(i, _)| *i))
+                .flatten()
+                .map(|i| match i {
+                    0 => wrist.handle,
+                    1 => dash.handle,
+                    2 => kb.handle,
+                    k => wins[k - WIN0].panel.handle,
+                });
+            if want_capture != capture_on {
+                if let Some(h) = capture_on {
+                    let _ = overlay.set_input_capture(h, false);
+                }
+                if let Some(h) = want_capture {
+                    if let Err(e) = overlay.set_input_capture(h, true) {
+                        warn!("block game input: {e:#}");
+                    }
+                }
+                capture_on = want_capture;
             }
 
             // ── Laser beams: drawn while a hand points at any panel; bright
