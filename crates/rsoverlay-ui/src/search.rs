@@ -65,6 +65,7 @@ fn static_entries() -> Vec<Entry> {
         card("Vibration", "Settings › Pointer", "haptics vibration rumble strength off", Settings, "Pointer"),
         card("Grab smoothing", "Settings › Pointer", "grab dampening smoothing shaky tremor sensitivity", Settings, "Pointer"),
         card("Pointer size", "Settings › Accessibility", "cursor laser dot beam size big", Settings, "Accessibility"),
+        card("Gamepad shortcuts", "Settings › Gamepad", "gamepad xbox controller xinput sim flight racing joystick shortcut", Settings, "Gamepad"),
         card("Updates", "Settings > Updates", "update new version release download upgrade beta test build", Settings, "Updates"),
         card("Placement", "Settings", "position offset size curve curvature opacity anchor", Settings, "Placement"),
         card("RSOverlay performance", "Settings › RSOverlay performance", "overlay fps frame time own footprint memory light fast", Settings, "RSOverlay performance"),
@@ -167,7 +168,7 @@ mod tests {
         for e in static_entries() {
             if let Target::Card(_, cap) = e.target {
                 assert!(
-                    ["Appearance", "Night light", "VR", "VR panels", "Updates", "Pointer", "Wrist toolbar", "Accessibility", "Administrator", "Reset", "Placement", "RSOverlay performance",
+                    ["Appearance", "Night light", "VR", "VR panels", "Gamepad", "Updates", "Pointer", "Wrist toolbar", "Accessibility", "Administrator", "Reset", "Placement", "RSOverlay performance",
                         "Volume", "Now playing", "VRChat chatbox", "Macros", "Notifications", "Battery", "PC performance"]
                         .contains(&cap),
                     "{cap}"

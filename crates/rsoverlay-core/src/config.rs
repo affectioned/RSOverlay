@@ -23,6 +23,8 @@ pub struct Config {
     pub discord: DiscordCfg,
     /// Update notifier (GitHub builds only; Steam updates itself).
     pub updates: UpdatesCfg,
+    /// Gamepad (XInput) shortcuts.
+    pub gamepad: GamepadCfg,
     /// Virtual StreamDeck buttons. Serialized as `[[macros]]` tables.
     /// Must stay the last field: TOML arrays of tables have to follow
     /// every plain table in the document.
@@ -170,6 +172,24 @@ impl Default for NotificationsCfg {
             sound_low_battery: "builtin".into(),
             muted_apps: Vec::new(),
         }
+    }
+}
+
+/// Gamepad shortcuts: XInput button chords (bit masks, 0 = unset).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GamepadCfg {
+    /// Off by default: never react to a game's controller unless asked.
+    pub enabled: bool,
+    pub dashboard: u16,
+    pub recenter: u16,
+    pub keyboard: u16,
+}
+
+impl Default for GamepadCfg {
+    fn default() -> Self {
+        // Back + LB / Back + RB / Back + Y.
+        Self { enabled: false, dashboard: 0x0120, recenter: 0x0220, keyboard: 0x8020 }
     }
 }
 

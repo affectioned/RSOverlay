@@ -988,6 +988,9 @@ mod imp {
         let mut device_icons = crate::device_icons::DeviceIcons::default();
         // Focus mode: the window being worked in (by seq).
         let mut focus_win: Option<u32> = None;
+        // Gamepad shortcuts (only polled while enabled).
+        let mut gamepads = rsoverlay_input::gamepad::Gamepads::default();
+        let mut pad_prev: u16 = 0;
         // SteamVR frame timing (game fps, GPU time, reprojection). Only the
         // layout-verified compositor table is used; None = no VR stats.
         let compositor = vr.compositor().map_err(|e| info!("frame stats unavailable: {e}")).ok();
@@ -1554,6 +1557,17 @@ mod imp {
                     laser::paint_cursor(ctx, cursor, accent);
                 });
             }
+            // Gamepad shortcuts drive the same actions as the wrist.
+            let pad_now = if dev_view.gamepad.enabled { gamepads.poll() } else { 0 };
+            dev_view.gamepad_held = pad_now;
+            {
+                use rsoverlay_input::gamepad::chord_pressed;
+                let g = &dev_view.gamepad;
+                act.toggle_dashboard |= chord_pressed(pad_prev, pad_now, g.dashboard);
+                act.recenter |= chord_pressed(pad_prev, pad_now, g.recenter);
+                act.toggle_keyboard ^= chord_pressed(pad_prev, pad_now, g.keyboard);
+            }
+            pad_prev = pad_now;
             toggle_dash |= act.toggle_dashboard;
             if act.toggle_keyboard {
                 dev_view.show_keyboard = !dev_view.show_keyboard;

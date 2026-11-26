@@ -269,6 +269,12 @@ pub struct DevView {
     pub toasts_external: bool,
     /// Settings › Discord: show RSOverlay on the Discord profile.
     pub discord_presence: bool,
+    /// Gamepad shortcuts (Settings › Gamepad).
+    pub gamepad: rsoverlay_core::config::GamepadCfg,
+    /// Buttons held on any gamepad right now (set by the VR app).
+    pub gamepad_held: u16,
+    /// "Set" pressed for shortcut i: buttons collected so far.
+    gamepad_capture: Option<(usize, u16)>,
     /// Focus mode (wrist): notifications go to history without a toast
     /// or sound, and windows you aren't looking at dim. Session only.
     pub focus_mode: bool,
@@ -429,6 +435,9 @@ impl Default for DevView {
             vr_perf: None,
             updates: Default::default(),
             focus_mode: false,
+            gamepad: Default::default(),
+            gamepad_held: 0,
+            gamepad_capture: None,
             steamvr_icons: true,
             discord: Default::default(),
             vr_hide_wrist: false,
@@ -841,47 +850,51 @@ impl DevView {
                         Some("vr-panels")
                     }
                     4 => {
+                        gamepad_card(ui, &mut self.gamepad, self.gamepad_held, &mut self.gamepad_capture, accent);
+                        Some("gamepad")
+                    }
+                    5 => {
                         pointer_card(ui, &mut self.cursor_smoothing, &mut self.scroll_speed, &mut self.pointer, accent);
                         Some("pointer")
                     }
-                    5 => {
+                    6 => {
                         keyboard_card(ui, &mut self.kb_prefs, accent);
                         Some("keyboard")
                     }
-                    6 => {
+                    7 => {
                         notifications_card(ui, &mut self.notif, &mut self.pending_sounds, accent);
                         Some("notifications")
                     }
-                    7 => {
+                    8 => {
                         wrist_toolbar_card(ui, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, &mut self.clock_format, &mut self.date_format, accent);
                         Some("wrist-toolbar")
                     }
-                    8 => {
+                    9 => {
                         accessibility_card(ui, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.vr_pointer_size, &mut self.reduce_motion, accent);
                         Some("accessibility")
                     }
-                    9 => {
+                    10 => {
                         let _ = admin_card(ui, &mut self.run_as_admin, self.elevated, accent);
                         Some("administrator")
                     }
-                    10 => {
+                    11 => {
                         placement_card(ui, &mut self.placement, accent);
                         Some("placement")
                     }
-                    11 => {
+                    12 => {
                         let snap = self.system.snapshot();
                         performance_card(ui, snap.as_ref(), self.frame_ms, &self.frame_ms_hist, self.last_fps, self.notifications_received, accent);
                         Some("stats")
                     }
-                    12 => {
+                    13 => {
                         discord_card(ui, &mut self.discord_presence, &mut self.discord, accent);
                         Some("discord")
                     }
-                    13 => {
+                    14 => {
                         self.updates.card(ui, accent);
                         Some("updates")
                     }
-                    14 => {
+                    15 => {
                         let _ = reset_card(ui, &mut self.reset_armed_at);
                         Some("reset")
                     }
@@ -1283,6 +1296,8 @@ impl DevView {
                     l.add_space(theme::GUTTER);
                     vr_panels_card(l, &mut self.vr_windows_follow_dash, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, accent);
                     l.add_space(theme::GUTTER);
+                    gamepad_card(l, &mut self.gamepad, self.gamepad_held, &mut self.gamepad_capture, accent);
+                    l.add_space(theme::GUTTER);
                     pointer_card(l, &mut self.cursor_smoothing, &mut self.scroll_speed, &mut self.pointer, accent);
                     l.add_space(theme::GUTTER);
                     keyboard_card(l, &mut self.kb_prefs, accent);
@@ -1468,6 +1483,71 @@ fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opac
         });
         ui.checkbox(hide_wrist, "Hide wrist toolbar")
             .on_hover_text("No wrist overlay at all. Open the dashboard with a double-press of A / X (or the menu button) on the wrist hand.");
+    });
+}
+
+/// Gamepad (XInput) shortcuts, with "Set" capture: press the buttons
+/// together, let go, and that combination is saved.
+fn gamepad_card(
+    ui: &mut egui::Ui,
+    pad: &mut rsoverlay_core::config::GamepadCfg,
+    held: u16,
+    capture: &mut Option<(usize, u16)>,
+    accent: egui::Color32,
+) {
+    use rsoverlay_input::gamepad::chord_name;
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::CONTROLLER, "Gamepad", accent);
+        ui.add_space(6.0);
+        ui.checkbox(&mut pad.enabled, "Gamepad shortcuts")
+            .on_hover_text("For sims and seated play with a controller: button combinations that open the dashboard, recenter or show the keyboard. Off by default so your game's controls are never touched.");
+        // Capture: collect everything pressed until all buttons are let go.
+        if let Some((i, acc)) = capture.as_mut() {
+            if held != 0 {
+                *acc |= held;
+            } else if *acc != 0 {
+                let chord = *acc;
+                match *i {
+                    0 => pad.dashboard = chord,
+                    1 => pad.recenter = chord,
+                    _ => pad.keyboard = chord,
+                }
+                *capture = None;
+            }
+        }
+        ui.add_enabled_ui(pad.enabled, |ui| {
+            let capturing = capture.map(|(i, _)| i);
+            for (i, label) in ["Dashboard", "Recenter", "Keyboard"].into_iter().enumerate() {
+                let chord = [pad.dashboard, pad.recenter, pad.keyboard][i];
+                ui.horizontal(|ui| {
+                    ui.label(theme::body_muted(label));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if capturing == Some(i) {
+                            if ui.button("Cancel").clicked() {
+                                *capture = None;
+                            }
+                            ui.label(egui::RichText::new("press the buttons together…").color(accent));
+                        } else {
+                            if ui.button("Set").on_hover_text("Then press the buttons together on your gamepad").clicked() {
+                                *capture = Some((i, 0));
+                            }
+                            if chord != 0 && ui.button("Clear").clicked() {
+                                match i {
+                                    0 => pad.dashboard = 0,
+                                    1 => pad.recenter = 0,
+                                    _ => pad.keyboard = 0,
+                                }
+                            }
+                            ui.label(egui::RichText::new(chord_name(chord)).monospace());
+                        }
+                    });
+                });
+            }
+        });
+        if pad.enabled && held != 0 {
+            ui.label(theme::caption(&format!("Pressed now: {}", chord_name(held))));
+        }
     });
 }
 

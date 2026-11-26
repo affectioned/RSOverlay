@@ -188,6 +188,7 @@ pub fn seed_dev_view(
     dev.steamvr_icons = cfg.appearance.steamvr_icons;
     dev.discord = cfg.discord.clone();
     dev.updates.prefs = cfg.updates.clone();
+    dev.gamepad = cfg.gamepad.clone();
     if test.show_keyboard {
         dev.show_keyboard = true;
     }
@@ -350,6 +351,7 @@ pub fn config_from_dev_view(
     out.vr_state = dev.vr_state.clone();
     out.discord = dev.discord.clone();
     out.updates = dev.updates.prefs.clone();
+    out.gamepad = dev.gamepad.clone();
     let [n, w, e, b] = dev.notif.sounds.clone();
     out.notifications = rsoverlay_core::config::NotificationsCfg {
         size_m: dev.notif.size_m,
@@ -1453,6 +1455,7 @@ mod config_roundtrip_tests {
             sound_low_battery: "none".into(),
             muted_apps: vec!["VRCX".into()],
         };
+        c.gamepad = rsoverlay_core::config::GamepadCfg { enabled: true, dashboard: 0x0030, recenter: 0, keyboard: 0x1000 };
         c.macros = Macros(vec![Macro { label: "Mute".into(), keys: "ctrl+m".into() }]);
         c
     }

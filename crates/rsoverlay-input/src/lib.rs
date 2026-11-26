@@ -25,6 +25,7 @@ pub struct MonitorGeom {
 }
 
 pub mod elevation;
+pub mod gamepad;
 pub mod physical;
 pub mod shortcut;
 
