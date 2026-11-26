@@ -36,6 +36,8 @@ pub mod compact {
     pub const ACTIONS: usize = ACTION_NAMES.len();
     /// Every action bit.
     pub const ALL_ACTIONS: u8 = 0xFF;
+    /// Full toolbar default: Add … Settings; Close all and Focus opt-in.
+    pub const DEFAULT_ACTIONS: u8 = 0x3F;
     pub const CLOCK: u32 = 1 << 8;
     pub const MEDIA: u32 = 1 << 9;
     pub const BATTERY: u32 = 1 << 10;

@@ -108,6 +108,11 @@ pub fn highlight_card(ctx: &egui::Context, caption: &str) {
     ctx.data_mut(|d| d.insert_temp(egui::Id::new(HIGHLIGHT), (caption.to_string(), t, false)));
 }
 
+/// Caption of the card a search result is flashing right now, if any.
+pub fn highlighted_card(ctx: &egui::Context) -> Option<String> {
+    ctx.data(|d| d.get_temp::<(String, f64, bool)>(egui::Id::new(HIGHLIGHT))).map(|(c, _, _)| c)
+}
+
 /// Card-header hook: scroll to + pulse the card a search result picked.
 fn highlight_hook(ui: &mut egui::Ui, caption: &str, accent: egui::Color32) {
     let id = egui::Id::new(HIGHLIGHT);

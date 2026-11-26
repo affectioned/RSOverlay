@@ -69,16 +69,16 @@ impl Gamepads {
             self.rescan = Some(std::time::Instant::now());
         }
         let mut held = 0;
-        for i in 0..4 {
-            if !self.connected[i] && !rescan {
+        for (slot, connected) in self.connected.iter_mut().enumerate() {
+            if !*connected && !rescan {
                 continue;
             }
-            match read(i as u32) {
+            match read(slot as u32) {
                 Some(b) => {
-                    self.connected[i] = true;
+                    *connected = true;
                     held |= b;
                 }
-                None => self.connected[i] = false,
+                None => *connected = false,
             }
         }
         held

@@ -498,7 +498,7 @@ impl Default for DevView {
             media_theme: false,
             art_accent: None,
             media_worker: None,
-            wrist_buttons: crate::wrist::compact::ALL_ACTIONS,
+            wrist_buttons: crate::wrist::compact::DEFAULT_ACTIONS,
             wrist_compact: rsoverlay_core::config::DEFAULT_WRIST_COMPACT,
             kb_prefs: KeyboardPrefs::default(),
             cursor_smoothing: 0.5,
@@ -845,63 +845,71 @@ impl DevView {
                         Some("appearance")
                     }
                     1 => {
-                        self.night_light.card(ui, minute_of_day(), accent);
-                        Some("night-light")
-                    }
-                    2 => {
                         vr_card(ui, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, &mut self.vr_hide_wrist, accent);
                         Some("vr")
                     }
-                    3 => {
-                        vr_panels_card(ui, &mut self.vr_windows_follow_dash, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, &mut self.vr_background_fps, accent);
+                    2 => {
+                        vr_panels_card(ui, &mut self.vr_windows_follow_dash, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, &mut self.vr_background_fps, &mut self.pointer, accent);
                         Some("vr-panels")
                     }
-                    4 => {
-                        gamepad_card(ui, &mut self.gamepad, self.gamepad_held, &mut self.gamepad_capture, accent);
-                        Some("gamepad")
-                    }
-                    5 => {
+                    3 => {
                         pointer_card(ui, &mut self.cursor_smoothing, &mut self.scroll_speed, &mut self.pointer, accent);
                         Some("pointer")
                     }
-                    6 => {
+                    4 => {
+                        window_input_card(ui, &mut self.pointer, accent);
+                        Some("window-input")
+                    }
+                    5 => {
                         keyboard_card(ui, &mut self.kb_prefs, accent);
                         Some("keyboard")
                     }
-                    7 => {
-                        notifications_card(ui, &mut self.notif, &mut self.pending_sounds, accent);
-                        Some("notifications")
-                    }
-                    8 => {
-                        wrist_toolbar_card(ui, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, &mut self.clock_format, &mut self.date_format, &mut self.wrist_bg, accent);
-                        Some("wrist-toolbar")
-                    }
-                    9 => {
+                    6 => {
                         accessibility_card(ui, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.vr_pointer_size, &mut self.reduce_motion, accent);
                         Some("accessibility")
                     }
+                    7 => {
+                        wrist_look_card(ui, &mut self.clock_format, &mut self.date_format, &mut self.wrist_bg, &mut self.media_theme, accent);
+                        Some("wrist-look")
+                    }
+                    8 => {
+                        wrist_toolbar_card(ui, &mut self.wrist_buttons, &mut self.wrist_compact, accent);
+                        Some("wrist-toolbar")
+                    }
+                    9 => {
+                        notifications_card(ui, &mut self.notif, &mut self.pending_sounds, accent);
+                        Some("notifications")
+                    }
                     10 => {
-                        let _ = admin_card(ui, &mut self.run_as_admin, self.elevated, accent);
-                        Some("administrator")
+                        self.night_light.card(ui, minute_of_day(), accent);
+                        Some("night-light")
                     }
                     11 => {
-                        placement_card(ui, &mut self.placement, accent);
-                        Some("placement")
+                        gamepad_card(ui, &mut self.gamepad, self.gamepad_held, &mut self.gamepad_capture, accent);
+                        Some("gamepad")
                     }
                     12 => {
-                        let snap = self.system.snapshot();
-                        performance_card(ui, snap.as_ref(), self.frame_ms, &self.frame_ms_hist, self.last_fps, self.notifications_received, accent);
-                        Some("stats")
+                        self.updates.card(ui, accent);
+                        Some("updates")
                     }
                     13 => {
                         discord_card(ui, &mut self.discord_presence, &mut self.discord, accent);
                         Some("discord")
                     }
                     14 => {
-                        self.updates.card(ui, accent);
-                        Some("updates")
+                        let snap = self.system.snapshot();
+                        performance_card(ui, snap.as_ref(), self.frame_ms, &self.frame_ms_hist, self.last_fps, self.notifications_received, accent);
+                        Some("stats")
                     }
                     15 => {
+                        placement_card(ui, &mut self.placement, accent);
+                        Some("placement")
+                    }
+                    16 => {
+                        let _ = admin_card(ui, &mut self.run_as_admin, self.elevated, accent);
+                        Some("administrator")
+                    }
+                    17 => {
                         let _ = reset_card(ui, &mut self.reset_armed_at);
                         Some("reset")
                     }
@@ -1041,6 +1049,8 @@ impl DevView {
                     ui.horizontal(|ui| {
                         ui.set_height(40.0);
                         ui.label(egui::RichText::new(format!("RSOverlay · {}", self.page.label())).color(theme::FG_MUTED).size(theme::SIZE_BODY));
+                        // Version in view, so screenshots in bug reports carry it.
+                        ui.label(egui::RichText::new(rsoverlay_core::update::CURRENT).color(theme::FG_FAINT).size(theme::SIZE_CAPTION));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let (dock, close, _) = crate::window_panel::dock_controls(ui, self.dash_attach, None, accent);
                             self.dash_dock = dock.or(self.dash_dock);
@@ -1298,43 +1308,55 @@ impl DevView {
                         self.reset_requested = true;
                     }
                     l.add_space(theme::GUTTER);
-                    self.night_light.card(l, minute_of_day(), accent);
-                    l.add_space(theme::GUTTER);
                     vr_card(l, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, &mut self.vr_hide_wrist, accent);
                     l.add_space(theme::GUTTER);
-                    vr_panels_card(l, &mut self.vr_windows_follow_dash, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, &mut self.vr_background_fps, accent);
-                    l.add_space(theme::GUTTER);
-                    gamepad_card(l, &mut self.gamepad, self.gamepad_held, &mut self.gamepad_capture, accent);
+                    vr_panels_card(l, &mut self.vr_windows_follow_dash, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, &mut self.vr_background_fps, &mut self.pointer, accent);
                     l.add_space(theme::GUTTER);
                     pointer_card(l, &mut self.cursor_smoothing, &mut self.scroll_speed, &mut self.pointer, accent);
                     l.add_space(theme::GUTTER);
+                    window_input_card(l, &mut self.pointer, accent);
+                    l.add_space(theme::GUTTER);
                     keyboard_card(l, &mut self.kb_prefs, accent);
                     l.add_space(theme::GUTTER);
-                    notifications_card(l, &mut self.notif, &mut self.pending_sounds, accent);
-                    l.add_space(theme::GUTTER);
-                    wrist_toolbar_card(l, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, &mut self.clock_format, &mut self.date_format, &mut self.wrist_bg, accent);
-                    l.add_space(theme::GUTTER);
                     accessibility_card(l, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.vr_pointer_size, &mut self.reduce_motion, accent);
-                    l.add_space(theme::GUTTER);
-                    if admin_card(l, &mut self.run_as_admin, self.elevated, accent) {
-                        self.restart_elevated_requested = true;
-                    }
                     // Right column: beside the left one, or below it when narrow.
                     let r_min = if narrow { egui::pos2(top.x, l.min_rect().bottom() + gap) } else { egui::pos2(top.x + col_w + gap, top.y) };
                     let mut r = ui.child_ui(column(r_min), plain);
                     let r = &mut r;
-                    placement_card(r, &mut self.placement, accent);
+                    wrist_look_card(r, &mut self.clock_format, &mut self.date_format, &mut self.wrist_bg, &mut self.media_theme, accent);
+                    r.add_space(theme::GUTTER);
+                    wrist_toolbar_card(r, &mut self.wrist_buttons, &mut self.wrist_compact, accent);
+                    r.add_space(theme::GUTTER);
+                    notifications_card(r, &mut self.notif, &mut self.pending_sounds, accent);
+                    r.add_space(theme::GUTTER);
+                    self.night_light.card(r, minute_of_day(), accent);
+                    r.add_space(theme::GUTTER);
+                    gamepad_card(r, &mut self.gamepad, self.gamepad_held, &mut self.gamepad_capture, accent);
+                    r.add_space(theme::GUTTER);
+                    self.updates.card(r, accent);
+                    r.add_space(theme::GUTTER);
+                    discord_card(r, &mut self.discord_presence, &mut self.discord, accent);
                     r.add_space(theme::GUTTER);
                     let snap = self.system.snapshot();
                     performance_card(r, snap.as_ref(), self.frame_ms, &self.frame_ms_hist, self.last_fps, self.notifications_received, accent);
                     r.add_space(theme::GUTTER);
-                    discord_card(r, &mut self.discord_presence, &mut self.discord, accent);
-                    r.add_space(theme::GUTTER);
-                    self.updates.card(r, accent);
-                    r.add_space(theme::GUTTER);
-                    if reset_card(r, &mut self.reset_armed_at) {
-                        self.reset_requested = true;
-                    }
+                    // Rarely needed: tucked away, opened by search when a
+                    // result lands in here.
+                    let wanted = crate::widgets::highlighted_card(r.ctx()).is_some_and(|c| ["Placement", "Administrator", "Reset"].contains(&c.as_str()));
+                    egui::CollapsingHeader::new(theme::body_muted("Advanced"))
+                        .id_source("settings-advanced")
+                        .open(wanted.then_some(true))
+                        .show(r, |r| {
+                            placement_card(r, &mut self.placement, accent);
+                            r.add_space(theme::GUTTER);
+                            if admin_card(r, &mut self.run_as_admin, self.elevated, accent) {
+                                self.restart_elevated_requested = true;
+                            }
+                            r.add_space(theme::GUTTER);
+                            if reset_card(r, &mut self.reset_armed_at) {
+                                self.reset_requested = true;
+                            }
+                        });
                     // Hand the used area back so the scroll area knows the height.
                     ui.allocate_rect(l.min_rect().union(r.min_rect()), egui::Sense::hover());
                 }
@@ -1524,7 +1546,11 @@ fn gamepad_card(
                 *capture = None;
             }
         }
-        ui.add_enabled_ui(pad.enabled, |ui| {
+        if !pad.enabled {
+            *capture = None;
+            return;
+        }
+        ui.vertical(|ui| {
             let capturing = capture.map(|(i, _)| i);
             for (i, label) in ["Dashboard", "Recenter", "Keyboard"].into_iter().enumerate() {
                 let chord = [pad.dashboard, pad.recenter, pad.keyboard][i];
@@ -1569,6 +1595,7 @@ fn vr_panels_card(
     axis_lock: &mut bool,
     render_scale: &mut f32,
     background_fps: &mut f32,
+    ptr: &mut PointerPrefs,
     accent: egui::Color32,
 ) {
     theme::card().show(ui, |ui| {
@@ -1583,6 +1610,23 @@ fn vr_panels_card(
             .on_hover_text("While grabbing, the panel rotates with your hand. Off: it stays upright and faces you.");
         ui.checkbox(axis_lock, "One stick action at a time")
             .on_hover_text("While grabbing: push/pull (stick up/down) and resize (stick left/right) don't mix. The direction you push first wins until the stick returns to centre.");
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Grab smoothing"));
+            crate::theme::fit_slider(ui);
+            ui.add(egui::Slider::new(&mut ptr.grab_smoothing, 0.0..=1.0).fixed_decimals(2));
+        })
+        .response
+        .on_hover_text("Steadier panels while you carry them (higher = calmer, a little more lag)");
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Vibration"));
+            crate::theme::fit_slider(ui);
+            let mut pct = (ptr.haptics * 100.0).round();
+            if ui.add(egui::Slider::new(&mut pct, 0.0..=150.0).fixed_decimals(0).suffix("%")).changed() {
+                ptr.haptics = pct / 100.0;
+            }
+        })
+        .response
+        .on_hover_text("Controller vibration on clicks and grabs (0% = off)");
         ui.horizontal(|ui| {
             ui.label(theme::body_muted("Resolution"));
             for (v, label, tip) in [
@@ -1610,21 +1654,19 @@ fn vr_panels_card(
     });
 }
 
-#[allow(clippy::too_many_arguments)]
-fn wrist_toolbar_card(
+/// How the wrist looks: clock / date format, background image, and
+/// the album-art accent.
+fn wrist_look_card(
     ui: &mut egui::Ui,
-    mask: &mut u8,
-    compact: &mut u32,
-    media_theme: &mut bool,
     clock: &mut String,
     date: &mut String,
     bg: &mut crate::backgrounds::WristBackground,
+    media_theme: &mut bool,
     accent: egui::Color32,
 ) {
-    use crate::wrist::compact as c;
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        card_header(ui, icons::GRID, "Wrist toolbar", accent);
+        card_header(ui, icons::CLOCK, "Wrist look", accent);
         ui.add_space(6.0);
         for (label, value, table) in [("Clock", &mut *clock, &crate::locale::CLOCK_FORMATS[..]), ("Date", &mut *date, &crate::locale::DATE_FORMATS[..])] {
             ui.horizontal(|ui| {
@@ -1670,27 +1712,20 @@ fn wrist_toolbar_card(
             .response
             .on_hover_text("Darkens the image so the clock stays easy to read");
         }
-        ui.add_space(4.0);
-        ui.label(theme::body_muted("Full toolbar (after More)"));
-        ui.horizontal_wrapped(|ui| {
-            for (i, name) in c::ACTION_NAMES.iter().enumerate() {
-                let mut on = *mask & (1 << i) != 0;
-                if ui.checkbox(&mut on, *name).changed() {
-                    *mask ^= 1 << i;
-                    if *mask & crate::wrist::compact::ALL_ACTIONS == 0 {
-                        *mask |= 1 << 3; // keep at least the dashboard button
-                    }
-                }
-            }
-        });
+        ui.checkbox(media_theme, "Media theme").on_hover_text("Accent colour follows the album art while music plays");
+    });
+}
+
+/// What the wrist shows. Modules and status chips up front; the button
+/// lists fold away (they're also editable in VR: More, then Edit).
+fn wrist_toolbar_card(ui: &mut egui::Ui, mask: &mut u8, compact: &mut u32, accent: egui::Color32) {
+    use crate::wrist::compact as c;
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::GRID, "Wrist toolbar", accent);
         ui.add_space(6.0);
-        ui.label(theme::body_muted("Compact wrist"))
-            .on_hover_text("What the wrist shows before you press More. More is always there.");
-        ui.horizontal_wrapped(|ui| {
-            for (i, name) in c::ACTION_NAMES.iter().enumerate() {
-                compact_toggle(ui, compact, 1 << i, name);
-            }
-        });
+        ui.label(theme::body_muted("Compact wrist shows"))
+            .on_hover_text("What the wrist shows before you press More. In VR: More, then Edit, and tap items to show / hide them.");
         ui.horizontal_wrapped(|ui| {
             for &(bit, name) in c::SECTIONS {
                 compact_toggle(ui, compact, bit, name);
@@ -1702,11 +1737,30 @@ fn wrist_toolbar_card(
                 compact_toggle(ui, compact, bit, name);
             }
         });
+        egui::CollapsingHeader::new(theme::body_muted("Customise buttons")).id_source("wrist-buttons").show(ui, |ui| {
+            ui.label(theme::caption("Compact wrist"));
+            ui.horizontal_wrapped(|ui| {
+                for (i, name) in c::ACTION_NAMES.iter().enumerate() {
+                    compact_toggle(ui, compact, 1 << i, name);
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(theme::caption("Full toolbar (after More)"));
+            ui.horizontal_wrapped(|ui| {
+                for (i, name) in c::ACTION_NAMES.iter().enumerate() {
+                    let mut on = *mask & (1 << i) != 0;
+                    if ui.checkbox(&mut on, *name).changed() {
+                        *mask ^= 1 << i;
+                        if *mask & c::ALL_ACTIONS == 0 {
+                            *mask |= 1 << 3; // keep at least the dashboard button
+                        }
+                    }
+                }
+            });
+        });
         if ui.small_button("Default compact set").clicked() {
             *compact = rsoverlay_core::config::DEFAULT_WRIST_COMPACT;
         }
-        ui.add_space(4.0);
-        ui.checkbox(media_theme, "Media theme").on_hover_text("Accent colour follows the album art while music plays");
     });
 }
 
@@ -1907,6 +1961,21 @@ fn notifications_card(
     });
 }
 
+/// How desktop windows in VR receive the laser.
+fn window_input_card(ui: &mut egui::Ui, ptr: &mut PointerPrefs, accent: egui::Color32) {
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::MONITOR, "Window input", accent);
+        ui.add_space(6.0);
+        ui.checkbox(&mut ptr.mouse_follows, "Mouse follows the laser")
+            .on_hover_text("On: pointing at a window moves your real mouse (hover menus, tooltips). Off: the mouse only moves when you click or drag, so it stays put while you look around.");
+        ui.checkbox(&mut ptr.touch_input, "Touch input")
+            .on_hover_text("The trigger touches the window like a finger (tap, drag, swipe) instead of clicking a mouse. For touch-friendly apps; right / middle click and scrolling still use the mouse.");
+        ui.checkbox(&mut ptr.block_game_input, "Block game input while pointing (experimental)")
+            .on_hover_text("While your laser is on a panel, the game doesn't get your trigger / button presses (no accidental shots or menu clicks). Uses SteamVR's laser-mouse mode, which may show SteamVR's own pointer too. Please report how it behaves.");
+    });
+}
+
 fn pointer_card(ui: &mut egui::Ui, smoothing: &mut f32, scroll: &mut f32, ptr: &mut PointerPrefs, accent: egui::Color32) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -1924,29 +1993,6 @@ fn pointer_card(ui: &mut egui::Ui, smoothing: &mut f32, scroll: &mut f32, ptr: &
             crate::theme::fit_slider(ui);
             ui.add(egui::Slider::new(scroll, 0.25..=3.0).fixed_decimals(2).suffix("×"));
         });
-        ui.horizontal(|ui| {
-            ui.label(theme::body_muted("Vibration"));
-            crate::theme::fit_slider(ui);
-            let mut pct = (ptr.haptics * 100.0).round();
-            if ui.add(egui::Slider::new(&mut pct, 0.0..=150.0).fixed_decimals(0).suffix("%")).changed() {
-                ptr.haptics = pct / 100.0;
-            }
-        })
-        .response
-        .on_hover_text("Controller vibration on clicks and grabs (0% = off)");
-        ui.horizontal(|ui| {
-            ui.label(theme::body_muted("Grab smoothing"));
-            crate::theme::fit_slider(ui);
-            ui.add(egui::Slider::new(&mut ptr.grab_smoothing, 0.0..=1.0).fixed_decimals(2));
-        })
-        .response
-        .on_hover_text("Steadier panels while you carry them (higher = calmer, a little more lag)");
-        ui.checkbox(&mut ptr.block_game_input, "Block game input while pointing (experimental)")
-            .on_hover_text("While your laser is on a panel, the game doesn't get your trigger / button presses (no accidental shots or menu clicks). Uses SteamVR's laser-mouse mode, which may show SteamVR's own pointer too. Please report how it behaves.");
-        ui.checkbox(&mut ptr.touch_input, "Touch input for windows")
-            .on_hover_text("The trigger touches the window like a finger (tap, drag, swipe) instead of clicking a mouse. For touch-friendly apps; right / middle click and scrolling still use the mouse.");
-        ui.checkbox(&mut ptr.mouse_follows, "Mouse follows the laser")
-            .on_hover_text("On: pointing at a window moves your real mouse (hover menus, tooltips). Off: the mouse only moves when you click or drag, so it stays put while you look around.");
         ui.checkbox(&mut ptr.long_press, "Long-press for right click")
             .on_hover_text("Hold the trigger still to right-click. Moving first still drags; letting go early still clicks.");
         ui.add_enabled_ui(ptr.long_press, |ui| {
@@ -2667,6 +2713,31 @@ mod search_integration_tests {
         // The card's header hook consumed the request and scrolled to it.
         let h = ctx.data(|d| d.get_temp::<(String, f64, bool)>(egui::Id::new("rso-highlight")));
         assert_eq!(h.map(|(c, _, scrolled)| (c, scrolled)), Some(("Accessibility".to_string(), true)));
+    }
+
+    #[test]
+    fn search_opens_the_advanced_section_to_reach_its_cards() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut dev = DevView { show_volume: false, show_system: false, ..Default::default() };
+        let mut t = 0.0;
+        let mut frame = |dev: &mut DevView| {
+            t += 1.0 / 60.0;
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1365.0, 853.0))),
+                time: Some(t),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |c| dev.ui_with(c, None));
+        };
+        frame(&mut dev);
+        // Administrator lives in the collapsed Advanced section.
+        dev.apply_search(&ctx, Target::Card(Page::Settings, "Administrator"));
+        for _ in 0..3 {
+            frame(&mut dev);
+        }
+        let h = ctx.data(|d| d.get_temp::<(String, f64, bool)>(egui::Id::new("rso-highlight")));
+        assert_eq!(h.map(|(c, _, scrolled)| (c, scrolled)), Some(("Administrator".to_string(), true)), "card was drawn and scrolled to");
     }
 }
 

@@ -129,10 +129,12 @@ pub fn seed_dev_view(
     dev.vr_laser_angle = cfg.vr.laser_angle.clamp(-30.0, 30.0);
     dev.cursor_smoothing = cfg.vr.cursor_smoothing.clamp(0.0, 1.0);
     dev.scroll_speed = cfg.vr.scroll_speed.clamp(0.25, 3.0);
-    let all = rsoverlay_ui::wrist::compact::ALL_ACTIONS;
-    let mut buttons = if cfg.vr.wrist_buttons & all == 0 { all } else { cfg.vr.wrist_buttons };
-    if cfg.vr.wrist_actions_rev < 1 {
-        buttons |= 1 << 7; // Focus is new: show it once on the full toolbar
+    use rsoverlay_ui::wrist::compact::{ALL_ACTIONS, DEFAULT_ACTIONS};
+    let mut buttons = if cfg.vr.wrist_buttons & ALL_ACTIONS == 0 { DEFAULT_ACTIONS } else { cfg.vr.wrist_buttons };
+    // Untouched defaults from older builds (all 7, or all 8) become the
+    // new, calmer default; anything the user chose is kept.
+    if cfg.vr.wrist_actions_rev < 2 && (buttons == 0x7F || buttons == ALL_ACTIONS) {
+        buttons = DEFAULT_ACTIONS;
     }
     dev.wrist_buttons = buttons;
     dev.media_theme = cfg.vr.media_theme;
@@ -330,7 +332,7 @@ pub fn config_from_dev_view(
         cursor_smoothing: dev.cursor_smoothing,
         scroll_speed: dev.scroll_speed,
         wrist_buttons: dev.wrist_buttons,
-        wrist_actions_rev: 1,
+        wrist_actions_rev: 2,
         media_theme: dev.media_theme,
         wrist_expanded: dev.wrist_expanded,
         wrist_compact: dev.wrist_compact,

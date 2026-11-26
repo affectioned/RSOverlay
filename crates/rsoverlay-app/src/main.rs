@@ -290,7 +290,7 @@ fn init_logging(console: bool) {
         tracing::error!("panic: {info}");
         prev(info);
     }));
-    info!("RSOverlay {} starting", env!("CARGO_PKG_VERSION"));
+    info!("{} starting", rsoverlay_core::update::version_line());
 }
 
 /// A fatal error with no console to print it on: say so in a dialog.

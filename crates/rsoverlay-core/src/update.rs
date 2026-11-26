@@ -16,8 +16,31 @@ pub const RELEASES_URL: &str = "https://github.com/affectioned/RSOverlay/release
 /// Where testers report problems.
 pub const ISSUES_URL: &str = "https://github.com/affectioned/RSOverlay/issues";
 
-/// This build's version (workspace `version`).
-pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
+/// This build's version: the release tag the build was made from (set
+/// by the release workflow, e.g. "0.1.0-beta.3"), else the Cargo version
+/// with "-dev" for local builds. Used for display *and* the update
+/// check, so a beta build is told about the next beta.
+pub const CURRENT: &str = match option_env!("RSO_VERSION") {
+    Some(v) => v,
+    None => concat!(env!("CARGO_PKG_VERSION"), "-dev"),
+};
+
+/// Short commit the build came from (release builds), if known.
+pub const COMMIT: Option<&str> = option_env!("RSO_COMMIT");
+
+/// "RSOverlay 0.1.0-beta.3 (d8843e6)" — what to quote in a bug report.
+pub fn version_line() -> String {
+    match COMMIT {
+        Some(c) => format!("RSOverlay {CURRENT} ({c})"),
+        None => format!("RSOverlay {CURRENT}"),
+    }
+}
+
+/// Issue tracker "new issue" page with the version filled in.
+pub fn new_issue_url() -> String {
+    let body = format!("**Version:** {}%0A**Headset:** %0A%0A**What happened:**%0A%0A**What I expected:**%0A", version_line().replace(' ', "%20"));
+    format!("{ISSUES_URL}/new?body={body}")
+}
 
 /// A published release newer than this build.
 #[derive(Clone, Debug, PartialEq)]
@@ -130,9 +153,9 @@ pub fn open_release_page(url: &str) -> bool {
     open_url(url)
 }
 
-/// Open the issue tracker in the browser.
+/// Open a new issue in the browser, with this build's version filled in.
 pub fn open_issues() -> bool {
-    open_url(ISSUES_URL)
+    open_url(&new_issue_url())
 }
 
 /// Open RSOverlay's log folder in Explorer (created if missing).
@@ -235,6 +258,21 @@ mod tests {
 
     fn v(s: &str) -> Version {
         Version::parse(s).unwrap()
+    }
+
+    #[test]
+    fn beta_builds_are_offered_the_next_beta() {
+        // The bug this guards: comparing against the bare Cargo version
+        // ("0.1.0") hid every 0.1.0-beta.N from beta testers.
+        let list = r#"[{"tag_name":"v0.1.0-beta.3","html_url":"https://github.com/affectioned/RSOverlay/releases/tag/v0.1.0-beta.3","draft":false,"prerelease":true}]"#;
+        assert!(newest_from_json(list, "0.1.0-beta.2", true).is_some());
+        assert!(newest_from_json(list, "0.1.0", true).is_none());
+    }
+
+    #[test]
+    fn issue_link_carries_the_version() {
+        assert!(new_issue_url().starts_with("https://github.com/affectioned/RSOverlay/issues/new?body="));
+        assert!(new_issue_url().contains(CURRENT));
     }
 
     #[test]

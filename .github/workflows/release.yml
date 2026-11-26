@@ -41,7 +41,13 @@ jobs:
         run: cargo test --workspace --locked
 
       - name: Build
-        run: cargo build --release --locked -p rsoverlay-app
+        shell: bash
+        # The tag + commit are stamped into the exe (Settings › Updates,
+        # bug reports, and the update check compares against them).
+        run: |
+          export RSO_VERSION="${GITHUB_REF_NAME#v}"
+          export RSO_COMMIT="${GITHUB_SHA::7}"
+          cargo build --release --locked -p rsoverlay-app
 
       - name: Package
         shell: bash
@@ -88,7 +94,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build (Steam)
-        run: cargo build --release --locked -p rsoverlay-app --features steam
+        shell: bash
+        run: |
+          export RSO_VERSION="${GITHUB_REF_NAME#v}"
+          export RSO_COMMIT="${GITHUB_SHA::7}"
+          cargo build --release --locked -p rsoverlay-app --features steam
       - name: Stage depot
         shell: bash
         run: |

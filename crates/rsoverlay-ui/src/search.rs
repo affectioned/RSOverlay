@@ -61,12 +61,13 @@ fn static_entries() -> Vec<Entry> {
         card("One stick action at a time", "Settings › VR panels", "push pull scale resize stick decouple axis grab", Settings, "VR panels"),
         card("Unwatched panels refresh rate", "Settings › VR panels", "fps capture rate background refresh gpu performance video", Settings, "VR panels"),
         card("Panel resolution", "Settings › VR panels", "sharp text blurry resolution supersampling bigscreen beyond pimax quality", Settings, "VR panels"),
-        card("Clock and date format", "Settings › Wrist toolbar", "12h 24h time clock date format am pm iso", Settings, "Wrist toolbar"),
-        card("Block game input while pointing", "Settings › Pointer", "block input background game focus accidental click shoot layout mode", Settings, "Pointer"),
-        card("Touch input for windows", "Settings › Pointer", "touch injection finger tap swipe tablet input method", Settings, "Pointer"),
-        card("Mouse follows the laser", "Settings › Pointer", "automatic mouse control hover cursor follow move", Settings, "Pointer"),
-        card("Vibration", "Settings › Pointer", "haptics vibration rumble strength off", Settings, "Pointer"),
-        card("Grab smoothing", "Settings › Pointer", "grab dampening smoothing shaky tremor sensitivity", Settings, "Pointer"),
+        card("Clock and date format", "Settings › Wrist look", "12h 24h time clock date format am pm iso", Settings, "Wrist look"),
+        card("Wrist background", "Settings › Wrist look", "wallpaper image picture background theme", Settings, "Wrist look"),
+        card("Block game input while pointing", "Settings › Window input", "block input background game focus accidental click shoot layout mode", Settings, "Window input"),
+        card("Touch input for windows", "Settings › Window input", "touch injection finger tap swipe tablet input method", Settings, "Window input"),
+        card("Mouse follows the laser", "Settings › Window input", "automatic mouse control hover cursor follow move", Settings, "Window input"),
+        card("Vibration", "Settings › VR panels", "haptics vibration rumble strength off", Settings, "VR panels"),
+        card("Grab smoothing", "Settings › VR panels", "grab dampening smoothing shaky tremor sensitivity", Settings, "VR panels"),
         card("Pointer size", "Settings › Accessibility", "cursor laser dot beam size big", Settings, "Accessibility"),
         card("Gamepad shortcuts", "Settings › Gamepad", "gamepad xbox controller xinput sim flight racing joystick shortcut", Settings, "Gamepad"),
         card("Updates", "Settings > Updates", "update new version release download upgrade beta test build", Settings, "Updates"),
@@ -171,7 +172,7 @@ mod tests {
         for e in static_entries() {
             if let Target::Card(_, cap) = e.target {
                 assert!(
-                    ["Appearance", "Night light", "VR", "VR panels", "Gamepad", "Updates", "Pointer", "Wrist toolbar", "Accessibility", "Administrator", "Reset", "Placement", "RSOverlay performance",
+                    ["Appearance", "Night light", "VR", "VR panels", "Gamepad", "Updates", "Pointer", "Window input", "Wrist look", "Wrist toolbar", "Accessibility", "Administrator", "Reset", "Placement", "RSOverlay performance",
                         "Volume", "Now playing", "VRChat chatbox", "Macros", "Notifications", "Battery", "PC performance"]
                         .contains(&cap),
                     "{cap}"

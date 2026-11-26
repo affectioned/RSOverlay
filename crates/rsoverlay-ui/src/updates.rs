@@ -130,7 +130,11 @@ impl Updates {
             ui.set_width(ui.available_width());
             crate::views::card_header(ui, icons::LOAD, "Updates", accent);
             ui.add_space(6.0);
-            ui.label(theme::body_muted(&format!("You have RSOverlay {}", update::CURRENT)));
+            // Selectable, so it can be copied into a bug report.
+            ui.horizontal(|ui| {
+                ui.label(theme::body_muted("Version"));
+                ui.add(egui::Label::new(egui::RichText::new(update::version_line()).monospace().color(theme::FG_PRIMARY)).selectable(true));
+            });
             if !self.supported {
                 ui.label(theme::body_muted("Updates are handled by Steam."));
                 ui.add_space(6.0);
