@@ -132,7 +132,9 @@ impl Preset {
             Self::Gaming => (-0.12, -0.30, 0.0),
             Self::Social => (0.0, -0.30, 0.0),
             Self::Dashboard => (-0.08, -0.16, 0.0),
-            Self::WristCompact | Self::WristExpanded => (-0.46, -0.60, 0.20),
+            Self::WristCompact => (-0.46, -0.60, 0.20),
+            // Taller (two rows of status chips): look a little lower, step back.
+            Self::WristExpanded => (-0.46, -0.62, 0.13),
         }
     }
 
