@@ -11,9 +11,9 @@ scratch against public Windows / OpenVR APIs.
 
 ---
 
-## What's shipped (M0 → M60)
+## What's shipped (M0 → M74)
 
-Last reviewed 2026-11-24. Parity detail lives in
+Last reviewed 2026-11-26. Parity detail lives in
 [XSO_PARITY.md](XSO_PARITY.md).
 
 - **Foundations (M0–M17):** desktop preview, OpenVR overlay FFI, DXGI
@@ -65,6 +65,25 @@ Last reviewed 2026-11-24. Parity detail lives in
   custom sounds for every alert (notification / warning / error / low
   battery: built-in, silent or any WAV in `sounds/`); client
   `audioPath` picks a category, never a file.
+- **M69:** PC performance for VR players: busiest-core meter, SteamVR
+  frame timing (game fps vs refresh, GPU headroom, reprojection), VR FPS
+  and VRAM wrist chips; RSOverlay's own stats moved to Settings ›
+  RSOverlay performance. Media polling moved off the UI thread.
+- **M70 (first tester feedback):** the laser hits the panel drawn on top
+  (explicit SteamVR sort layers; fixes the keyboard "ray angle");
+  windows hide with the dashboard unless pinned; panels step aside for
+  the SteamVR menu; one stick action at a time while grabbing; tilt with
+  the controller; dedicated right / middle click actions; pointer size;
+  panel resolution 1× / 1.5× / 2×.
+- **M71:** releases: tag-driven GitHub builds (pre-releases for
+  testers), opt-in update notice (never installs anything), `steam`
+  build feature, SteamPipe beta upload job (off until the App ID exists),
+  achievements draft ([ACHIEVEMENTS.md](ACHIEVEMENTS.md)).
+- **M72:** sideways scrolling (stick X, tilt-wheel on captured windows);
+  hide battery devices; mute notifications per app.
+- **M73:** Focus mode on the wrist: notifications wait in history, the
+  windows you aren't working in dim.
+- **M74:** resize the real window from its VR toolbar (Size menu).
 
 ## XSOverlay parity: remaining gaps
 
@@ -81,22 +100,18 @@ physical-style keyboard that types in any language, global search,
 macros, DPI-correct input, dock-anywhere panels. The VR preview's
 "work" scene (`--vr-preview --scene work`) shows the target setup.
 
-1. **Focus mode** — one toggle that silences notifications/toasts and
-   dims or throttles panels you aren't looking at, so the window you're
-   working in owns your attention. Auto-off when you leave it.
-2. **Work layout preset** — one tap builds a large curved main screen
+1. **Work layout preset** — one tap builds a large curved main screen
    plus side windows at reading distance (a built-in layout template
    users can then tweak and save to a slot).
-3. **Window resize from VR** — set the *real* window's size/DPI from the
-   overlay toolbar so text stays readable at the panel's physical size
-   (e.g. "fit to panel" / 1280×800 / 1920×1080 presets).
-4. **Multi-monitor wall** — every monitor at once, arranged in an arc
+2. **Multi-monitor wall** — every monitor at once, arranged in an arc
    around you, with per-monitor docking and recenter.
+3. **Focus mode follow-ups** — auto-off when you leave the window, and
+   optional throttling of the dimmed panels.
 
 ## Mid-term
 
-- **Notifications polish.** History + clear-all shipped (M21); next:
-  per-app mute, scrollable history in a widget, size / offset settings.
+- **Notifications polish.** History, clear-all, VR size / offset and
+  per-app mute shipped; next: history as a pop-out widget.
   *XSO #127/#128/#131.*
 - **Per-layout keyboard presets.** Layout slots already store the
   keyboard pose (M53); next: favourites + quick-switch.
@@ -104,10 +119,8 @@ macros, DPI-correct input, dock-anywhere panels. The VR preview's
 - **Service discovery via mDNS** so companion apps autoconnect to the
   notification server (XSO #188).
 - **Toolbar whitelist / blacklist**, window frame chrome toggles (OVR #7).
-- **Horizontal scroll forwarding** on captured windows (XSO #115).
 - **Discord button bar** (mute / deafen) next to the media controls
   (XSO #119/#120).
-- **Per-device battery hide toggles** (battery widget follow-up).
 - **Hand-tracking input** (OVR #5): fingertip typing via OpenXR
   skeletal tracking.
 

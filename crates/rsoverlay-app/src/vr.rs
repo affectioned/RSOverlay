@@ -1896,6 +1896,12 @@ mod imp {
                 if let Some(o) = act.opacity {
                     w.opacity = o.clamp(window_panel::MIN_CONTENT_OPACITY, 1.0);
                 }
+                if let (Some((rw, rh)), Some(hwnd)) = (act.resize, w.mirror.as_ref().and_then(|m| m.window_hwnd())) {
+                    match rsoverlay_capture::window::resize_window(hwnd, rw, rh) {
+                        Ok(()) => info!("resized window to {rw}x{rh}"),
+                        Err(e) => warn!("resize window: {e:#}"),
+                    }
+                }
                 if let Some(a) = act.attach {
                     // Docked to head / hand → no longer part of a window wall.
                     w.group = None;

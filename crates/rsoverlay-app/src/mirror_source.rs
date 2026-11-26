@@ -105,7 +105,7 @@ impl GpuMirror {
                     egui::pos2(w as f32 / self.mirror.width as f32, h as f32 / self.mirror.height as f32),
                 );
                 // WGC captures the cursor itself (SetIsCursorCaptureEnabled).
-                MirrorHandle { id: self.tex_id, width: w, height: h, uv, cursor: None }
+                MirrorHandle { id: self.tex_id, width: w, height: h, uv, cursor: None, resizable: true }
             }
         }
     }

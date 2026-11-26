@@ -26,11 +26,13 @@ pub struct MirrorHandle {
     /// OS cursor position within the content (0..1 each axis), for
     /// sources whose capture leaves the cursor out (monitor duplication).
     pub cursor: Option<egui::Vec2>,
+    /// A real window whose size we may change (not a monitor).
+    pub resizable: bool,
 }
 
 impl MirrorHandle {
     pub fn full(id: egui::TextureId, width: u32, height: u32) -> Self {
-        Self { id, width, height, uv: egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), cursor: None }
+        Self { id, width, height, uv: egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), cursor: None, resizable: false }
     }
 }
 

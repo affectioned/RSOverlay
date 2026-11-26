@@ -137,6 +137,48 @@ pub fn focus_window(hwnd: isize) {
     }
 }
 
+/// Where a window of `w`x`h` goes: shrunk to fit the monitor's work area
+/// `(left, top, right, bottom)`, kept at its current top-left `at` when
+/// it fits, otherwise shifted back inside. Returns (x, y, w, h).
+pub fn place_in_work_area(work: (i32, i32, i32, i32), at: (i32, i32), w: u32, h: u32) -> (i32, i32, i32, i32) {
+    let (l, t, r, b) = work;
+    let w = (w as i32).min(r - l).max(1);
+    let h = (h as i32).min(b - t).max(1);
+    let x = at.0.clamp(l, r - w);
+    let y = at.1.clamp(t, b - h);
+    (x, y, w, h)
+}
+
+/// Resize a real window (restoring it first if maximised), keeping it
+/// on its monitor's work area. Fails for windows Windows won't let us
+/// touch (elevated ones while we aren't).
+pub fn resize_window(hwnd: isize, w: u32, h: u32) -> Result<()> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowRect, IsZoomed, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SWP_NOZORDER, SW_RESTORE,
+    };
+    let hwnd = HWND(hwnd);
+    // SAFETY: plain user32 calls on a window handle; stale handles just fail.
+    unsafe {
+        if !IsWindow(hwnd).as_bool() {
+            bail!("window is gone");
+        }
+        if IsZoomed(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        let mut cur = RECT::default();
+        GetWindowRect(hwnd, &mut cur).context("GetWindowRect")?;
+        let mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if !GetMonitorInfoW(mon, &mut mi).as_bool() {
+            bail!("GetMonitorInfo failed");
+        }
+        let wa = mi.rcWork;
+        let (x, y, w, h) = place_in_work_area((wa.left, wa.top, wa.right, wa.bottom), (cur.left, cur.top), w, h);
+        SetWindowPos(hwnd, HWND(0), x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE).context("SetWindowPos")?;
+    }
+    Ok(())
+}
+
 /// Live content size, packed `w << 32 | h` so a single atomic load is
 /// tear-free between the capture thread and the UI thread.
 #[derive(Clone, Default)]
@@ -540,5 +582,27 @@ mod icon_size_probe {
             .collect();
         println!("icon sizes: {sizes:?}");
         assert!(sizes.iter().any(|&(w, _)| w >= 128));
+    }
+}
+
+#[cfg(test)]
+mod placement_tests {
+    use super::place_in_work_area;
+
+    const WORK: (i32, i32, i32, i32) = (0, 0, 2560, 1392);
+
+    #[test]
+    fn keeps_position_when_it_fits() {
+        assert_eq!(place_in_work_area(WORK, (100, 50), 1280, 720), (100, 50, 1280, 720));
+    }
+
+    #[test]
+    fn shifts_back_inside_and_shrinks_to_the_work_area() {
+        // Would run off the right / bottom: shifted in.
+        assert_eq!(place_in_work_area(WORK, (2000, 1000), 1280, 720), (1280, 672, 1280, 720));
+        // Bigger than the work area (taskbar excluded): shrunk to fit.
+        assert_eq!(place_in_work_area(WORK, (10, 10), 2560, 1440), (0, 0, 2560, 1392));
+        // Second monitor to the left (negative coordinates).
+        assert_eq!(place_in_work_area((-1920, 0, 0, 1040), (-300, 0), 1280, 720), (-1280, 0, 1280, 720));
     }
 }

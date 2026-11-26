@@ -52,7 +52,12 @@ pub struct WindowPanelAction {
     pub opacity: Option<f32>,
     /// Pin pill clicked (stay visible with the dashboard closed).
     pub toggle_pin: bool,
+    /// Resize the real window to (w, h) pixels (Size menu).
+    pub resize: Option<(u32, u32)>,
 }
+
+/// Window sizes on the toolbar's Size menu (outer size, pixels).
+pub const SIZE_PRESETS: [(u32, u32); 4] = [(1280, 720), (1600, 900), (1920, 1080), (2560, 1440)];
 
 /// Lowest per-window content opacity: still visible enough to aim at.
 pub const MIN_CONTENT_OPACITY: f32 = 0.1;
@@ -119,8 +124,10 @@ pub fn show(
         }
 
         let mut op = opacity;
-        let t = toolbar(ui, bar, title, icon, attach, linked, pinned, Some(&mut op), accent);
-        (out.attach, out.close, out.unlink, out.toggle_pin) = t;
+        // Size menu: only for real windows Windows lets us touch.
+        let resizable = mirror.is_some_and(|m| m.resizable) && !input_blocked;
+        let t = toolbar(ui, bar, title, icon, attach, linked, pinned, resizable, Some(&mut op), accent);
+        (out.attach, out.close, out.unlink, out.toggle_pin, out.resize) = (t.attach, t.close, t.unlink, t.toggle_pin, t.resize);
         if (op - opacity).abs() > f32::EPSILON {
             out.opacity = Some(op);
         }
@@ -128,10 +135,20 @@ pub fn show(
     out
 }
 
+/// What the toolbar's controls asked for this frame.
+#[derive(Debug, Default)]
+pub struct ToolbarOut {
+    pub attach: Option<Attach>,
+    pub close: bool,
+    pub unlink: bool,
+    pub toggle_pin: bool,
+    pub resize: Option<(u32, u32)>,
+}
+
 /// A window panel's bottom toolbar: app icon + title, dock + close, and
-/// Unlink while edge-docked to other windows, and the content-opacity
-/// slider when `opacity` is given. Returns (dock, close, unlink, pin
-/// toggled).
+/// Unlink while edge-docked to other windows, Pin (`pinned` given), the
+/// Size menu (`resizable`) and the content-opacity slider (`opacity`
+/// given).
 #[allow(clippy::too_many_arguments)]
 pub fn toolbar(
     ui: &mut egui::Ui,
@@ -141,9 +158,10 @@ pub fn toolbar(
     attach: Attach,
     linked: bool,
     pinned: Option<bool>,
+    resizable: bool,
     opacity: Option<&mut f32>,
     accent: egui::Color32,
-) -> (Option<Attach>, bool, bool, bool) {
+) -> ToolbarOut {
     ui.painter().rect_filled(bar, 14.0, theme::BG_ROOT);
     ui.painter().rect_stroke(bar, 14.0, egui::Stroke::new(1.0_f32, theme::STROKE_CARD));
     let mut bar_ui = ui.child_ui(bar.shrink2(egui::vec2(16.0, 8.0)), egui::Layout::left_to_right(egui::Align::Center));
@@ -151,12 +169,12 @@ pub fn toolbar(
         bar_ui.add(egui::Image::new((id, egui::vec2(24.0, 24.0))));
     }
     bar_ui.add(egui::Label::new(egui::RichText::new(title).color(theme::FG_PRIMARY).size(theme::SIZE_BODY)).truncate(true));
-    let mut out = (None, false, false, false);
+    let mut out = ToolbarOut::default();
     bar_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        (out.0, out.1, out.3) = dock_controls(ui, attach, pinned, accent);
+        (out.attach, out.close, out.toggle_pin) = dock_controls(ui, attach, pinned, accent);
         if linked {
             ui.add_space(8.0);
-            out.2 = unlink_pill(ui, accent);
+            out.unlink = unlink_pill(ui, accent);
         }
         if let Some(op) = opacity {
             ui.add_space(12.0);
@@ -172,8 +190,30 @@ pub fn toolbar(
             }
             ui.label(theme::caption("Opacity"));
         }
+        if resizable {
+            ui.add_space(12.0);
+            out.resize = size_menu(ui);
+        }
     });
     out
+}
+
+/// "Size": resize the real window so its text reads well at the panel's
+/// size (smaller window = bigger text in VR).
+fn size_menu(ui: &mut egui::Ui) -> Option<(u32, u32)> {
+    let mut pick = None;
+    ui.menu_button("Size", |ui| {
+        ui.label(theme::caption("Resize the real window"));
+        for (w, h) in SIZE_PRESETS {
+            if ui.button(format!("{w} × {h}")).clicked() {
+                pick = Some((w, h));
+                ui.close_menu();
+            }
+        }
+    })
+    .response
+    .on_hover_text("Change the real window's size: bigger fits more, smaller makes text larger in VR");
+    pick
 }
 
 /// Shown over an elevated window's capture when RSOverlay isn't elevated:
