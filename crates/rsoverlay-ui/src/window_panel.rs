@@ -50,6 +50,8 @@ pub struct WindowPanelAction {
     pub unlink: bool,
     /// Content opacity changed on the toolbar slider.
     pub opacity: Option<f32>,
+    /// Pin pill clicked (stay visible with the dashboard closed).
+    pub toggle_pin: bool,
 }
 
 /// Lowest per-window content opacity: still visible enough to aim at.
@@ -67,6 +69,7 @@ pub fn show(
     icon: Option<egui::TextureId>,
     linked: bool,
     opacity: f32,
+    pinned: Option<bool>,
     accent: egui::Color32,
 ) -> WindowPanelAction {
     let mut out = WindowPanelAction::default();
@@ -116,7 +119,8 @@ pub fn show(
         }
 
         let mut op = opacity;
-        (out.attach, out.close, out.unlink) = toolbar(ui, bar, title, icon, attach, linked, Some(&mut op), accent);
+        let t = toolbar(ui, bar, title, icon, attach, linked, pinned, Some(&mut op), accent);
+        (out.attach, out.close, out.unlink, out.toggle_pin) = t;
         if (op - opacity).abs() > f32::EPSILON {
             out.opacity = Some(op);
         }
@@ -126,7 +130,8 @@ pub fn show(
 
 /// A window panel's bottom toolbar: app icon + title, dock + close, and
 /// Unlink while edge-docked to other windows, and the content-opacity
-/// slider when `opacity` is given. Returns (dock, close, unlink).
+/// slider when `opacity` is given. Returns (dock, close, unlink, pin
+/// toggled).
 #[allow(clippy::too_many_arguments)]
 pub fn toolbar(
     ui: &mut egui::Ui,
@@ -135,9 +140,10 @@ pub fn toolbar(
     icon: Option<egui::TextureId>,
     attach: Attach,
     linked: bool,
+    pinned: Option<bool>,
     opacity: Option<&mut f32>,
     accent: egui::Color32,
-) -> (Option<Attach>, bool, bool) {
+) -> (Option<Attach>, bool, bool, bool) {
     ui.painter().rect_filled(bar, 14.0, theme::BG_ROOT);
     ui.painter().rect_stroke(bar, 14.0, egui::Stroke::new(1.0_f32, theme::STROKE_CARD));
     let mut bar_ui = ui.child_ui(bar.shrink2(egui::vec2(16.0, 8.0)), egui::Layout::left_to_right(egui::Align::Center));
@@ -145,9 +151,9 @@ pub fn toolbar(
         bar_ui.add(egui::Image::new((id, egui::vec2(24.0, 24.0))));
     }
     bar_ui.add(egui::Label::new(egui::RichText::new(title).color(theme::FG_PRIMARY).size(theme::SIZE_BODY)).truncate(true));
-    let mut out = (None, false, false);
+    let mut out = (None, false, false, false);
     bar_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        (out.0, out.1) = dock_controls(ui, attach, accent);
+        (out.0, out.1, out.3) = dock_controls(ui, attach, pinned, accent);
         if linked {
             ui.add_space(8.0);
             out.2 = unlink_pill(ui, accent);
@@ -191,13 +197,25 @@ fn uac_banner(ui: &egui::Ui, content: egui::Rect) {
 
 /// The controls every floating panel carries (windows, widgets, the
 /// dashboard; not the keyboard): dock target + close. Call inside a
-/// right-to-left layout. Returns (dock request, close).
-pub fn dock_controls(ui: &mut egui::Ui, attach: Attach, accent: egui::Color32) -> (Option<Attach>, bool) {
-    let mut out = (None, false);
+/// right-to-left layout. `pinned`: show the Pin pill (XSO layout mode;
+/// `None` = not applicable). Returns (dock request, close, pin toggled).
+pub fn dock_controls(ui: &mut egui::Ui, attach: Attach, pinned: Option<bool>, accent: egui::Color32) -> (Option<Attach>, bool, bool) {
+    let mut out = (None, false, false);
     if pill(ui, "✕", false, theme::DANGER).on_hover_text("Close").clicked() {
         out.1 = true;
     }
     ui.add_space(8.0);
+    if let Some(on) = pinned {
+        let tip = if on {
+            "Pinned: stays visible when the dashboard is closed. Click to unpin."
+        } else {
+            "Shown only while the dashboard is open. Pin it to keep it visible."
+        };
+        if pill(ui, if on { "Pinned" } else { "Pin" }, on, accent).on_hover_text(tip).clicked() {
+            out.2 = true;
+        }
+        ui.add_space(8.0);
+    }
     for a in Attach::ALL.into_iter().rev() {
         if pill(ui, a.label(), attach == a, accent).on_hover_text(format!("Dock to {}", a.label())).clicked() && attach != a {
             out.0 = Some(a);

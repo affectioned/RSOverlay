@@ -254,17 +254,30 @@ fn button(pos: egui::Pos2, button: egui::PointerButton, pressed: bool) -> egui::
     egui::Event::PointerButton { pos, button, pressed, modifiers: egui::Modifiers::NONE }
 }
 
+/// Settings › Accessibility › Pointer size, as f32 bits (1.0 default).
+static CURSOR_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3F80_0000);
+
+/// Laser cursor size multiplier for every panel (0.5–2.5).
+pub fn set_cursor_scale(scale: f32) {
+    CURSOR_SCALE.store(scale.clamp(0.5, 2.5).to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn cursor_scale() -> f32 {
+    f32::from_bits(CURSOR_SCALE.load(std::sync::atomic::Ordering::Relaxed))
+}
+
 /// Paint the laser cursor: accent ring, filled while pressed.
 pub fn paint_cursor(ctx: &egui::Context, cursor: Option<(egui::Pos2, bool)>, accent: egui::Color32) {
     let Some((pos, pressed)) = cursor else { return };
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("laser-cursor")));
-    let r = if pressed { 7.0 } else { 9.0 };
-    painter.circle_filled(pos, r + 2.0, egui::Color32::from_black_alpha(160));
+    let k = cursor_scale();
+    let r = if pressed { 7.0 } else { 9.0 } * k;
+    painter.circle_filled(pos, r + 2.0 * k, egui::Color32::from_black_alpha(160));
     if pressed {
         painter.circle_filled(pos, r, accent);
     } else {
-        painter.circle_stroke(pos, r, egui::Stroke::new(2.0_f32, accent));
-        painter.circle_filled(pos, 2.0, accent);
+        painter.circle_stroke(pos, r, egui::Stroke::new(2.0 * k, accent));
+        painter.circle_filled(pos, 2.0 * k, accent);
     }
 }
 

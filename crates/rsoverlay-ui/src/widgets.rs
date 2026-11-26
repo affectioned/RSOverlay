@@ -166,6 +166,8 @@ pub struct WidgetAction {
     pub close: bool,
     /// Leave the edge-docked group.
     pub unlink: bool,
+    /// Pin pill clicked.
+    pub toggle_pin: bool,
 }
 
 pub const TAB_H: f32 = 40.0;
@@ -173,12 +175,14 @@ pub const BAR_H: f32 = 46.0;
 
 /// Frame around a widget body: tab strip on top, dock bar at the bottom.
 /// `body` draws the active card into the middle.
+#[allow(clippy::too_many_arguments)]
 pub fn frame(
     ctx: &egui::Context,
     tabs: &[WidgetKind],
     active: usize,
     attach: Attach,
     linked: bool,
+    pinned: Option<bool>,
     accent: egui::Color32,
     body: impl FnOnce(&mut egui::Ui, WidgetKind),
 ) -> WidgetAction {
@@ -242,7 +246,7 @@ pub fn frame(
 
         // Dock bar.
         let mut dui = ui.child_ui(bar_r, egui::Layout::right_to_left(egui::Align::Center));
-        (out.attach, out.close) = crate::window_panel::dock_controls(&mut dui, attach, accent);
+        (out.attach, out.close, out.toggle_pin) = crate::window_panel::dock_controls(&mut dui, attach, pinned, accent);
         if linked {
             dui.add_space(8.0);
             out.unlink = crate::window_panel::unlink_pill(&mut dui, accent);

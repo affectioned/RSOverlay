@@ -143,9 +143,16 @@ mod imp {
         width_m: f32,
         /// 0..1 view-angle fade (multiplies alpha).
         fade: f32,
+        /// Texture size now (base size x render scale).
         tex: (u32, u32),
+        base_tex: (u32, u32),
         base_ppp: f32,
         scale: f32,
+        /// Settings > VR panels > Resolution: texels multiplier.
+        render_k: f32,
+        /// The texture replaced by the last resolution change, kept alive
+        /// a few frames so the compositor never samples a freed one.
+        retired: Option<(wgpu::Texture, u32)>,
         /// Inside the view-angle cone this frame.
         in_view: bool,
         last_render: f64,
@@ -187,8 +194,11 @@ mod imp {
                 width_m,
                 fade: 1.0,
                 tex,
+                base_tex: tex,
                 base_ppp: ppp,
                 scale: 1.0,
+                render_k: 1.0,
+                retired: None,
                 in_view: true,
                 last_render: f64::NEG_INFINITY,
             })
@@ -198,9 +208,40 @@ mod imp {
         fn apply_scale(&mut self, scale: f32) {
             if (scale - self.scale).abs() > 1e-3 {
                 self.scale = scale;
-                let ppp = self.base_ppp * scale;
-                self.egui.set_pixels_per_point(ppp);
-                self.points = egui::vec2(self.tex.0 as f32 / ppp, self.tex.1 as f32 / ppp);
+                self.apply_ppp();
+            }
+        }
+
+        /// Same layout in points, `render_k` x the texels: sharper text
+        /// on high-resolution headsets.
+        fn apply_ppp(&mut self) {
+            let ppp = self.base_ppp * self.scale * self.render_k;
+            self.egui.set_pixels_per_point(ppp);
+            self.points = egui::vec2(self.tex.0 as f32 / ppp, self.tex.1 as f32 / ppp);
+        }
+
+        /// Rebuild the shared texture at `k` x the base size (1..=2).
+        fn set_render_scale(&mut self, gpu: &GpuCtx, k: f32) {
+            let k = k.clamp(1.0, 2.0);
+            if (k - self.render_k).abs() < 1e-3 {
+                return;
+            }
+            let tex = ((self.base_tex.0 as f32 * k).round() as u32, (self.base_tex.1 as f32 * k).round() as u32);
+            match build_shared_overlay_texture(gpu, tex.0, tex.1) {
+                Ok((t, view, raw_resource, raw_queue)) => {
+                    let old = std::mem::replace(&mut self._tex, t);
+                    self.retired = Some((old, 0));
+                    self.view = view;
+                    self.raw_resource = raw_resource;
+                    self.raw_queue = raw_queue;
+                    self.tex = tex;
+                    self.render_k = k;
+                    self.egui.resize(tex.0, tex.1);
+                    self.apply_ppp();
+                    // Redraw now, not at the background rate.
+                    self.last_render = f64::NEG_INFINITY;
+                }
+                Err(e) => warn!("panel resolution {k}x: {e:#}"),
             }
         }
 
@@ -247,6 +288,13 @@ mod imp {
             unsafe {
                 if let Err(e) = overlay.set_texture_d3d12(self.handle, self.raw_resource, self.raw_queue) {
                     warn!("SetOverlayTexture (D3D12): {e:#}");
+                }
+            }
+            // The compositor has had several frames on the new texture.
+            if let Some((_, n)) = &mut self.retired {
+                *n += 1;
+                if *n > 8 {
+                    self.retired = None;
                 }
             }
         }
@@ -343,6 +391,8 @@ mod imp {
         group: Option<u32>,
         /// Captured-content opacity (toolbar slider), 0.1..=1.
         opacity: f32,
+        /// Stays up with the dashboard closed (XSO layout mode).
+        pinned: bool,
     }
 
     impl WinOverlay {
@@ -373,6 +423,25 @@ mod imp {
         /// Grabbed panel's size (m) at grab start: followers beyond its
         /// edges are pushed out / pulled in as it's resized.
         size0: (f32, f32),
+        /// Settings > VR panels > Tilt with the controller: the panel's
+        /// rotation relative to the controller at grab start.
+        tilt: Option<glam::Quat>,
+        /// One-stick-action lock: Some(true) = scaling, Some(false) =
+        /// push/pull, None = stick centred (nothing chosen yet).
+        axis: Option<bool>,
+    }
+
+    /// Stick (x, y) after the one-action-at-a-time lock: the axis that
+    /// leaves the dead zone first wins until the stick recentres.
+    fn lock_axis(axis: &mut Option<bool>, x: f32, y: f32) -> (f32, f32) {
+        if x == 0.0 && y == 0.0 {
+            *axis = None;
+            return (0.0, 0.0);
+        }
+        match *axis.get_or_insert(x.abs() > y.abs()) {
+            true => (x, 0.0),
+            false => (0.0, y),
+        }
     }
 
     /// XSO-style auto-hide: shown while the angle between the head's
@@ -399,6 +468,26 @@ mod imp {
         let (_, r0, t0) = from.to_scale_rotation_translation();
         let (_, r1, t1) = to.to_scale_rotation_translation();
         Affine3A::from_rotation_translation(r0.slerp(r1, k), t0.lerp(t1, k))
+    }
+
+    /// SteamVR draws overlays by sort order, not depth. Each panel gets
+    /// an explicit layer (higher = drawn on top), and the laser picks the
+    /// top layer where panels overlap, so it hits what you see.
+    /// Windows 0, dashboard 10, keyboard 20, wrist 30 (toasts 60,
+    /// beams 100).
+    fn layer(panel: usize) -> u32 {
+        match panel {
+            0 => 30,
+            1 => 10,
+            2 => 20,
+            _ => 0,
+        }
+    }
+
+    /// Does hit `a` (panel, distance) beat `b`? Top layer first, then
+    /// nearest.
+    fn hit_beats(a: (usize, f32), b: (usize, f32)) -> bool {
+        (layer(a.0), -a.1) > (layer(b.0), -b.1)
     }
 
     fn stick(v: f32) -> f32 {
@@ -451,6 +540,7 @@ mod imp {
             seq,
             group: None,
             opacity: 1.0,
+            pinned: false,
         })
     }
 
@@ -500,6 +590,7 @@ mod imp {
                     width: w.panel.width_m,
                     group: w.group,
                     opacity: (w.opacity < 1.0).then_some(w.opacity),
+                    pinned: w.pinned,
                 }
             })
             .collect();
@@ -538,6 +629,7 @@ mod imp {
             seq,
             group: None,
             opacity: 1.0,
+            pinned: false,
         })
     }
 
@@ -779,6 +871,9 @@ mod imp {
         // The favourite layout loads once controllers/HMD are tracked.
         let mut favorite_pending = dev_view.layouts.favorite;
         let mut kb = VrPanel::new(&overlay, &gpu, "rsoverlay.keyboard", "RSOverlay Keyboard", KB_TEX, KB_PPP, KB_WIDTH_M, 0.0)?;
+        for (i, h) in [(0, wrist.handle), (1, dash.handle), (2, kb.handle)] {
+            let _ = overlay.set_sort_order(h, layer(i));
+        }
         // Laser beams: static white strip textures rendered once, tinted
         // and stretched per frame. Sorted above every panel.
         let mut beams = Vec::with_capacity(2);
@@ -903,6 +998,8 @@ mod imp {
             // from the tracking API. [left, right].
             let actions = input.as_ref().map(|i| i.poll());
             let mut mods = [(false, false); 2];
+            // Dedicated right / middle click buttons (pressed = clicking).
+            let mut direct = [(false, false); 2];
             let mut toggle_edit = false;
             if let Some(a) = &actions {
                 for c in controllers.iter_mut() {
@@ -913,6 +1010,7 @@ mod imp {
                     c.stick = h.stick;
                     c.menu = false;
                     mods[hand_slot(c.hand)] = (h.right_mod, h.middle_mod);
+                    direct[hand_slot(c.hand)] = (h.right_click, h.middle_click);
                     // Aim from SteamVR's tip pose: the intended pointing
                     // direction per controller model (raw pose points
                     // noticeably off on Index).
@@ -951,18 +1049,27 @@ mod imp {
 
             // ── View-angle auto-hide (XSO behaviour) for every panel; a
             // panel being grabbed never fades.
+            // SteamVR's own menu open: everything of ours steps aside.
+            let steamvr_menu = dev_view.vr_hide_with_steamvr && overlay.is_dashboard_visible();
+            if steamvr_menu && grab.is_some() {
+                grab = None;
+            }
+            // XSO layout mode: unpinned windows only while the dashboard is up.
+            let follow = dev_view.vr_windows_follow_dash;
             if let Some(h) = hmd.as_ref().map(to_affine) {
                 let clip = dev_view.vr_clip_angle;
                 let grabbed = grab.as_ref().map(|g| g.panel);
                 let wrist_world = wrist_parent
                     .and_then(|d| device_pose(d, hmd.as_ref(), &controllers))
                     .map(|p| p * wrist_rel);
-                wrist.update_fade(grabbed == Some(0) || wrist_world.is_some_and(|w| in_view(&h, &w, clip)), dt);
-                dash.update_fade(grabbed == Some(1) || dash_pose.is_some_and(|p| in_view(&h, &p, clip)), dt);
-                kb.update_fade(grabbed == Some(2) || kb_pose.is_some_and(|p| in_view(&h, &p, clip)), dt);
+                let up = !steamvr_menu;
+                wrist.update_fade(up && (grabbed == Some(0) || wrist_world.is_some_and(|w| in_view(&h, &w, clip))), dt);
+                dash.update_fade(up && (grabbed == Some(1) || dash_pose.is_some_and(|p| in_view(&h, &p, clip))), dt);
+                kb.update_fade(up && (grabbed == Some(2) || kb_pose.is_some_and(|p| in_view(&h, &p, clip))), dt);
                 for (k, w) in wins.iter_mut().enumerate() {
                     let p = win_world(w, hmd.as_ref(), &controllers);
-                    w.panel.update_fade(grabbed == Some(k + WIN0) || in_view(&h, &p, clip), dt);
+                    let shown = up && (!follow || w.pinned || dash.visible);
+                    w.panel.update_fade(shown && (grabbed == Some(k + WIN0) || in_view(&h, &p, clip)), dt);
                 }
             }
 
@@ -994,7 +1101,7 @@ mod imp {
                         continue;
                     }
                     if let Some((uv, d)) = overlay.intersect(h, c.origin, c.dir) {
-                        if best.is_none_or(|b| d < b.2) {
+                        if best.is_none_or(|b| hit_beats((i, d), (b.0, b.2))) {
                             best = Some((i, uv, d));
                         }
                     }
@@ -1004,14 +1111,15 @@ mod imp {
                     let hit = best.filter(|b| b.0 == i).map(|b| LaserInput::uv_to_points(b.1, target(i).2));
                     hit_by[i][hand_slot(c.hand)] = hit.is_some();
                     let (rm, mm) = mods[hand_slot(c.hand)];
-                    let button = if rm {
-                        egui::PointerButton::Secondary
-                    } else if mm {
-                        egui::PointerButton::Middle
-                    } else {
-                        egui::PointerButton::Primary
+                    let (trigger, button) = match direct[hand_slot(c.hand)] {
+                        // A dedicated button clicks on its own.
+                        (true, _) => (1.0, egui::PointerButton::Secondary),
+                        (_, true) => (1.0, egui::PointerButton::Middle),
+                        _ if rm => (c.trigger, egui::PointerButton::Secondary),
+                        _ if mm => (c.trigger, egui::PointerButton::Middle),
+                        _ => (c.trigger, egui::PointerButton::Primary),
                     };
-                    list.push(HandSample { hand, hit, trigger: c.trigger, stick_y: c.stick[1], button });
+                    list.push(HandSample { hand, hit, trigger, stick_y: c.stick[1], button });
                 }
             }
             let mut samples = samples.into_iter();
@@ -1093,7 +1201,12 @@ mod imp {
                                 None => Vec::new(),
                             };
                             let size0 = i.checked_sub(WIN0).map_or((width, 0.0), |k| wins[k].size_m());
-                            grab = Some(Grab { hand: c.hand, panel: i, dist, offset, second: None, smoothed: p, followers, size0 });
+                            let tilt = dev_view.vr_grab_tilt.then(|| {
+                                let (_, hand_rot, _) = to_affine(&c.pose).to_scale_rotation_translation();
+                                let (_, panel_rot, _) = p.to_scale_rotation_translation();
+                                hand_rot.inverse() * panel_rot
+                            });
+                            grab = Some(Grab { hand: c.hand, panel: i, dist, offset, second: None, smoothed: p, followers, size0, tilt, axis: None });
                             grabbed_hand = Some(c.hand);
                         }
                     }
@@ -1118,13 +1231,18 @@ mod imp {
                                 w0 * sep / sep0
                             })
                         });
-                        let resizing = two.is_some() || stick(c.stick[0]) != 0.0;
+                        let (sx, sy) = if dev_view.vr_stick_axis_lock {
+                            lock_axis(&mut g.axis, stick(c.stick[0]), stick(c.stick[1]))
+                        } else {
+                            (stick(c.stick[0]), stick(c.stick[1]))
+                        };
+                        let resizing = two.is_some() || sx != 0.0;
                         match two {
                             Some(w) => width = w,
                             None => {
                                 g.second = None;
-                                width *= (stick(c.stick[0]) * SCALE_RATE * dt).exp();
-                                g.dist = (g.dist * (stick(c.stick[1]) * PUSH_RATE * dt).exp()).clamp(GRAB_DIST.0, GRAB_DIST.1);
+                                width *= (sx * SCALE_RATE * dt).exp();
+                                g.dist = (g.dist * (sy * PUSH_RATE * dt).exp()).clamp(GRAB_DIST.0, GRAB_DIST.1);
                             }
                         }
                         let width = width.clamp(PANEL_WIDTH.0, PANEL_WIDTH.1);
@@ -1132,9 +1250,17 @@ mod imp {
                         let hit = Vec3A::from(c.origin) + Vec3A::from(c.dir) * g.dist;
                         // Orient first (from the grab point), then hang the
                         // panel off it by the scaled grab offset.
-                        let mut target = face(hit, eye.unwrap_or(hit + Vec3A::Z));
+                        let mut target = match g.tilt {
+                            // Rotates with the hand (roll/pitch/yaw), from
+                            // wherever it was relative to the hand at grab.
+                            Some(rel) => {
+                                let (_, hand_rot, _) = to_affine(&c.pose).to_scale_rotation_translation();
+                                Affine3A::from_rotation_translation(hand_rot * rel, hit.into())
+                            }
+                            None => face(hit, eye.unwrap_or(hit + Vec3A::Z)),
+                        };
                         target.translation = hit + target.matrix3 * (g.offset * width);
-                        if let Some(e) = eye {
+                        if let (Some(e), None) = (eye, g.tilt) {
                             target = Affine3A { translation: target.translation, ..face(target.translation, e) };
                         }
                         g.smoothed = smooth(g.smoothed, target, dt);
@@ -1284,7 +1410,7 @@ mod imp {
                 let z = (to_eye - d * to_eye.dot(d)).try_normalize().unwrap_or(Vec3A::Y);
                 let pose = Affine3A::from_cols(d, z.cross(d), z, mid);
                 let _ = overlay.set_width(b.handle, len);
-                let _ = overlay.set_texel_aspect(b.handle, len * BEAM_TEX.1 as f32 / (BEAM_TEX.0 as f32 * BEAM_THICKNESS_M));
+                let _ = overlay.set_texel_aspect(b.handle, len * BEAM_TEX.1 as f32 / (BEAM_TEX.0 as f32 * BEAM_THICKNESS_M * dev_view.vr_pointer_size));
                 // Parent to the controller: the compositor re-poses it
                 // every frame with the freshest tracking, so the beam
                 // never trails the hand (absolute poses lagged a frame).
@@ -1334,6 +1460,13 @@ mod imp {
             wrist.apply_scale(scale);
             dash.apply_scale(scale);
             kb.apply_scale(scale);
+            let k = dev_view.vr_render_scale;
+            for p in [&mut wrist, &mut dash, &mut kb, &mut toasts] {
+                p.set_render_scale(&gpu, k);
+            }
+            for w in &mut wins {
+                w.panel.set_render_scale(&gpu, k);
+            }
             for w in &mut wins {
                 w.panel.apply_scale(scale);
             }
@@ -1624,10 +1757,11 @@ mod imp {
                 if let Some((tabs, active)) = w.widgets.clone() {
                     // Widget group: tabs + live card + dock bar.
                     let (attach, cursor, linked) = (w.attach, lf.cursor, w.group.is_some());
+                    let pinned = follow.then_some(w.pinned);
                     let inj = injector.as_ref();
                     let mut wa = rsoverlay_ui::widgets::WidgetAction::default();
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
-                        wa = dev_view.widget_ui(ctx, &tabs, active, attach, linked, inj);
+                        wa = dev_view.widget_ui(ctx, &tabs, active, attach, linked, pinned, inj);
                         if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
                             rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                         }
@@ -1642,6 +1776,7 @@ mod imp {
                     act.attach = wa.attach;
                     act.close = wa.close;
                     act.unlink = wa.unlink;
+                    act.toggle_pin = wa.toggle_pin;
                 } else if let Some(mirror) = &w.mirror {
                     if w.blocked_checked.is_none_or(|t| t.elapsed() >= Duration::from_secs(1)) {
                         w.blocked_checked = Some(Instant::now());
@@ -1650,10 +1785,10 @@ mod imp {
                     let (title, handle_m, attach, cursor, blocked) =
                         (mirror.source.label(), mirror.handle(), w.attach, lf.cursor, w.input_blocked);
                     let icon = w.icon.as_ref().map(|t| t.id());
-                    let (linked, opacity) = (w.group.is_some(), w.opacity);
+                    let (linked, opacity, pinned) = (w.group.is_some(), w.opacity, follow.then_some(w.pinned));
                     let events = lf.events.clone();
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
-                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, opacity, accent);
+                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, opacity, pinned, accent);
                         if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
                             rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                         }
@@ -1716,6 +1851,7 @@ mod imp {
                 if act.unlink {
                     w.group = None;
                 }
+                w.pinned ^= act.toggle_pin;
                 if let Some(o) = act.opacity {
                     w.opacity = o.clamp(window_panel::MIN_CONTENT_OPACITY, 1.0);
                 }
@@ -1875,6 +2011,7 @@ mod imp {
                             w.world = world;
                             w.group = p.group.filter(|_| attach == Attach::World).map(|g| group_base + 1 + g);
                             w.opacity = p.opacity.unwrap_or(1.0).clamp(window_panel::MIN_CONTENT_OPACITY, 1.0);
+                            w.pinned = p.pinned;
                             next_group = next_group.max(w.group.unwrap_or(0));
                             wins.push(w);
                         }
@@ -2298,6 +2435,26 @@ mod imp {
                 p = smooth(p, b, 1.0 / 90.0);
             }
             assert!((p.translation - b.translation).length() < 1e-3);
+        }
+
+        #[test]
+        fn laser_hits_the_panel_drawn_on_top() {
+            // Keyboard (drawn over windows) wins even when a window is nearer.
+            assert!(hit_beats((2, 1.2), (WIN0, 0.8)));
+            assert!(!hit_beats((WIN0, 0.8), (2, 1.2)));
+            // Same layer: nearest wins.
+            assert!(hit_beats((WIN0, 0.5), (WIN0 + 1, 0.9)));
+        }
+
+        #[test]
+        fn stick_does_one_thing_at_a_time() {
+            let mut axis = None;
+            // Mostly sideways first: scaling, even as it drifts vertical.
+            assert_eq!(lock_axis(&mut axis, 0.6, 0.2), (0.6, 0.0));
+            assert_eq!(lock_axis(&mut axis, 0.3, 0.9), (0.3, 0.0));
+            // Recentred: the next push picks again.
+            assert_eq!(lock_axis(&mut axis, 0.0, 0.0), (0.0, 0.0));
+            assert_eq!(lock_axis(&mut axis, 0.1, -0.7), (0.0, -0.7));
         }
 
         #[test]

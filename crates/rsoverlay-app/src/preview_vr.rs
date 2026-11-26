@@ -421,7 +421,7 @@ pub fn run(
                                 let _ = keyboard.frame(ctx, &hands, time, accent, false);
                             }
                             Content::Widgets(tabs) => {
-                                let _ = dev_view.widget_ui(ctx, &tabs, 0, Attach::World, false, None);
+                                let _ = dev_view.widget_ui(ctx, &tabs, 0, Attach::World, false, None, None);
                             }
                             Content::Window(app) => {
                                 egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
@@ -430,7 +430,7 @@ pub fn run(
                                     let body = egui::Rect::from_min_max(full.min, egui::pos2(full.right(), bar.top() - 6.0));
                                     app.paint(ui, body);
                                     let mut opacity = 1.0;
-                                    let _ = window_panel::toolbar(ui, bar, app.title(), None, Attach::World, false, Some(&mut opacity), accent);
+                                    let _ = window_panel::toolbar(ui, bar, app.title(), None, Attach::World, false, None, Some(&mut opacity), accent);
                                 });
                             }
                         }

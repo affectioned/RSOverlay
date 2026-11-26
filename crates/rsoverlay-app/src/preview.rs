@@ -142,6 +142,12 @@ pub fn seed_dev_view(
     dev.pointer.double_click_s = cfg.vr.double_click_s.clamp(0.0, 0.8);
     dev.restore_session = cfg.vr.restore_session;
     dev.vr_hide_wrist = cfg.vr.hide_wrist;
+    dev.vr_hide_with_steamvr = cfg.vr.hide_with_steamvr_dashboard;
+    dev.vr_windows_follow_dash = cfg.vr.windows_follow_dashboard;
+    dev.vr_grab_tilt = cfg.vr.grab_tilt;
+    dev.vr_stick_axis_lock = cfg.vr.stick_axis_lock;
+    dev.vr_pointer_size = cfg.vr.pointer_size.clamp(0.5, 2.5);
+    dev.vr_render_scale = cfg.vr.render_scale.clamp(1.0, 2.0);
     let nc = &cfg.notifications;
     dev.notif.size_m = nc.size_m.clamp(0.15, 0.6);
     dev.notif.offset_y = nc.offset_y.clamp(-0.4, 0.2);
@@ -317,6 +323,12 @@ pub fn config_from_dev_view(
         double_click_s: dev.pointer.double_click_s,
         restore_session: dev.restore_session,
         hide_wrist: dev.vr_hide_wrist,
+        hide_with_steamvr_dashboard: dev.vr_hide_with_steamvr,
+        windows_follow_dashboard: dev.vr_windows_follow_dash,
+        grab_tilt: dev.vr_grab_tilt,
+        stick_axis_lock: dev.vr_stick_axis_lock,
+        pointer_size: dev.vr_pointer_size,
+        render_scale: dev.vr_render_scale,
     };
     out.vr_state = dev.vr_state.clone();
     out.discord = dev.discord.clone();
@@ -1387,6 +1399,12 @@ mod config_roundtrip_tests {
         v.double_click_s = 0.2;
         v.restore_session = false;
         v.hide_wrist = true;
+        v.hide_with_steamvr_dashboard = false;
+        v.windows_follow_dashboard = false;
+        v.grab_tilt = true;
+        v.stick_axis_lock = false;
+        v.pointer_size = 1.5;
+        v.render_scale = 2.0;
         c.vr_state = VrState {
             wrist_pose: Some([[1.0, 0.0, 0.0, 0.1], [0.0, 1.0, 0.0, 0.2], [0.0, 0.0, 1.0, 0.3]]),
             wrist_width: Some(0.3),

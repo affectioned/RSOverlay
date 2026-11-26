@@ -93,6 +93,9 @@ pub struct IVROverlayFnTable {
     pub _pad_04b: [*const c_void; 6], // 50..=55
     pub SetOverlayTexture: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, pTexture: *const Texture_t) -> EVROverlayError,
     pub ClearOverlayTexture: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
+    pub _pad_05: [*const c_void; 6], // 58..=63
+    /// Is SteamVR's own dashboard (system menu) open?
+    pub IsDashboardVisible: unsafe extern "system" fn() -> bool, // 64
 }
 
 // Slot indices verified against `openvr_capi.h` at SDK tag v1.12.5,
@@ -114,6 +117,7 @@ const _: () = {
     assert!(std::mem::offset_of!(IVROverlayFnTable, HideOverlay) == 41 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayTexture) == 56 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, ClearOverlayTexture) == 57 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, IsDashboardVisible) == 64 * P);
 };
 
 pub type FnVR_InitInternal = unsafe extern "system" fn(peError: *mut EVRInitError, eType: EVRApplicationType) -> isize;

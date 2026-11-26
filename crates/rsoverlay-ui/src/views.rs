@@ -317,6 +317,18 @@ pub struct DevView {
     pub vr_ui_scale: f32,
     pub vr_show_lasers: bool,
     pub vr_laser_angle: f32,
+    /// Laser cursor + beam size multiplier.
+    pub vr_pointer_size: f32,
+    /// Fade all panels while SteamVR's own dashboard is open.
+    pub vr_hide_with_steamvr: bool,
+    /// XSO layout mode: unpinned windows only show with the dashboard.
+    pub vr_windows_follow_dash: bool,
+    /// Grabbed panels tilt/roll with the controller.
+    pub vr_grab_tilt: bool,
+    /// Grab stick: one axis (push/pull or scale) at a time.
+    pub vr_stick_axis_lock: bool,
+    /// Panel render resolution multiplier (1, 1.5, 2).
+    pub vr_render_scale: f32,
     pub run_as_admin: bool,
     /// Set by the app: is this process elevated right now?
     pub elevated: bool,
@@ -432,6 +444,12 @@ impl Default for DevView {
             vr_ui_scale: 1.0,
             vr_show_lasers: true,
             vr_laser_angle: 0.0,
+            vr_pointer_size: 1.0,
+            vr_hide_with_steamvr: true,
+            vr_windows_follow_dash: true,
+            vr_grab_tilt: false,
+            vr_stick_axis_lock: true,
+            vr_render_scale: 1.0,
             run_as_admin: false,
             elevated: false,
             restart_elevated_requested: false,
@@ -585,6 +603,7 @@ impl DevView {
     }
 
     /// A floating widget panel: tab strip + the live card + dock bar.
+    #[allow(clippy::too_many_arguments)]
     pub fn widget_ui(
         &mut self,
         ctx: &egui::Context,
@@ -592,6 +611,7 @@ impl DevView {
         active: usize,
         attach: crate::window_panel::Attach,
         linked: bool,
+        pinned: Option<bool>,
         injector: Option<&rsoverlay_input::InputInjector>,
     ) -> crate::widgets::WidgetAction {
         use crate::widgets::WidgetKind as K;
@@ -601,7 +621,7 @@ impl DevView {
         if ctx.style().visuals.selection.bg_fill != accent {
             ctx.style_mut(|st| st.visuals.selection.bg_fill = accent);
         }
-        crate::widgets::frame(ctx, tabs, active, attach, linked, accent, |ui, k| match k {
+        crate::widgets::frame(ctx, tabs, active, attach, linked, pinned, accent, |ui, k| match k {
             K::NowPlaying => media_card(ui, self.media.as_ref(), accent),
             K::System => self.system.show(ui, self.vr_perf.as_ref(), accent),
             K::Volume => self.volume.show(ui, accent),
@@ -770,43 +790,47 @@ impl DevView {
                         Some("vr")
                     }
                     3 => {
+                        vr_panels_card(ui, &mut self.vr_windows_follow_dash, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, accent);
+                        Some("vr-panels")
+                    }
+                    4 => {
                         pointer_card(ui, &mut self.cursor_smoothing, &mut self.scroll_speed, &mut self.pointer, accent);
                         Some("pointer")
                     }
-                    4 => {
+                    5 => {
                         keyboard_card(ui, &mut self.kb_prefs, accent);
                         Some("keyboard")
                     }
-                    5 => {
+                    6 => {
                         notifications_card(ui, &mut self.notif, &mut self.pending_sounds, accent);
                         Some("notifications")
                     }
-                    6 => {
+                    7 => {
                         wrist_toolbar_card(ui, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, accent);
                         Some("wrist-toolbar")
                     }
-                    7 => {
-                        accessibility_card(ui, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.reduce_motion, accent);
+                    8 => {
+                        accessibility_card(ui, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.vr_pointer_size, &mut self.reduce_motion, accent);
                         Some("accessibility")
                     }
-                    8 => {
+                    9 => {
                         let _ = admin_card(ui, &mut self.run_as_admin, self.elevated, accent);
                         Some("administrator")
                     }
-                    9 => {
+                    10 => {
                         placement_card(ui, &mut self.placement, accent);
                         Some("placement")
                     }
-                    10 => {
+                    11 => {
                         let snap = self.system.snapshot();
                         performance_card(ui, snap.as_ref(), self.frame_ms, &self.frame_ms_hist, self.last_fps, self.notifications_received, accent);
                         Some("stats")
                     }
-                    11 => {
+                    12 => {
                         discord_card(ui, &mut self.discord_presence, &mut self.discord, accent);
                         Some("discord")
                     }
-                    12 => {
+                    13 => {
                         let _ = reset_card(ui, &mut self.reset_armed_at);
                         Some("reset")
                     }
@@ -851,6 +875,7 @@ impl DevView {
     /// Called by every surface (dashboard, wrist); idempotent within a
     /// frame.
     fn tick_state(&mut self, ctx: &egui::Context) {
+        crate::laser::set_cursor_scale(self.vr_pointer_size);
         let now = Instant::now();
         while matches!(self.toasts.front(), Some(t) if t.expires < now) {
             self.toasts.pop_front();
@@ -934,7 +959,7 @@ impl DevView {
                         ui.set_height(40.0);
                         ui.label(egui::RichText::new(format!("RSOverlay · {}", self.page.label())).color(theme::FG_MUTED).size(theme::SIZE_BODY));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let (dock, close) = crate::window_panel::dock_controls(ui, self.dash_attach, accent);
+                            let (dock, close, _) = crate::window_panel::dock_controls(ui, self.dash_attach, None, accent);
                             self.dash_dock = dock.or(self.dash_dock);
                             self.dash_close |= close;
                         });
@@ -1193,6 +1218,8 @@ impl DevView {
                     l.add_space(theme::GUTTER);
                     vr_card(l, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, &mut self.vr_hide_wrist, accent);
                     l.add_space(theme::GUTTER);
+                    vr_panels_card(l, &mut self.vr_windows_follow_dash, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, accent);
+                    l.add_space(theme::GUTTER);
                     pointer_card(l, &mut self.cursor_smoothing, &mut self.scroll_speed, &mut self.pointer, accent);
                     l.add_space(theme::GUTTER);
                     keyboard_card(l, &mut self.kb_prefs, accent);
@@ -1201,7 +1228,7 @@ impl DevView {
                     l.add_space(theme::GUTTER);
                     wrist_toolbar_card(l, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, accent);
                     l.add_space(theme::GUTTER);
-                    accessibility_card(l, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.reduce_motion, accent);
+                    accessibility_card(l, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.vr_pointer_size, &mut self.reduce_motion, accent);
                     l.add_space(theme::GUTTER);
                     if admin_card(l, &mut self.run_as_admin, self.elevated, accent) {
                         self.restart_elevated_requested = true;
@@ -1316,7 +1343,8 @@ fn reset_card(ui: &mut egui::Ui, armed_at: &mut Option<f64>) -> bool {
     confirmed
 }
 
-fn accessibility_card(ui: &mut egui::Ui, scale: &mut f32, lasers: &mut bool, laser_angle: &mut f32, reduce_motion: &mut bool, accent: egui::Color32) {
+#[allow(clippy::too_many_arguments)]
+fn accessibility_card(ui: &mut egui::Ui, scale: &mut f32, lasers: &mut bool, laser_angle: &mut f32, pointer_size: &mut f32, reduce_motion: &mut bool, accent: egui::Color32) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         card_header(ui, icons::SETTINGS, "Accessibility", accent);
@@ -1334,6 +1362,13 @@ fn accessibility_card(ui: &mut egui::Ui, scale: &mut f32, lasers: &mut bool, las
         })
         .response
         .on_hover_text("Tilt the laser up/down to match how you hold your controller");
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Pointer size"));
+            crate::theme::fit_slider(ui);
+            ui.add(egui::Slider::new(pointer_size, 0.5..=2.5).fixed_decimals(1).suffix("×"));
+        })
+        .response
+        .on_hover_text("Size of the laser cursor and beam");
         ui.checkbox(reduce_motion, "Reduce motion").on_hover_text("Make page, toast and highlight transitions instant");
         ui.label(egui::RichText::new("Moving/resizing a panel always shows an accent outline + size readout, with a haptic tick on grab and release.")
             .size(theme::SIZE_CAPTION + 1.0).color(theme::FG_MUTED));
@@ -1368,6 +1403,48 @@ fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opac
         });
         ui.checkbox(hide_wrist, "Hide wrist toolbar")
             .on_hover_text("No wrist overlay at all. Open the dashboard with a double-press of A / X (or the menu button) on the wrist hand.");
+    });
+}
+
+/// How panels show, hide, move and render in VR.
+fn vr_panels_card(
+    ui: &mut egui::Ui,
+    follow_dash: &mut bool,
+    hide_with_steamvr: &mut bool,
+    grab_tilt: &mut bool,
+    axis_lock: &mut bool,
+    render_scale: &mut f32,
+    accent: egui::Color32,
+) {
+    theme::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        card_header(ui, icons::LAYERS, "VR panels", accent);
+        ui.add_space(6.0);
+        ui.checkbox(follow_dash, "Windows hide with the dashboard")
+            .on_hover_text("Like XSOverlay: closing the dashboard hides every window that isn't pinned. Use Pin on a window's toolbar to keep it up.");
+        ui.checkbox(hide_with_steamvr, "Hide while the SteamVR menu is open")
+            .on_hover_text("Fade all RSOverlay panels out while SteamVR's own dashboard is up");
+        ui.checkbox(grab_tilt, "Tilt panels with the controller")
+            .on_hover_text("While grabbing, the panel rotates with your hand. Off: it stays upright and faces you.");
+        ui.checkbox(axis_lock, "One stick action at a time")
+            .on_hover_text("While grabbing: push/pull (stick up/down) and resize (stick left/right) don't mix. The direction you push first wins until the stick returns to centre.");
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Resolution"));
+            for (v, label, tip) in [
+                (1.0, "Standard", "Default sharpness"),
+                (1.5, "High", "Sharper text for high-resolution headsets (more GPU memory)"),
+                (2.0, "Ultra", "Sharpest text, e.g. Bigscreen Beyond or Pimax (about 4× the GPU memory)"),
+            ] {
+                let sel = (*render_scale - v).abs() < 0.01;
+                if ui
+                    .selectable_label(sel, egui::RichText::new(label).color(if sel { theme::BG_ROOT } else { theme::FG_MUTED }))
+                    .on_hover_text(tip)
+                    .clicked()
+                {
+                    *render_scale = v;
+                }
+            }
+        });
     });
 }
 

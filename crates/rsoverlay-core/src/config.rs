@@ -82,6 +82,23 @@ pub struct VrCfg {
     /// Don't show the wrist toolbar (the dashboard is still summoned with
     /// the controller's menu double-press).
     pub hide_wrist: bool,
+    /// Fade every RSOverlay panel out while SteamVR's own dashboard is
+    /// open (it sits behind ours otherwise).
+    pub hide_with_steamvr_dashboard: bool,
+    /// XSO layout mode: windows that aren't pinned show only while the
+    /// RSOverlay dashboard is open; pinned ones always stay.
+    pub windows_follow_dashboard: bool,
+    /// While grabbing, the panel tilts/rolls with the controller instead
+    /// of staying upright and facing you.
+    pub grab_tilt: bool,
+    /// While grabbing, the stick does one thing at a time: the axis
+    /// pushed first (push/pull or scale) wins until the stick recentres.
+    pub stick_axis_lock: bool,
+    /// Laser cursor + beam size multiplier (0.5–2.5).
+    pub pointer_size: f32,
+    /// Panel render resolution multiplier (1, 1.5 or 2): sharper text on
+    /// high-resolution headsets, more VRAM.
+    pub render_scale: f32,
 }
 
 /// Where things were left in VR — not choices made in Settings, but
@@ -170,7 +187,7 @@ pub const DEFAULT_WRIST_COMPACT: u32 = 0x0F | (1 << 8) | (1 << 9) | (1 << 10) | 
 
 impl Default for VrCfg {
     fn default() -> Self {
-        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0x7F, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new(), long_press: false, long_press_s: 0.6, double_click_s: 0.4, restore_session: true, hide_wrist: false }
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0x7F, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new(), long_press: false, long_press_s: 0.6, double_click_s: 0.4, restore_session: true, hide_wrist: false, hide_with_steamvr_dashboard: true, windows_follow_dashboard: true, grab_tilt: false, stick_axis_lock: true, pointer_size: 1.0, render_scale: 1.0 }
     }
 }
 

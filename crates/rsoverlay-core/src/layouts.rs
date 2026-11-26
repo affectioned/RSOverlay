@@ -34,6 +34,9 @@ pub struct LayoutPanel {
     /// existed) = fully opaque — deliberately not a 0.0 default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f32>,
+    /// Stays visible while the dashboard is closed (XSO layout mode).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -134,6 +137,7 @@ mod tests {
                 pose: [[1.0, 0.0, 0.0, 0.1], [0.0, 1.0, 0.0, 0.2], [0.0, 0.0, 1.0, 0.3]],
                 width: 0.34,
                 group: Some(3),
+                pinned: true,
                 ..Default::default()
             }],
             keyboard: Some(KeyboardPose { pose: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 1.0], [0.0, 0.0, 1.0, -0.5]], width: 0.75 }),

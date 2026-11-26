@@ -54,6 +54,16 @@
       "requirement": "optional"
     },
     {
+      "name": "/actions/rsoverlay/in/RightClick",
+      "type": "boolean",
+      "requirement": "optional"
+    },
+    {
+      "name": "/actions/rsoverlay/in/MiddleClick",
+      "type": "boolean",
+      "requirement": "optional"
+    },
+    {
       "name": "/actions/rsoverlay/in/ToggleEditMode",
       "type": "boolean",
       "requirement": "suggested"
@@ -79,6 +89,8 @@
       "/actions/rsoverlay/in/Stick": "Scroll \u00b7 push/pull \u00b7 scale",
       "/actions/rsoverlay/in/RightClickModifier": "Right-click modifier (hold while clicking)",
       "/actions/rsoverlay/in/MiddleClickModifier": "Middle-click modifier (hold while clicking)",
+      "/actions/rsoverlay/in/RightClick": "Right click (press)",
+      "/actions/rsoverlay/in/MiddleClick": "Middle click (press)",
       "/actions/rsoverlay/in/ToggleEditMode": "Show / hide dashboard",
       "/actions/rsoverlay/out/Haptic": "Haptic feedback",
       "/actions/rsoverlay/in/Pointer": "Laser pointer pose"

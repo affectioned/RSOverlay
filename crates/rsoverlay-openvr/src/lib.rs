@@ -304,6 +304,12 @@ impl<'a> Overlay<'a> {
         check(r, "HideOverlay")
     }
 
+    /// SteamVR's own dashboard (system menu) is open.
+    pub fn is_dashboard_visible(&self) -> bool {
+        // SAFETY: IVROverlay_024 slot 64 (pinned in sys.rs), no arguments.
+        unsafe { (self.table().IsDashboardVisible)() }
+    }
+
     /// Multiply the overlay's colour in the compositor (0..=1 per
     /// channel). Used for night light — zero render cost on our side.
     pub fn set_color(&self, handle: VROverlayHandle_t, rgb: [f32; 3]) -> Result<(), OpenVrError> {
@@ -704,6 +710,10 @@ pub struct HandInput {
     /// XSO-style click modifiers (Index trackpad S/N, Touch A·X / B·Y touch).
     pub right_mod: bool,
     pub middle_mod: bool,
+    /// Dedicated right / middle click buttons (press = click at the
+    /// laser, no trigger needed). Unbound by default.
+    pub right_click: bool,
+    pub middle_click: bool,
     /// Rising edge of the edit-mode toggle (double-press left A / X).
     pub toggle_edit: bool,
     /// SteamVR's per-controller pointing pose (/pose/tip) — where the
@@ -722,6 +732,8 @@ pub struct Input<'a> {
     stick: sys::VRActionHandle_t,
     right_mod: sys::VRActionHandle_t,
     middle_mod: sys::VRActionHandle_t,
+    right_click: sys::VRActionHandle_t,
+    middle_click: sys::VRActionHandle_t,
     toggle_edit: sys::VRActionHandle_t,
     haptic: sys::VRActionHandle_t,
     pointer: sys::VRActionHandle_t,
@@ -816,6 +828,8 @@ impl OpenVr {
                 stick: handle("/actions/rsoverlay/in/Stick")?,
                 right_mod: handle("/actions/rsoverlay/in/RightClickModifier")?,
                 middle_mod: handle("/actions/rsoverlay/in/MiddleClickModifier")?,
+                right_click: handle("/actions/rsoverlay/in/RightClick")?,
+                middle_click: handle("/actions/rsoverlay/in/MiddleClick")?,
                 toggle_edit: handle("/actions/rsoverlay/in/ToggleEditMode")?,
                 haptic: handle("/actions/rsoverlay/out/Haptic")?,
                 pointer: handle("/actions/rsoverlay/in/Pointer")?,
@@ -877,6 +891,8 @@ impl Input<'_> {
                 stick: [stick.x, stick.y],
                 right_mod: on(self.right_mod),
                 middle_mod: on(self.middle_mod),
+                right_click: on(self.right_click),
+                middle_click: on(self.middle_click),
                 toggle_edit: edit.bActive && edit.bState && edit.bChanged,
                 aim,
             }

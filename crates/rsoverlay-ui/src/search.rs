@@ -55,6 +55,12 @@ fn static_entries() -> Vec<Entry> {
         card("Media theme", "Settings › Wrist toolbar", "album art colour color accent", Settings, "Wrist toolbar"),
         card("Cursor smoothing", "Settings › Pointer", "jitter steady laser", Settings, "Pointer"),
         card("Scroll speed", "Settings › Pointer", "wheel scrolling", Settings, "Pointer"),
+        card("Windows hide with the dashboard", "Settings › VR panels", "pin pinned layout mode hide show all windows xsoverlay", Settings, "VR panels"),
+        card("Hide while the SteamVR menu is open", "Settings › VR panels", "steamvr dashboard system menu hide fade", Settings, "VR panels"),
+        card("Tilt panels with the controller", "Settings › VR panels", "rotate rotation tilt roll grab world locked", Settings, "VR panels"),
+        card("One stick action at a time", "Settings › VR panels", "push pull scale resize stick decouple axis grab", Settings, "VR panels"),
+        card("Panel resolution", "Settings › VR panels", "sharp text blurry resolution supersampling bigscreen beyond pimax quality", Settings, "VR panels"),
+        card("Pointer size", "Settings › Accessibility", "cursor laser dot beam size big", Settings, "Accessibility"),
         card("Placement", "Settings", "position offset size curve curvature opacity anchor", Settings, "Placement"),
         card("RSOverlay performance", "Settings › RSOverlay performance", "overlay fps frame time own footprint memory light fast", Settings, "RSOverlay performance"),
         card("Volume mixer", "Audio", "sound mute master app volume", Audio, "Volume"),
@@ -156,7 +162,7 @@ mod tests {
         for e in static_entries() {
             if let Target::Card(_, cap) = e.target {
                 assert!(
-                    ["Appearance", "Night light", "VR", "Pointer", "Wrist toolbar", "Accessibility", "Administrator", "Reset", "Placement", "RSOverlay performance",
+                    ["Appearance", "Night light", "VR", "VR panels", "Pointer", "Wrist toolbar", "Accessibility", "Administrator", "Reset", "Placement", "RSOverlay performance",
                         "Volume", "Now playing", "VRChat chatbox", "Macros", "Notifications", "Battery", "PC performance"]
                         .contains(&cap),
                     "{cap}"

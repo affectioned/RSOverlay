@@ -70,6 +70,7 @@ pub struct DevHarness {
     demo_batteries: bool,
     win_attach: Attach,
     win_linked: bool,
+    win_pinned: bool,
     win_opacity: f32,
     /// What the VR keyboard typed (it types into RSOverlay, not Windows).
     typed: String,
@@ -105,6 +106,7 @@ impl DevHarness {
             demo_batteries: test.demo_batteries,
             win_attach: Attach::World,
             win_linked: true,
+            win_pinned: false,
             win_opacity: 1.0,
             typed: String::new(),
             icons: Default::default(),
@@ -169,13 +171,14 @@ impl DevHarness {
             }
             Surface::Widgets => {
                 self.widget_active = self.widget_active.min(self.widgets.len().saturating_sub(1));
-                let wa = dev.widget_ui(ctx, &self.widgets, self.widget_active, self.win_attach, self.win_linked, Some(injector));
+                let wa = dev.widget_ui(ctx, &self.widgets, self.widget_active, self.win_attach, self.win_linked, Some(self.win_pinned), Some(injector));
                 if let Some(i) = wa.select {
                     self.widget_active = i;
                 }
                 if wa.unlink {
                     self.win_linked = false;
                 }
+                self.win_pinned ^= wa.toggle_pin;
                 if let Some(a) = wa.attach {
                     self.win_attach = a;
                 }
@@ -184,13 +187,14 @@ impl DevHarness {
                 }
             }
             Surface::WindowPanel => {
-                let act = window_panel::show(ctx, "Example window — capture placeholder", None, self.win_attach, false, None, self.win_linked, self.win_opacity, dev.accent);
+                let act = window_panel::show(ctx, "Example window — capture placeholder", None, self.win_attach, false, None, self.win_linked, self.win_opacity, Some(self.win_pinned), dev.accent);
                 if let Some(a) = act.attach {
                     self.win_attach = a;
                 }
                 if act.unlink {
                     self.win_linked = false;
                 }
+                self.win_pinned ^= act.toggle_pin;
                 if let Some(o) = act.opacity {
                     self.win_opacity = o;
                 }
