@@ -62,8 +62,16 @@ jobs:
         run: |
           pre=""
           case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
+          # Hand-written notes in docs/releases/<tag>.md when present
+          # (write them before tagging); otherwise GitHub's generated list.
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then
+            notes_arg=(--notes-file "$notes")
+          else
+            notes_arg=(--generate-notes)
+          fi
           gh release create "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" \
-            --title "RSOverlay $GITHUB_REF_NAME" --generate-notes $pre
+            --title "RSOverlay $GITHUB_REF_NAME" "${notes_arg[@]}" $pre
 
   steam:
     # Off until the Steam app exists. To turn on: set the repository

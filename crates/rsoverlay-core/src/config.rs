@@ -83,6 +83,10 @@ pub struct VrCfg {
     pub long_press_s: f32,
     /// Laser double-click assist window, seconds (0 = off).
     pub double_click_s: f32,
+    /// Controller vibration strength (0 = off, 1 = default, up to 1.5).
+    pub haptics: f32,
+    /// Grab smoothing 0..1 (0 = raw hand motion).
+    pub grab_smoothing: f32,
     /// Reopen the windows / widgets that were open when VR last closed
     /// (a starred startup layout takes precedence).
     pub restore_session: bool,
@@ -217,7 +221,7 @@ pub const DEFAULT_WRIST_COMPACT: u32 = 0x0F | (1 << 8) | (1 << 9) | (1 << 10) | 
 
 impl Default for VrCfg {
     fn default() -> Self {
-        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0xFF, wrist_actions_rev: 1, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new(), long_press: false, long_press_s: 0.6, double_click_s: 0.4, restore_session: true, hide_wrist: false, hide_with_steamvr_dashboard: true, windows_follow_dashboard: true, grab_tilt: false, stick_axis_lock: true, pointer_size: 1.0, render_scale: 1.0 }
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0xFF, wrist_actions_rev: 1, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new(), long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, restore_session: true, hide_wrist: false, hide_with_steamvr_dashboard: true, windows_follow_dashboard: true, grab_tilt: false, stick_axis_lock: true, pointer_size: 1.0, render_scale: 1.0 }
     }
 }
 
@@ -316,6 +320,10 @@ pub struct Appearance {
     pub battery_warn_pct: u8,
     /// Play a chime with the low-battery toast (VR).
     pub battery_sound: bool,
+    /// Clock: "system", "12h" or "24h".
+    pub clock_format: String,
+    /// Date: "system" (Thu, Nov 26), "day-month" (Thu 26 Nov) or "iso".
+    pub date_format: String,
     /// Devices (by label) hidden from the battery card, wrist and header;
     /// they don't raise low-battery alerts either.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -347,6 +355,8 @@ impl Default for Appearance {
             reduce_motion: false,
             battery_warn_pct: 20,
             battery_hidden: Vec::new(),
+            clock_format: "system".into(),
+            date_format: "system".into(),
             battery_sound: true,
             discord_presence: true,
             steamvr_icons: true,

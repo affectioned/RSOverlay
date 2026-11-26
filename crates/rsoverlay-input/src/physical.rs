@@ -62,6 +62,35 @@ mod imp {
         Ok(())
     }
 
+    /// Installed keyboard layouts (input languages).
+    pub fn layout_count() -> usize {
+        // SAFETY: a null buffer only asks for the count.
+        unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayoutList(None).max(0) as usize }
+    }
+
+    /// Ask the focused window to switch to the next installed layout
+    /// (what Windows' own language hotkey does).
+    pub fn next_layout() -> bool {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_INPUTLANGCHANGEREQUEST};
+        const HKL_NEXT: isize = 1;
+        // SAFETY: posting a standard message to the foreground window.
+        unsafe { PostMessageW(GetForegroundWindow(), WM_INPUTLANGCHANGEREQUEST, WPARAM(0), LPARAM(HKL_NEXT)).is_ok() }
+    }
+
+    /// Short name of a layout's language, e.g. "en-US", "de-DE".
+    pub fn layout_name(hkl: isize) -> String {
+        use windows::Win32::Globalization::LCIDToLocaleName;
+        let lcid = (hkl as usize & 0xFFFF) as u32;
+        let mut buf = [0u16; 85];
+        // SAFETY: buffer sized to LOCALE_NAME_MAX_LENGTH.
+        let n = unsafe { LCIDToLocaleName(lcid, Some(&mut buf), 0) };
+        if n <= 1 {
+            return format!("{lcid:04x}");
+        }
+        String::from_utf16_lossy(&buf[..n as usize - 1])
+    }
+
     /// The layout of whatever window keystrokes will land in.
     pub fn foreground_layout() -> isize {
         unsafe {
@@ -120,6 +149,15 @@ mod imp {
     pub fn foreground_layout() -> isize {
         0
     }
+    pub fn layout_count() -> usize {
+        1
+    }
+    pub fn next_layout() -> bool {
+        false
+    }
+    pub fn layout_name(_hkl: isize) -> String {
+        String::new()
+    }
     pub fn caps_lock_on() -> bool {
         false
     }
@@ -136,6 +174,21 @@ pub fn send_scan(k: ScanKey, down: bool) -> Result<()> {
 /// HKL (as an integer) of the foreground window's keyboard layout.
 pub fn foreground_layout() -> isize {
     imp::foreground_layout()
+}
+
+/// How many keyboard layouts (input languages) are installed.
+pub fn layout_count() -> usize {
+    imp::layout_count()
+}
+
+/// Switch the focused window to the next installed layout.
+pub fn next_layout() -> bool {
+    imp::next_layout()
+}
+
+/// "en-US", "de-DE", … for a layout handle.
+pub fn layout_name(hkl: isize) -> String {
+    imp::layout_name(hkl)
 }
 
 pub fn caps_lock_on() -> bool {

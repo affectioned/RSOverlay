@@ -333,6 +333,9 @@ pub struct DevView {
     pub vr_laser_angle: f32,
     /// Laser cursor + beam size multiplier.
     pub vr_pointer_size: f32,
+    /// Clock / date format slugs (see `locale::CLOCK_FORMATS`).
+    pub clock_format: String,
+    pub date_format: String,
     /// Fade all panels while SteamVR's own dashboard is open.
     pub vr_hide_with_steamvr: bool,
     /// XSO layout mode: unpinned windows only show with the dashboard.
@@ -462,6 +465,8 @@ impl Default for DevView {
             vr_show_lasers: true,
             vr_laser_angle: 0.0,
             vr_pointer_size: 1.0,
+            clock_format: "system".into(),
+            date_format: "system".into(),
             vr_hide_with_steamvr: true,
             vr_windows_follow_dash: true,
             vr_grab_tilt: false,
@@ -848,7 +853,7 @@ impl DevView {
                         Some("notifications")
                     }
                     7 => {
-                        wrist_toolbar_card(ui, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, accent);
+                        wrist_toolbar_card(ui, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, &mut self.clock_format, &mut self.date_format, accent);
                         Some("wrist-toolbar")
                     }
                     8 => {
@@ -922,6 +927,7 @@ impl DevView {
     /// frame.
     fn tick_state(&mut self, ctx: &egui::Context) {
         crate::laser::set_cursor_scale(self.vr_pointer_size);
+        crate::locale::set_formats(&self.clock_format, &self.date_format);
         if let Some(r) = self.updates.tick() {
             let kind = if r.prerelease { "Test build" } else { "Update" };
             self.push_notification(Notification {
@@ -1283,7 +1289,7 @@ impl DevView {
                     l.add_space(theme::GUTTER);
                     notifications_card(l, &mut self.notif, &mut self.pending_sounds, accent);
                     l.add_space(theme::GUTTER);
-                    wrist_toolbar_card(l, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, accent);
+                    wrist_toolbar_card(l, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, &mut self.clock_format, &mut self.date_format, accent);
                     l.add_space(theme::GUTTER);
                     accessibility_card(l, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.vr_pointer_size, &mut self.reduce_motion, accent);
                     l.add_space(theme::GUTTER);
@@ -1507,12 +1513,33 @@ fn vr_panels_card(
     });
 }
 
-fn wrist_toolbar_card(ui: &mut egui::Ui, mask: &mut u8, compact: &mut u32, media_theme: &mut bool, accent: egui::Color32) {
+#[allow(clippy::too_many_arguments)]
+fn wrist_toolbar_card(
+    ui: &mut egui::Ui,
+    mask: &mut u8,
+    compact: &mut u32,
+    media_theme: &mut bool,
+    clock: &mut String,
+    date: &mut String,
+    accent: egui::Color32,
+) {
     use crate::wrist::compact as c;
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         card_header(ui, icons::GRID, "Wrist toolbar", accent);
         ui.add_space(6.0);
+        for (label, value, table) in [("Clock", &mut *clock, &crate::locale::CLOCK_FORMATS[..]), ("Date", &mut *date, &crate::locale::DATE_FORMATS[..])] {
+            ui.horizontal(|ui| {
+                ui.label(theme::body_muted(label));
+                for (slug, text) in table {
+                    let sel = value.as_str() == *slug;
+                    if ui.selectable_label(sel, egui::RichText::new(*text).color(if sel { theme::BG_ROOT } else { theme::FG_MUTED })).clicked() {
+                        *value = slug.to_string();
+                    }
+                }
+            });
+        }
+        ui.add_space(4.0);
         ui.label(theme::body_muted("Full toolbar (after More)"));
         ui.horizontal_wrapped(|ui| {
             for (i, name) in c::ACTION_NAMES.iter().enumerate() {
@@ -1622,11 +1649,15 @@ pub struct PointerPrefs {
     pub long_press: bool,
     pub long_press_s: f32,
     pub double_click_s: f32,
+    /// Controller vibration strength (0 = off, 1 = default).
+    pub haptics: f32,
+    /// Grab smoothing: 0 = raw hand motion, 1 = heavy dampening.
+    pub grab_smoothing: f32,
 }
 
 impl Default for PointerPrefs {
     fn default() -> Self {
-        Self { long_press: false, long_press_s: 0.6, double_click_s: 0.4 }
+        Self { long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3 }
     }
 }
 
@@ -1753,6 +1784,23 @@ fn pointer_card(ui: &mut egui::Ui, smoothing: &mut f32, scroll: &mut f32, ptr: &
             crate::theme::fit_slider(ui);
             ui.add(egui::Slider::new(scroll, 0.25..=3.0).fixed_decimals(2).suffix("×"));
         });
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Vibration"));
+            crate::theme::fit_slider(ui);
+            let mut pct = (ptr.haptics * 100.0).round();
+            if ui.add(egui::Slider::new(&mut pct, 0.0..=150.0).fixed_decimals(0).suffix("%")).changed() {
+                ptr.haptics = pct / 100.0;
+            }
+        })
+        .response
+        .on_hover_text("Controller vibration on clicks and grabs (0% = off)");
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Grab smoothing"));
+            crate::theme::fit_slider(ui);
+            ui.add(egui::Slider::new(&mut ptr.grab_smoothing, 0.0..=1.0).fixed_decimals(2));
+        })
+        .response
+        .on_hover_text("Steadier panels while you carry them (higher = calmer, a little more lag)");
         ui.checkbox(&mut ptr.long_press, "Long-press for right click")
             .on_hover_text("Hold the trigger still to right-click. Moving first still drags; letting go early still clicks.");
         ui.add_enabled_ui(ptr.long_press, |ui| {

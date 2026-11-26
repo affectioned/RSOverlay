@@ -11,8 +11,12 @@ There are two channels:
 
 ## Cutting a GitHub release
 
-1. Set the version in the root `Cargo.toml` (`[workspace.package] version`) and commit.
-2. Tag and push:
+1. Set the version in the root `Cargo.toml` (`[workspace.package] version`).
+2. Write the release notes in `docs/releases/<tag>.md` (e.g.
+   `docs/releases/v0.2.0-beta.1.md`), for testers and users, not a commit
+   list: install steps, what's new, what to test, known issues. Copy the
+   shape of an earlier one. Commit both.
+3. Tag and push:
 
    ```sh
    # tester build (GitHub pre-release; only users with "Include test builds" are told)
@@ -24,9 +28,10 @@ There are two channels:
    git push origin v0.2.0
    ```
 
-3. The workflow tests, builds `--release`, zips `rsoverlay.exe` with the
+4. The workflow tests, builds `--release`, zips `rsoverlay.exe` with the
    README, licences and the custom sounds guide, and publishes the release
-   with generated notes and a SHA-256 file.
+   with your notes (GitHub's generated list if the file is missing) and a
+   SHA-256 file.
 
 The tag must match the Cargo version (a `-beta.N` / `-rc.N` suffix is
 allowed), otherwise the workflow stops before building.

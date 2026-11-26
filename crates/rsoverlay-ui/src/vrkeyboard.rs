@@ -153,6 +153,10 @@ pub struct VrKeyboard {
     /// chatbox (OSC) instead of typing into the desktop.
     pub vrchat: bool,
     vrc_buf: String,
+    /// Several layouts installed: show the language pill.
+    multi_layout: bool,
+    /// Current layout's language ("en-US").
+    lang: String,
     /// Focused window is elevated and we aren't (cached, 0.5 s).
     blocked: bool,
     blocked_at: f64,
@@ -206,6 +210,8 @@ impl VrKeyboard {
         }
         self.label_key = Some((hkl, mods));
         self.label_at = time;
+        self.multi_layout = physical::layout_count() > 1;
+        self.lang = physical::layout_name(hkl);
         // ISO layouts give the extra key its own character (DE "<" vs "#",
         // UK "\\" vs "#"); ANSI layouts like US merely alias it to the
         // backslash key, so only show it when it differs.
@@ -355,6 +361,7 @@ impl VrKeyboard {
         let paste_r = egui::Rect::from_center_size(vrc_r.center() - egui::vec2(88.0, 0.0), egui::vec2(72.0, 32.0));
         let copy_r = egui::Rect::from_center_size(paste_r.center() - egui::vec2(80.0, 0.0), egui::vec2(72.0, 32.0));
         let size_r = egui::Rect::from_center_size(copy_r.center() - egui::vec2(88.0, 0.0), egui::vec2(88.0, 32.0));
+        let lang_r = egui::Rect::from_center_size(size_r.center() - egui::vec2(96.0, 0.0), egui::vec2(88.0, 32.0));
 
         let area = egui::Rect::from_min_max(egui::pos2(card.left() + 12.0, bar.bottom() + 4.0), card.max - egui::vec2(12.0, 12.0));
         let all_rows = rows_for(self.iso, self.full);
@@ -394,6 +401,13 @@ impl VrKeyboard {
                 }
                 if repeat_r.contains(p) {
                     self.auto_repeat = !self.auto_repeat;
+                    out.haptic.push(hand);
+                    continue;
+                }
+                if self.multi_layout && lang_r.contains(p) {
+                    // Next input language for the focused window; labels follow.
+                    physical::next_layout();
+                    self.label_at = f64::NEG_INFINITY;
                     out.haptic.push(hand);
                     continue;
                 }
@@ -537,6 +551,12 @@ impl VrKeyboard {
         for (r, t, on) in [(vrc_r, "VRChat", self.vrchat), (copy_r, "Copy", false), (paste_r, "Paste", false), (size_r, if self.full { "Full" } else { "Compact" }, self.full)] {
             painter.text(r.center(), egui::Align2::CENTER_CENTER, t,
                 egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), if on { accent } else { theme::FG_PRIMARY });
+        }
+        if self.multi_layout {
+            let hover = hovered.iter().any(|p| lang_r.contains(*p));
+            painter.rect_filled(lang_r, 10.0, if hover { crate::theme::BG_HOVER } else { crate::theme::BG_RAISED });
+            painter.text(lang_r.center(), egui::Align2::CENTER_CENTER, &self.lang,
+                egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), theme::FG_PRIMARY);
         }
         painter.text(repeat_r.center(), egui::Align2::CENTER_CENTER,
             if self.auto_repeat { "repeat: on" } else { "hold: real" },

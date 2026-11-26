@@ -321,12 +321,8 @@ pub fn header(
 ) -> HeaderActions {
     let mut out = HeaderActions::default();
     let now = Local::now();
-    let time = if locale::uses_24h_clock() {
-        now.format("%H:%M").to_string()
-    } else {
-        now.format("%-I:%M %p").to_string()
-    };
-    let date = now.format("%a, %b %-d").to_string();
+    let time = locale::format_time(&now);
+    let date = locale::format_date(&now);
     ui.horizontal(|ui| {
         ui.set_height(44.0);
         ui.label(egui::RichText::new(time).font(theme::medium(theme::SIZE_BODY + 1.0)).color(theme::FG_PRIMARY));

@@ -111,9 +111,10 @@ mod imp {
     const STICK_DEAD: f32 = 0.2;
     const GRAB_DIST: (f32, f32) = (0.20, 8.0);
     const PANEL_WIDTH: (f32, f32) = (0.15, 4.0);
-    /// Pose smoothing time constant — kills hand tremor on big panels
-    /// without feeling laggy.
-    const GRAB_TAU: f32 = 0.05;
+    /// Grab smoothing time constant range (Settings › Pointer › Grab
+    /// smoothing 0..1); the default 0.3 ≈ 0.05 s kills hand tremor on big
+    /// panels without feeling laggy.
+    const GRAB_TAU: (f32, f32) = (0.005, 0.15);
     /// Panels outside your view cone re-render at this interval instead
     /// of every frame (XSO: "active" overlays are the ones you look at).
     const BACKGROUND_FRAME_S: f64 = 0.2;
@@ -521,8 +522,9 @@ mod imp {
     }
 
     /// Frame-rate-independent exponential approach for poses.
-    fn smooth(from: Affine3A, to: Affine3A, dt: f32) -> Affine3A {
-        let k = 1.0 - (-dt.max(0.0) / GRAB_TAU).exp();
+    fn smooth(from: Affine3A, to: Affine3A, dt: f32, smoothing: f32) -> Affine3A {
+        let tau = GRAB_TAU.0 + (GRAB_TAU.1 - GRAB_TAU.0) * smoothing.clamp(0.0, 1.0);
+        let k = 1.0 - (-dt.max(0.0) / tau).exp();
         let (_, r0, t0) = from.to_scale_rotation_translation();
         let (_, r1, t1) = to.to_scale_rotation_translation();
         Affine3A::from_rotation_translation(r0.slerp(r1, k), t0.lerp(t1, k))
@@ -1329,7 +1331,7 @@ mod imp {
                         if let (Some(e), None) = (eye, g.tilt) {
                             target = Affine3A { translation: target.translation, ..face(target.translation, e) };
                         }
-                        g.smoothed = smooth(g.smoothed, target, dt);
+                        g.smoothed = smooth(g.smoothed, target, dt, dev_view.pointer.grab_smoothing);
                         let p = g.smoothed;
                         if g.panel == 0 {
                             // The wrist stays parented: store the new pose
@@ -1440,7 +1442,7 @@ mod imp {
                         }
                         wins[j].group = Some(gid);
                         if let (Some(h), Some(i)) = (released_hand, &input) {
-                            i.haptic(h, GRAB_HAPTIC_S, 1.0);
+                            i.haptic(h, GRAB_HAPTIC_S, dev_view.pointer.haptics);
                         }
                         info!("docked panel edges");
                     }
@@ -1505,10 +1507,10 @@ mod imp {
             // Grab / release: a firmer haptic tick than a click.
             for h in grabbed_hand.into_iter().chain(released_hand) {
                 match &input {
-                    Some(i) => i.haptic(h, GRAB_HAPTIC_S, 0.6),
+                    Some(i) => i.haptic(h, GRAB_HAPTIC_S, 0.6 * dev_view.pointer.haptics),
                     None => {
                         if let (Some(sys), Some(c)) = (&system, controllers.iter().find(|c| c.hand == h)) {
-                            sys.haptic(c.index, 2500);
+                            sys.haptic(c.index, (2500.0 * dev_view.pointer.haptics) as u16);
                         }
                     }
                 }
@@ -2242,10 +2244,10 @@ mod imp {
                         laser::Hand::Right => Hand::Right,
                     };
                     match &input {
-                        Some(i) => i.haptic(want, 0.012, 0.35),
+                        Some(i) => i.haptic(want, 0.012, 0.35 * dev_view.pointer.haptics),
                         None => {
                             if let Some(c) = controllers.iter().find(|c| c.hand == want) {
-                                sys.haptic(c.index, CLICK_HAPTIC_US);
+                                sys.haptic(c.index, (f32::from(CLICK_HAPTIC_US) * dev_view.pointer.haptics) as u16);
                             }
                         }
                     }
@@ -2619,12 +2621,12 @@ mod imp {
         fn smoothing_converges_and_is_frame_rate_independent() {
             let a = Affine3A::IDENTITY;
             let b = Affine3A::from_translation(glam::Vec3::new(1.0, 0.0, 0.0));
-            let one = smooth(a, b, 0.02);
-            let two = smooth(smooth(a, b, 0.01), b, 0.01);
+            let one = smooth(a, b, 0.02, 0.3);
+            let two = smooth(smooth(a, b, 0.01, 0.3), b, 0.01, 0.3);
             assert!((one.translation - two.translation).length() < 1e-5);
             let mut p = a;
             for _ in 0..200 {
-                p = smooth(p, b, 1.0 / 90.0);
+                p = smooth(p, b, 1.0 / 90.0, 0.3);
             }
             assert!((p.translation - b.translation).length() < 1e-3);
         }

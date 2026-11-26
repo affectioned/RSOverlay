@@ -145,6 +145,8 @@ pub fn seed_dev_view(
     dev.pointer.long_press = cfg.vr.long_press;
     dev.pointer.long_press_s = cfg.vr.long_press_s.clamp(0.3, 1.5);
     dev.pointer.double_click_s = cfg.vr.double_click_s.clamp(0.0, 0.8);
+    dev.pointer.haptics = cfg.vr.haptics.clamp(0.0, 1.5);
+    dev.pointer.grab_smoothing = cfg.vr.grab_smoothing.clamp(0.0, 1.0);
     dev.restore_session = cfg.vr.restore_session;
     dev.vr_hide_wrist = cfg.vr.hide_wrist;
     dev.vr_hide_with_steamvr = cfg.vr.hide_with_steamvr_dashboard;
@@ -178,6 +180,8 @@ pub fn seed_dev_view(
         .collect();
     dev.battery_warn_pct = cfg.appearance.battery_warn_pct.clamp(5, 50);
     dev.battery_hidden = cfg.appearance.battery_hidden.clone();
+    dev.clock_format = cfg.appearance.clock_format.clone();
+    dev.date_format = cfg.appearance.date_format.clone();
     dev.battery_sound = cfg.appearance.battery_sound;
     dev.discord_presence = cfg.appearance.discord_presence;
     dev.steamvr_icons = cfg.appearance.steamvr_icons;
@@ -330,6 +334,8 @@ pub fn config_from_dev_view(
         long_press: dev.pointer.long_press,
         long_press_s: dev.pointer.long_press_s,
         double_click_s: dev.pointer.double_click_s,
+        haptics: dev.pointer.haptics,
+        grab_smoothing: dev.pointer.grab_smoothing,
         restore_session: dev.restore_session,
         hide_wrist: dev.vr_hide_wrist,
         hide_with_steamvr_dashboard: dev.vr_hide_with_steamvr,
@@ -367,6 +373,8 @@ pub fn config_from_dev_view(
     );
     out.appearance.battery_warn_pct = dev.battery_warn_pct;
     out.appearance.battery_hidden = dev.battery_hidden.clone();
+    out.appearance.clock_format = dev.clock_format.clone();
+    out.appearance.date_format = dev.date_format.clone();
     out.appearance.battery_sound = dev.battery_sound;
     out.appearance.discord_presence = dev.discord_presence;
     out.appearance.steamvr_icons = dev.steamvr_icons;
@@ -1373,6 +1381,8 @@ mod config_roundtrip_tests {
         a.reduce_motion = !a.reduce_motion;
         a.battery_warn_pct = 33;
         a.battery_hidden = vec!["Tracker · VIVE Tracker 3.0".into()];
+        a.clock_format = "24h".into();
+        a.date_format = "iso".into();
         a.battery_sound = false;
         a.discord_presence = false;
         a.steamvr_icons = false;
@@ -1411,6 +1421,8 @@ mod config_roundtrip_tests {
         v.long_press = true;
         v.long_press_s = 0.9;
         v.double_click_s = 0.2;
+        v.haptics = 0.5;
+        v.grab_smoothing = 0.8;
         v.restore_session = false;
         v.hide_wrist = true;
         v.hide_with_steamvr_dashboard = false;

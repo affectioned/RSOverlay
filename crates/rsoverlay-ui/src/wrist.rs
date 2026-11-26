@@ -261,10 +261,10 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         let clock_w = if show_views { r3.width() / 2.0 - 16.0 } else { r3.width() - 20.0 };
         edits.push((egui::Rect::from_min_size(r3.min + egui::vec2(8.0, 6.0), egui::vec2(clock_w, 76.0)), compact::CLOCK));
         let now = Local::now();
-        let time = if locale::uses_24h_clock() { now.format("%H:%M").to_string() } else { now.format("%-I:%M %p").to_string() };
+        let time = locale::format_time(&now);
         let p = ui.painter();
         p.text(r3.left_top() + egui::vec2(18.0, 8.0), egui::Align2::LEFT_TOP, time, theme::display(40.0), theme::FG_PRIMARY);
-        p.text(r3.left_top() + egui::vec2(18.0, 60.0), egui::Align2::LEFT_TOP, now.format("%a, %b %-d").to_string(),
+        p.text(r3.left_top() + egui::vec2(18.0, 60.0), egui::Align2::LEFT_TOP, locale::format_date(&now),
             egui::FontId::proportional(theme::SIZE_BODY), theme::FG_MUTED);
         if has(compact::TIMER) {
             let s = d.session_secs;

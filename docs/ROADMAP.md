@@ -11,7 +11,7 @@ scratch against public Windows / OpenVR APIs.
 
 ---
 
-## What's shipped (M0 → M75)
+## What's shipped (M0 → M76)
 
 Last reviewed 2026-11-26. Parity detail lives in
 [XSO_PARITY.md](XSO_PARITY.md).
@@ -87,12 +87,16 @@ Last reviewed 2026-11-26. Parity detail lives in
 - **M75:** All monitors (every monitor on an arc around you, left to
   right as on the desk, pinned) and Big screen (main monitor, 2.2 m and
   curved, pinned; curvature saved with layouts).
+- **M76 (parity sweep):** vibration strength, grab smoothing, clock
+  (12 h / 24 h) and date format, keyboard language quick-switch;
+  XSO_PARITY.md re-reviewed. Release notes are hand-written per tag
+  (`docs/releases/`).
 
 ## XSOverlay parity: remaining gaps
 
 Ranked by value ÷ cost; full table in [XSO_PARITY.md](XSO_PARITY.md).
 
-1. Touch injection, gamepad bindings, curve bias.
+See [XSO_PARITY.md](XSO_PARITY.md) › Remaining gaps.
 
 ## Working in VR (productivity track)
 
