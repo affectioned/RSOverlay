@@ -129,7 +129,12 @@ pub fn seed_dev_view(
     dev.vr_laser_angle = cfg.vr.laser_angle.clamp(-30.0, 30.0);
     dev.cursor_smoothing = cfg.vr.cursor_smoothing.clamp(0.0, 1.0);
     dev.scroll_speed = cfg.vr.scroll_speed.clamp(0.25, 3.0);
-    dev.wrist_buttons = if cfg.vr.wrist_buttons & 0x7F == 0 { 0x7F } else { cfg.vr.wrist_buttons };
+    let all = rsoverlay_ui::wrist::compact::ALL_ACTIONS;
+    let mut buttons = if cfg.vr.wrist_buttons & all == 0 { all } else { cfg.vr.wrist_buttons };
+    if cfg.vr.wrist_actions_rev < 1 {
+        buttons |= 1 << 7; // Focus is new: show it once on the full toolbar
+    }
+    dev.wrist_buttons = buttons;
     dev.media_theme = cfg.vr.media_theme;
     dev.wrist_expanded = cfg.vr.wrist_expanded;
     dev.wrist_compact = cfg.vr.wrist_compact;
@@ -314,6 +319,7 @@ pub fn config_from_dev_view(
         cursor_smoothing: dev.cursor_smoothing,
         scroll_speed: dev.scroll_speed,
         wrist_buttons: dev.wrist_buttons,
+        wrist_actions_rev: 1,
         media_theme: dev.media_theme,
         wrist_expanded: dev.wrist_expanded,
         wrist_compact: dev.wrist_compact,

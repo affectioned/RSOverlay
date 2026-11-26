@@ -117,6 +117,11 @@ mod imp {
 
     /// View-angle fade time constant (XSO-style auto-hide).
     const FADE_TAU: f32 = 0.08;
+    /// Focus mode: opacity of the windows you aren't working in.
+    const FOCUS_DIM: f32 = 0.3;
+    /// Focus moves to another window only when it's this many degrees
+    /// closer to your gaze (no flicker between neighbours).
+    const FOCUS_HYSTERESIS_DEG: f32 = 6.0;
 
     /// How often to re-check which controller the wrist is parented to
     /// (controllers connect late / swap roles).
@@ -443,6 +448,27 @@ mod imp {
         match *axis.get_or_insert(x.abs() > y.abs()) {
             true => (x, 0.0),
             false => (0.0, y),
+        }
+    }
+
+    /// Degrees between the head's gaze and the direction to `p`.
+    fn gaze_angle(hmd: &Affine3A, p: Vec3A) -> f32 {
+        let gaze = -hmd.matrix3.z_axis;
+        let to = (p - hmd.translation).try_normalize().unwrap_or(gaze);
+        gaze.dot(to).clamp(-1.0, 1.0).acos().to_degrees()
+    }
+
+    /// Focus mode: which window (by seq) you're working in. The laser
+    /// wins; otherwise the window nearest your gaze, switching only when
+    /// another is clearly nearer than the current one.
+    fn pick_focus(current: Option<u32>, laser: Option<u32>, by_gaze: &[(u32, f32)]) -> Option<u32> {
+        if laser.is_some() {
+            return laser;
+        }
+        let best = by_gaze.iter().copied().min_by(|a, b| a.1.total_cmp(&b.1))?;
+        match current.and_then(|c| by_gaze.iter().find(|(s, _)| *s == c)) {
+            Some(&(c, a)) if a <= best.1 + FOCUS_HYSTERESIS_DEG => Some(c),
+            _ => Some(best.0),
         }
     }
 
@@ -925,6 +951,8 @@ mod imp {
         let mut thumbs = crate::mirror_source::ThumbWorker::spawn();
         // Device icons from the user's SteamVR install (decoded once each).
         let mut device_icons = crate::device_icons::DeviceIcons::default();
+        // Focus mode: the window being worked in (by seq).
+        let mut focus_win: Option<u32> = None;
         // SteamVR frame timing (game fps, GPU time, reprojection). Only the
         // layout-verified compositor table is used; None = no VR stats.
         let compositor = vr.compositor().map_err(|e| info!("frame stats unavailable: {e}")).ok();
@@ -2164,8 +2192,22 @@ mod imp {
             wrist.apply_tint(&overlay, [tint[0], tint[1], tint[2], tint[3] * dev_view.vr_wrist_opacity]);
             dash.apply_tint(&overlay, tint);
             kb.apply_tint(&overlay, [tint[0], tint[1], tint[2], tint[3] * dev_view.kb_prefs.opacity]);
+            // Focus mode: everything but the window you work in steps back.
+            focus_win = match (dev_view.focus_mode, hmd.as_ref().map(to_affine)) {
+                (true, Some(h)) => {
+                    let laser = hand_hit.iter().flatten().find_map(|(i, _)| i.checked_sub(WIN0)).and_then(|k| wins.get(k)).map(|w| w.seq);
+                    let by_gaze: Vec<(u32, f32)> = wins
+                        .iter()
+                        .filter(|w| w.panel.visible && w.panel.fade > 0.5)
+                        .map(|w| (w.seq, gaze_angle(&h, win_world(w, hmd.as_ref(), &controllers).translation)))
+                        .collect();
+                    pick_focus(focus_win, laser, &by_gaze)
+                }
+                _ => None,
+            };
             for w in &mut wins {
-                w.panel.apply_tint(&overlay, tint);
+                let dim = if focus_win.is_some_and(|f| f != w.seq) { FOCUS_DIM } else { 1.0 };
+                w.panel.apply_tint(&overlay, [tint[0], tint[1], tint[2], tint[3] * dim]);
             }
 
             std::thread::sleep(Duration::from_millis(11));
@@ -2448,6 +2490,17 @@ mod imp {
                 p = smooth(p, b, 1.0 / 90.0);
             }
             assert!((p.translation - b.translation).length() < 1e-3);
+        }
+
+        #[test]
+        fn focus_follows_laser_then_gaze_with_hysteresis() {
+            // Laser on a window: that one, whatever the gaze says.
+            assert_eq!(pick_focus(Some(1), Some(2), &[(1, 0.0), (2, 40.0)]), Some(2));
+            // Gaze: stays on the current window unless another is clearly nearer.
+            assert_eq!(pick_focus(Some(1), None, &[(1, 10.0), (2, 6.0)]), Some(1));
+            assert_eq!(pick_focus(Some(1), None, &[(1, 20.0), (2, 6.0)]), Some(2));
+            assert_eq!(pick_focus(None, None, &[(1, 20.0), (2, 6.0)]), Some(2));
+            assert_eq!(pick_focus(Some(1), None, &[]), None);
         }
 
         #[test]

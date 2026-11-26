@@ -52,8 +52,13 @@ pub struct VrCfg {
     pub cursor_smoothing: f32,
     /// Stick scroll speed multiplier.
     pub scroll_speed: f32,
-    /// Wrist toolbar buttons shown (bit mask over the 7 actions).
+    /// Wrist toolbar buttons shown (bit mask over the 8 actions).
     pub wrist_buttons: u8,
+    /// Revision of the wrist action set the mask was saved with. Rev 1
+    /// added Focus (bit 7): older masks get it switched on once.
+    /// Missing from a saved file = 0 (an old config), not the default 1.
+    #[serde(default)]
+    pub wrist_actions_rev: u8,
     /// Accent follows album art while music plays.
     pub media_theme: bool,
     /// Wrist shows its full set (layouts, devices, views), not the
@@ -212,7 +217,7 @@ pub const DEFAULT_WRIST_COMPACT: u32 = 0x0F | (1 << 8) | (1 << 9) | (1 << 10) | 
 
 impl Default for VrCfg {
     fn default() -> Self {
-        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0x7F, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new(), long_press: false, long_press_s: 0.6, double_click_s: 0.4, restore_session: true, hide_wrist: false, hide_with_steamvr_dashboard: true, windows_follow_dashboard: true, grab_tilt: false, stick_axis_lock: true, pointer_size: 1.0, render_scale: 1.0 }
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0xFF, wrist_actions_rev: 1, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new(), long_press: false, long_press_s: 0.6, double_click_s: 0.4, restore_session: true, hide_wrist: false, hide_with_steamvr_dashboard: true, windows_follow_dashboard: true, grab_tilt: false, stick_axis_lock: true, pointer_size: 1.0, render_scale: 1.0 }
     }
 }
 
@@ -510,5 +515,15 @@ mod tests {
         assert_eq!(missing.macros, Macros::default());
         let empty: Config = toml::from_str("macros = []").unwrap();
         assert!(empty.macros.0.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod wrist_rev_tests {
+    #[test]
+    fn old_config_without_rev_reads_as_rev_0() {
+        let old: super::VrCfg = toml::from_str("wrist_buttons = 127").unwrap();
+        assert_eq!(old.wrist_actions_rev, 0);
+        assert_eq!(super::VrCfg::default().wrist_actions_rev, 1);
     }
 }

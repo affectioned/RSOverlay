@@ -263,6 +263,9 @@ pub struct DevView {
     pub toasts_external: bool,
     /// Settings › Discord: show RSOverlay on the Discord profile.
     pub discord_presence: bool,
+    /// Focus mode (wrist): notifications go to history without a toast
+    /// or sound, and windows you aren't looking at dim. Session only.
+    pub focus_mode: bool,
     /// Update notifier (Settings > Updates). The app enables it on
     /// GitHub builds; Steam builds and tests leave it off.
     pub updates: crate::updates::Updates,
@@ -416,6 +419,7 @@ impl Default for DevView {
             discord_presence: true,
             vr_perf: None,
             updates: Default::default(),
+            focus_mode: false,
             steamvr_icons: true,
             discord: Default::default(),
             vr_hide_wrist: false,
@@ -468,7 +472,7 @@ impl Default for DevView {
             media_theme: false,
             art_accent: None,
             media_worker: None,
-            wrist_buttons: 0x7F,
+            wrist_buttons: crate::wrist::compact::ALL_ACTIONS,
             wrist_compact: rsoverlay_core::config::DEFAULT_WRIST_COMPACT,
             kb_prefs: KeyboardPrefs::default(),
             cursor_smoothing: 0.5,
@@ -495,7 +499,11 @@ impl DevView {
         self.notifications_received += 1;
         // Muted app: keep it in history, but no toast, sound or badge.
         let muted = !n.source_app.is_empty() && self.notif.muted.contains(&n.source_app);
-        if muted {
+        // Focus mode: same, but it still counts as unread for later.
+        if self.focus_mode && !muted {
+            self.unread += 1;
+        }
+        if muted || self.focus_mode {
             self.history.push_back(HistoryEntry { n, received: Instant::now() });
             while self.history.len() > MAX_HISTORY {
                 self.history.pop_front();
@@ -667,8 +675,9 @@ impl DevView {
     /// returns what the wearer tapped.
     pub fn wrist_ui(&mut self, ctx: &egui::Context) -> crate::wrist::WristAction {
         self.tick_state(ctx);
-        let est: Vec<Option<String>> = self
-            .batteries
+        // Estimates line up with the batteries actually shown.
+        let shown_batteries = self.shown_batteries();
+        let est: Vec<Option<String>> = shown_batteries
             .iter()
             .map(|b| self.battery_est.estimate(b).filter(|e| !e.charging).map(|e| crate::battery::format_duration(e.secs)))
             .collect();
@@ -677,7 +686,6 @@ impl DevView {
         use crate::wrist::compact as wc;
         let wants_sys = self.wrist_editing || self.wrist_expanded || self.wrist_compact & (wc::PERF | wc::RAM | wc::VRAM) != 0;
         let sys = if wants_sys { self.system.snapshot() } else { None };
-        let shown_batteries = self.shown_batteries();
         let data = crate::wrist::WristData {
             batteries: &shown_batteries,
             estimates: &est,
@@ -689,6 +697,7 @@ impl DevView {
             slot_filled: self.layouts.slot(self.wrist_slot).is_some(),
             slot_favorite: self.layouts.favorite == Some(self.wrist_slot),
             keyboard_open: self.show_keyboard,
+            focus: self.focus_mode,
             accent: self.effective_accent(),
             buttons: self.wrist_buttons,
             compact: self.wrist_compact,
@@ -701,6 +710,9 @@ impl DevView {
         let act = crate::wrist::show(ctx, &data);
         if act.toggle_more {
             self.wrist_expanded = !self.wrist_expanded;
+        }
+        if act.toggle_focus {
+            self.focus_mode = !self.focus_mode;
         }
         if act.toggle_edit {
             self.wrist_editing = !self.wrist_editing;
@@ -1501,7 +1513,7 @@ fn wrist_toolbar_card(ui: &mut egui::Ui, mask: &mut u8, compact: &mut u32, media
                 let mut on = *mask & (1 << i) != 0;
                 if ui.checkbox(&mut on, *name).changed() {
                     *mask ^= 1 << i;
-                    if *mask & 0x7F == 0 {
+                    if *mask & crate::wrist::compact::ALL_ACTIONS == 0 {
                         *mask |= 1 << 3; // keep at least the dashboard button
                     }
                 }

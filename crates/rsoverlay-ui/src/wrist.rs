@@ -31,7 +31,11 @@ use chrono::Local;
 /// Bits of the compact-wrist mask (`VrCfg::wrist_compact`).
 pub mod compact {
     /// Action names, bit i = action i (shared with the full-toolbar mask).
-    pub const ACTION_NAMES: [&str; 7] = ["Add", "Recenter", "Keyboard", "Dashboard", "Layouts", "Settings", "Close all"];
+    pub const ACTION_NAMES: [&str; 8] = ["Add", "Recenter", "Keyboard", "Dashboard", "Layouts", "Settings", "Close all", "Focus"];
+    /// Number of action buttons (bits 0..ACTIONS of both masks).
+    pub const ACTIONS: usize = ACTION_NAMES.len();
+    /// Every action bit.
+    pub const ALL_ACTIONS: u8 = 0xFF;
     pub const CLOCK: u32 = 1 << 8;
     pub const MEDIA: u32 = 1 << 9;
     pub const BATTERY: u32 = 1 << 10;
@@ -58,7 +62,7 @@ pub mod compact {
     /// Status-chip modules, in row order.
     pub const CHIPS: &[(u32, &str)] = &[(VR_FPS, "VR FPS"), (PERF, "CPU / GPU"), (VRAM, "VRAM"), (RAM, "RAM"), (ALERTS, "Alerts")];
     /// Compact action order: reach order, everyday four first.
-    pub const ORDER: [usize; 7] = [3, 2, 0, 1, 4, 5, 6];
+    pub const ORDER: [usize; 8] = [3, 2, 0, 1, 7, 4, 5, 6];
 }
 
 /// Everything the wrist shows, gathered by DevView.
@@ -73,6 +77,8 @@ pub struct WristData<'a> {
     pub slot_filled: bool,
     pub slot_favorite: bool,
     pub keyboard_open: bool,
+    /// Focus mode is on (lights the Focus button).
+    pub focus: bool,
     pub accent: egui::Color32,
     /// Which action buttons to show (bit i = actions[i]).
     pub buttons: u8,
@@ -99,6 +105,7 @@ pub struct WristAction {
     pub open_page: Option<Page>,
     pub recenter: bool,
     pub close_all: bool,
+    pub toggle_focus: bool,
     pub popout_stats: bool,
     /// Move the selected layout slot (−1 / +1).
     pub slot_delta: i32,
@@ -129,7 +136,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         // 1 · Actions.
         let r1 = row(&mut y, 80.0, 0.0);
         slab(ui, r1, accent);
-        let actions: [(egui::ImageSource<'static>, &str, &str, bool); 7] = [
+        let actions: [(egui::ImageSource<'static>, &str, &str, bool); compact::ACTIONS] = [
             (icons::PLUS, "Add", "Add a window or monitor", false),
             (icons::RECENTER, "Recenter", "Recenter panels in front of you", false),
             (icons::KEYBOARD, "Keyboard", "Show or hide the keyboard", d.keyboard_open),
@@ -137,13 +144,14 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             (icons::FOLDER, "Layouts", "Saved panel layouts", false),
             (icons::SETTINGS, "Settings", "Settings", false),
             (icons::TRASH, "Close all", "Close all floating panels", false),
+            (if d.focus { icons::STAR } else { icons::STAR_OUTLINE }, "Focus", "Focus mode: hold back notifications and dim the windows you aren't looking at", d.focus),
         ];
         // Compact: the user's compact picks, in reach order. Expanded:
         // every enabled action in toolbar order. Editing: all of them.
         let shown: Vec<_> = if d.editing {
-            (0..7).map(|i| (i, actions[i].clone())).collect()
+            (0..compact::ACTIONS).map(|i| (i, actions[i].clone())).collect()
         } else if d.expanded {
-            (0..7).filter(|&i| d.buttons & (1 << i) != 0).map(|i| (i, actions[i].clone())).collect()
+            (0..compact::ACTIONS).filter(|&i| d.buttons & (1 << i) != 0).map(|i| (i, actions[i].clone())).collect()
         } else {
             compact::ORDER.iter().filter(|&&i| d.compact & (1 << i) != 0).map(|&i| (i, actions[i].clone())).collect()
         };
@@ -190,7 +198,8 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
                     3 => act.toggle_dashboard = true,
                     4 => act.open_page = Some(Page::Layouts),
                     5 => act.open_page = Some(Page::Settings),
-                    _ => act.close_all = true,
+                    6 => act.close_all = true,
+                    _ => act.toggle_focus = true,
                 }
             }
         }
@@ -505,7 +514,13 @@ fn labelled_button(
 }
 
 fn paint_labelled(ui: &egui::Ui, r: egui::Rect, src: egui::ImageSource<'static>, size: f32, label: &str, icon_tint: egui::Color32, text_tint: egui::Color32) {
-    let text = (theme::SIZE_CAPTION).min(r.height() * 0.24);
+    let mut text = (theme::SIZE_CAPTION).min(r.height() * 0.24);
+    // Narrow cells (many buttons in a row): shrink the label to fit, so
+    // neighbours never run together.
+    let width = ui.fonts(|f| f.layout_no_wrap(label.to_string(), egui::FontId::proportional(text), text_tint).size().x);
+    if width > r.width() - 4.0 {
+        text = (text * (r.width() - 4.0) / width).max(9.0);
+    }
     let gap = 4.0;
     let block = size + gap + text;
     let top = r.center().y - block / 2.0;
@@ -553,7 +568,8 @@ mod tests {
             slot_favorite: false,
             keyboard_open: false,
             accent: egui::Color32::WHITE,
-            buttons: 0x7F,
+            buttons: compact::ALL_ACTIONS,
+            focus: false,
             compact: rsoverlay_core::config::DEFAULT_WRIST_COMPACT,
             expanded: false,
             editing: false,
@@ -585,7 +601,7 @@ mod tests {
         let all: Vec<u32> = compact::SECTIONS.iter().chain(compact::CHIPS).map(|&(b, _)| b).collect();
         for (i, a) in all.iter().enumerate() {
             assert_eq!(a.count_ones(), 1);
-            assert!(*a > 0x7F, "module bits must not overlap the 7 action bits");
+            assert!(*a > u32::from(compact::ALL_ACTIONS), "module bits must not overlap the action bits");
             assert!(all[i + 1..].iter().all(|b| b != a));
         }
     }
