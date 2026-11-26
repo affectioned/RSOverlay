@@ -6,6 +6,7 @@
 use egui_wgpu::{Renderer, ScreenDescriptor};
 use std::sync::Arc;
 
+pub mod backgrounds;
 pub mod battery;
 pub mod glyphs;
 pub mod i18n;

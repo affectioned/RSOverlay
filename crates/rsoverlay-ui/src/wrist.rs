@@ -79,6 +79,8 @@ pub struct WristData<'a> {
     pub keyboard_open: bool,
     /// Focus mode is on (lights the Focus button).
     pub focus: bool,
+    /// Background image behind the clock + media, and how much to darken it.
+    pub background: Option<(&'a std::sync::Arc<egui::ColorImage>, f32)>,
     pub accent: egui::Color32,
     /// Which action buttons to show (bit i = actions[i]).
     pub buttons: u8,
@@ -257,6 +259,9 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         if show_clock || show_views || title.is_some() {
         let r3 = row(&mut y, top_h + media_h, full.width() * 0.12);
         slab(ui, r3, accent);
+        if let Some((img, dim)) = d.background {
+            crate::backgrounds::paint(ui, img, r3.shrink(1.0), 18.0, dim);
+        }
         if show_clock {
         let clock_w = if show_views { r3.width() / 2.0 - 16.0 } else { r3.width() - 20.0 };
         edits.push((egui::Rect::from_min_size(r3.min + egui::vec2(8.0, 6.0), egui::vec2(clock_w, 76.0)), compact::CLOCK));
@@ -570,6 +575,7 @@ mod tests {
             accent: egui::Color32::WHITE,
             buttons: compact::ALL_ACTIONS,
             focus: false,
+            background: None,
             compact: rsoverlay_core::config::DEFAULT_WRIST_COMPACT,
             expanded: false,
             editing: false,

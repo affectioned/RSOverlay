@@ -183,6 +183,8 @@ pub fn seed_dev_view(
     dev.battery_hidden = cfg.appearance.battery_hidden.clone();
     dev.clock_format = cfg.appearance.clock_format.clone();
     dev.date_format = cfg.appearance.date_format.clone();
+    dev.wrist_bg.file = cfg.appearance.wrist_background.clone();
+    dev.wrist_bg.dim = cfg.appearance.wrist_background_dim.clamp(0.0, 1.0);
     dev.battery_sound = cfg.appearance.battery_sound;
     dev.discord_presence = cfg.appearance.discord_presence;
     dev.steamvr_icons = cfg.appearance.steamvr_icons;
@@ -379,6 +381,8 @@ pub fn config_from_dev_view(
     out.appearance.battery_hidden = dev.battery_hidden.clone();
     out.appearance.clock_format = dev.clock_format.clone();
     out.appearance.date_format = dev.date_format.clone();
+    out.appearance.wrist_background = dev.wrist_bg.file.clone();
+    out.appearance.wrist_background_dim = dev.wrist_bg.dim;
     out.appearance.battery_sound = dev.battery_sound;
     out.appearance.discord_presence = dev.discord_presence;
     out.appearance.steamvr_icons = dev.steamvr_icons;
@@ -1387,6 +1391,8 @@ mod config_roundtrip_tests {
         a.battery_hidden = vec!["Tracker · VIVE Tracker 3.0".into()];
         a.clock_format = "24h".into();
         a.date_format = "iso".into();
+        a.wrist_background = "stars.png".into();
+        a.wrist_background_dim = 0.3;
         a.battery_sound = false;
         a.discord_presence = false;
         a.steamvr_icons = false;

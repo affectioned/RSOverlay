@@ -353,6 +353,10 @@ pub struct Appearance {
     pub clock_format: String,
     /// Date: "system" (Thu, Nov 26), "day-month" (Thu 26 Nov) or "iso".
     pub date_format: String,
+    /// Wrist background: an image file name in `backgrounds/` ("" = none).
+    pub wrist_background: String,
+    /// Darkening over the wrist background, 0..1.
+    pub wrist_background_dim: f32,
     /// Devices (by label) hidden from the battery card, wrist and header;
     /// they don't raise low-battery alerts either.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -386,6 +390,8 @@ impl Default for Appearance {
             battery_hidden: Vec::new(),
             clock_format: "system".into(),
             date_format: "system".into(),
+            wrist_background: String::new(),
+            wrist_background_dim: 0.55,
             battery_sound: true,
             discord_presence: true,
             steamvr_icons: true,

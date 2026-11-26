@@ -269,6 +269,8 @@ pub struct DevView {
     pub toasts_external: bool,
     /// Settings › Discord: show RSOverlay on the Discord profile.
     pub discord_presence: bool,
+    /// Wrist background image (Settings › Wrist toolbar).
+    pub wrist_bg: crate::backgrounds::WristBackground,
     /// Gamepad shortcuts (Settings › Gamepad).
     pub gamepad: rsoverlay_core::config::GamepadCfg,
     /// Buttons held on any gamepad right now (set by the VR app).
@@ -436,6 +438,7 @@ impl Default for DevView {
             updates: Default::default(),
             focus_mode: false,
             gamepad: Default::default(),
+            wrist_bg: Default::default(),
             gamepad_held: 0,
             gamepad_capture: None,
             steamvr_icons: true,
@@ -718,6 +721,7 @@ impl DevView {
             slot_favorite: self.layouts.favorite == Some(self.wrist_slot),
             keyboard_open: self.show_keyboard,
             focus: self.focus_mode,
+            background: self.wrist_bg.image.as_ref().map(|i| (i, self.wrist_bg.dim)),
             accent: self.effective_accent(),
             buttons: self.wrist_buttons,
             compact: self.wrist_compact,
@@ -866,7 +870,7 @@ impl DevView {
                         Some("notifications")
                     }
                     8 => {
-                        wrist_toolbar_card(ui, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, &mut self.clock_format, &mut self.date_format, accent);
+                        wrist_toolbar_card(ui, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, &mut self.clock_format, &mut self.date_format, &mut self.wrist_bg, accent);
                         Some("wrist-toolbar")
                     }
                     9 => {
@@ -941,6 +945,7 @@ impl DevView {
     fn tick_state(&mut self, ctx: &egui::Context) {
         crate::laser::set_cursor_scale(self.vr_pointer_size);
         crate::locale::set_formats(&self.clock_format, &self.date_format);
+        self.wrist_bg.tick();
         if let Some(r) = self.updates.tick() {
             let kind = if r.prerelease { "Test build" } else { "Update" };
             self.push_notification(Notification {
@@ -1304,7 +1309,7 @@ impl DevView {
                     l.add_space(theme::GUTTER);
                     notifications_card(l, &mut self.notif, &mut self.pending_sounds, accent);
                     l.add_space(theme::GUTTER);
-                    wrist_toolbar_card(l, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, &mut self.clock_format, &mut self.date_format, accent);
+                    wrist_toolbar_card(l, &mut self.wrist_buttons, &mut self.wrist_compact, &mut self.media_theme, &mut self.clock_format, &mut self.date_format, &mut self.wrist_bg, accent);
                     l.add_space(theme::GUTTER);
                     accessibility_card(l, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.vr_pointer_size, &mut self.reduce_motion, accent);
                     l.add_space(theme::GUTTER);
@@ -1601,6 +1606,7 @@ fn wrist_toolbar_card(
     media_theme: &mut bool,
     clock: &mut String,
     date: &mut String,
+    bg: &mut crate::backgrounds::WristBackground,
     accent: egui::Color32,
 ) {
     use crate::wrist::compact as c;
@@ -1618,6 +1624,39 @@ fn wrist_toolbar_card(
                     }
                 }
             });
+        }
+        // Background image behind the clock + media.
+        if !bg.scanned {
+            bg.scanned = true;
+            bg.files = crate::backgrounds::list(&crate::backgrounds::dir());
+        }
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Background"));
+            let shown = if bg.file.is_empty() { "None".to_string() } else { bg.file.clone() };
+            egui::ComboBox::from_id_source("wrist-bg").selected_text(shown).show_ui(ui, |ui| {
+                ui.selectable_value(&mut bg.file, String::new(), "None");
+                for f in bg.files.clone() {
+                    ui.selectable_value(&mut bg.file, f.clone(), f);
+                }
+            });
+            if ui.button("Refresh").clicked() {
+                bg.files = crate::backgrounds::list(&crate::backgrounds::dir());
+            }
+            if ui.button("Open folder").on_hover_text("Drop PNG or JPG images here, then Refresh").clicked() {
+                let d = crate::backgrounds::dir();
+                let _ = std::fs::create_dir_all(&d);
+                crate::backgrounds::open_folder(&d);
+                bg.files = crate::backgrounds::list(&d);
+            }
+        });
+        if !bg.file.is_empty() {
+            ui.horizontal(|ui| {
+                ui.label(theme::body_muted("Darken"));
+                crate::theme::fit_slider(ui);
+                ui.add(egui::Slider::new(&mut bg.dim, 0.0..=0.9).fixed_decimals(2));
+            })
+            .response
+            .on_hover_text("Darkens the image so the clock stays easy to read");
         }
         ui.add_space(4.0);
         ui.label(theme::body_muted("Full toolbar (after More)"));
