@@ -78,6 +78,12 @@ pub struct SourcePicker {
     pub wall_request: bool,
     /// "Big screen": the main monitor as one large curved screen.
     pub big_screen_request: bool,
+    /// Program of each listed window ("Discord.exe"), set by the app.
+    pub apps: std::collections::HashMap<isize, String>,
+    /// Programs hidden from the picker (persisted).
+    pub hidden_apps: Vec<String>,
+    /// "Show hidden" toggle on the Desktop page.
+    pub show_hidden: bool,
     /// Desktop-page filter text.
     pub filter: String,
     /// App icons per window (raw pixels from the app; textures are made

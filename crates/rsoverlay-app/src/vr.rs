@@ -418,6 +418,8 @@ mod imp {
         pinned: bool,
         /// Overlay curvature (0 = flat).
         curvature: f32,
+        /// Full frame rate even when not looked at (Window menu).
+        smooth: bool,
     }
 
     impl WinOverlay {
@@ -611,6 +613,7 @@ mod imp {
             opacity: 1.0,
             pinned: false,
             curvature: 0.0,
+            smooth: false,
         })
     }
 
@@ -662,6 +665,7 @@ mod imp {
                     opacity: (w.opacity < 1.0).then_some(w.opacity),
                     pinned: w.pinned,
                     curvature: (w.curvature > 0.0).then_some(w.curvature),
+                    smooth: w.smooth,
                 }
             })
             .collect();
@@ -705,6 +709,7 @@ mod imp {
             opacity: 1.0,
             pinned: false,
             curvature: 0.0,
+            smooth: false,
         })
     }
 
@@ -1839,6 +1844,7 @@ mod imp {
             if std::mem::take(&mut dev_view.sources.wants_refresh) {
                 dev_view.sources.choices = list_sources();
                 fetch_icons(&dev_view.sources.choices, &mut dev_view.sources.icons);
+                crate::mirror_source::fetch_apps(&dev_view.sources.choices, &mut dev_view.sources.apps);
                 thumbs.request(&dev_view.sources.choices);
             }
             thumbs.collect(&mut dev_view.sources);
@@ -1969,7 +1975,7 @@ mod imp {
                 let background_s = 1.0 / f64::from(dev_view.vr_background_fps.clamp(1.0, 90.0));
                 // Focus mode: dimmed windows are background too.
                 let dimmed = focus_win.is_some_and(|f| f != w.seq);
-                if (!w.panel.in_view || dimmed) && time - w.panel.last_render < background_s && lf.events.is_empty() {
+                if !w.smooth && (!w.panel.in_view || dimmed) && time - w.panel.last_render < background_s && lf.events.is_empty() {
                     continue;
                 }
                 let accent = dev_view.effective_accent();
@@ -2006,7 +2012,7 @@ mod imp {
                         (mirror.source.label(), mirror.handle(), w.attach, lf.cursor, w.input_blocked);
                     let touch_mode = dev_view.pointer.touch_input;
                     let icon = w.icon.as_ref().map(|t| t.id());
-                    let (linked, opacity, pinned) = (w.group.is_some(), w.opacity, follow.then_some(w.pinned));
+                    let (linked, opacity, pinned, smooth) = (w.group.is_some(), w.opacity, follow.then_some(w.pinned), w.smooth);
                     // Auto-hide: the toolbar shows while the laser is on the
                     // window or it's held, and lingers a moment after.
                     if lf.cursor.is_some() || grab.as_ref().is_some_and(|g| g.panel == k + WIN0) {
@@ -2015,7 +2021,7 @@ mod imp {
                     let show_toolbar = !dev_view.pointer.autohide_toolbars || time - w.toolbar_seen < TOOLBAR_LINGER_S;
                     let events = lf.events.clone();
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
-                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, opacity, pinned, show_toolbar, accent);
+                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, opacity, pinned, show_toolbar, smooth, accent);
                         if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
                             rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                         }
@@ -2114,6 +2120,7 @@ mod imp {
                     w.group = None;
                 }
                 w.pinned ^= act.toggle_pin;
+                w.smooth ^= act.toggle_smooth;
                 if let Some(o) = act.opacity {
                     w.opacity = o.clamp(window_panel::MIN_CONTENT_OPACITY, 1.0);
                 }
@@ -2280,6 +2287,7 @@ mod imp {
                             w.group = p.group.filter(|_| attach == Attach::World).map(|g| group_base + 1 + g);
                             w.opacity = p.opacity.unwrap_or(1.0).clamp(window_panel::MIN_CONTENT_OPACITY, 1.0);
                             w.pinned = p.pinned;
+                            w.smooth = p.smooth;
                             if let Some(c) = p.curvature.filter(|c| *c > 0.0) {
                                 w.curvature = c.min(1.0);
                                 let _ = overlay.set_curvature(w.panel.handle, w.curvature);

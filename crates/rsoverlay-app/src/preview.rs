@@ -153,6 +153,7 @@ pub fn seed_dev_view(
     dev.pointer.touch_input = cfg.vr.window_touch;
     dev.pointer.block_game_input = cfg.vr.block_game_input;
     dev.pointer.autohide_toolbars = cfg.vr.autohide_toolbars;
+    dev.sources.hidden_apps = cfg.vr.hidden_apps.clone();
     dev.restore_session = cfg.vr.restore_session;
     dev.vr_hide_wrist = cfg.vr.hide_wrist;
     dev.vr_hide_with_steamvr = cfg.vr.hide_with_steamvr_dashboard;
@@ -350,6 +351,7 @@ pub fn config_from_dev_view(
         window_touch: dev.pointer.touch_input,
         block_game_input: dev.pointer.block_game_input,
         autohide_toolbars: dev.pointer.autohide_toolbars,
+        hidden_apps: dev.sources.hidden_apps.clone(),
         restore_session: dev.restore_session,
         hide_wrist: dev.vr_hide_wrist,
         hide_with_steamvr_dashboard: dev.vr_hide_with_steamvr,
@@ -942,6 +944,7 @@ pub fn run(
                         if std::mem::take(&mut dev_view.sources.wants_refresh) {
                             dev_view.sources.choices = list_sources();
                             fetch_icons(&dev_view.sources.choices, &mut dev_view.sources.icons);
+                crate::mirror_source::fetch_apps(&dev_view.sources.choices, &mut dev_view.sources.apps);
                             thumbs.request(&dev_view.sources.choices);
                         }
                         thumbs.collect(&mut dev_view.sources);
@@ -1455,6 +1458,7 @@ mod config_roundtrip_tests {
         v.window_touch = true;
         v.block_game_input = true;
         v.autohide_toolbars = true;
+        v.hidden_apps = vec!["Discord.exe".into()];
         v.restore_session = false;
         v.hide_wrist = true;
         v.hide_with_steamvr_dashboard = false;

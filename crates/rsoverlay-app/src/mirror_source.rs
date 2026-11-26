@@ -162,6 +162,19 @@ fn spawn(name: &str, f: impl FnOnce() + Send + 'static) -> Result<JoinHandle<()>
 }
 
 /// App icons for windows not already in `have`, as egui images.
+/// Which program each listed window belongs to (for hiding apps).
+pub fn fetch_apps(sources: &[CaptureSource], have: &mut std::collections::HashMap<isize, String>) {
+    for s in sources {
+        if let CaptureSource::Window { hwnd, .. } = s {
+            if !have.contains_key(hwnd) {
+                if let Some(app) = rsoverlay_capture::window::window_app(*hwnd) {
+                    have.insert(*hwnd, app);
+                }
+            }
+        }
+    }
+}
+
 pub fn fetch_icons(sources: &[CaptureSource], have: &mut std::collections::HashMap<isize, egui::ColorImage>) {
     for s in sources {
         if let CaptureSource::Window { hwnd, .. } = s {

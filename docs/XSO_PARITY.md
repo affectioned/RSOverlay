@@ -31,7 +31,7 @@ Last reviewed: M77 (2026-11-26).
 | Curve bias | ⛔ | OpenVR's overlay curvature has no bias parameter; faking it would mean warping textures ourselves |
 | Clip angle (hide when viewed edge-on) | ✅ | M44, default 60°, every panel |
 | Default overlay scale / opacity | ✅ | M35 (global); per-window content opacity on each window toolbar (M64) |
-| Per-overlay min/max capture FPS | 🟡 | M77: one setting for panels you aren't looking at (1–90 fps, default 5); the one you look at runs at full rate. Not per panel |
+| Per-overlay min/max capture FPS | ✅ | M77 global rate for panels you aren't looking at (1–90 fps); M78 per window: Window menu › Keep smooth when not looking |
 | Force higher-quality overlays | ✅ | M70: Settings › VR panels › Resolution (Standard / High 1.5× / Ultra 2×), live |
 | Resize the real window from VR | ✅ | M74: Size menu on window toolbars (RSO-only in this form) |
 | Layouts (save / load panel arrangements) | ✅ | M53: 8 slots, startup slot, last session restored (M65) |
@@ -125,4 +125,4 @@ Last reviewed: M77 (2026-11-26).
    more languages.
 2. Headset-test the experimental input blocking; promote or replace it.
 3. Full colour themes (theme colours as runtime tokens, `themes/` files).
-4. HOTAS / DirectInput sim bindings; per-panel refresh rates.
+4. HOTAS / DirectInput sim bindings.

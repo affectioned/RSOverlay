@@ -435,11 +435,10 @@ pub fn cursor_pos() -> Option<(i32, i32)> {
     (ci.flags.0 & CURSOR_SHOWING.0 != 0).then_some((ci.ptScreenPos.x, ci.ptScreenPos.y))
 }
 
-/// Large (128 px) icon from the window's executable — WM_GETICON
-/// usually hands back 32 px, which looks soft on VR panels.
-fn exe_icon_large(hwnd: isize) -> Option<windows::Win32::UI::WindowsAndMessaging::HICON> {
+/// Full path of the program that owns a window (UTF-16, NUL-terminated).
+fn process_path(hwnd: isize) -> Option<[u16; 260]> {
     use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
-    use windows::Win32::UI::WindowsAndMessaging::{PrivateExtractIconsW, HICON};
+    // SAFETY: plain Win32 calls; the process handle is closed.
     unsafe {
         let mut pid = 0u32;
         GetWindowThreadProcessId(HWND(hwnd), Some(&mut pid));
@@ -448,9 +447,24 @@ fn exe_icon_large(hwnd: isize) -> Option<windows::Win32::UI::WindowsAndMessaging
         let mut len = path.len() as u32;
         let ok = QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, windows::core::PWSTR(path.as_mut_ptr()), &mut len).is_ok();
         let _ = CloseHandle(h);
-        if !ok {
-            return None;
-        }
+        ok.then_some(path)
+    }
+}
+
+/// The program a window belongs to, e.g. "Discord.exe".
+pub fn window_app(hwnd: isize) -> Option<String> {
+    let path = process_path(hwnd)?;
+    let end = path.iter().position(|c| *c == 0).unwrap_or(path.len());
+    let full = String::from_utf16_lossy(&path[..end]);
+    full.rsplit(['\\', '/']).next().filter(|n| !n.is_empty()).map(str::to_string)
+}
+
+/// Large (128 px) icon from the window's executable — WM_GETICON
+/// usually hands back 32 px, which looks soft on VR panels.
+fn exe_icon_large(hwnd: isize) -> Option<windows::Win32::UI::WindowsAndMessaging::HICON> {
+    use windows::Win32::UI::WindowsAndMessaging::{PrivateExtractIconsW, HICON};
+    unsafe {
+        let path = process_path(hwnd)?;
         let mut icons = [HICON::default(); 1];
         let n = PrivateExtractIconsW(&path, 0, 128, 128, Some(&mut icons), None, 0);
         (n >= 1 && icons[0].0 != 0).then_some(icons[0])
@@ -604,5 +618,18 @@ mod placement_tests {
         assert_eq!(place_in_work_area(WORK, (10, 10), 2560, 1440), (0, 0, 2560, 1392));
         // Second monitor to the left (negative coordinates).
         assert_eq!(place_in_work_area((-1920, 0, 0, 1040), (-300, 0), 1280, 720), (-1280, 0, 1280, 720));
+    }
+}
+
+#[cfg(test)]
+mod app_name_tests {
+    /// Lists real windows with their program (run with --ignored).
+    #[test]
+    #[ignore]
+    fn live_window_apps() {
+        let wins = crate::enumerate_windows().unwrap();
+        let named = wins.iter().filter_map(|w| super::window_app(w.hwnd)).collect::<Vec<_>>();
+        println!("{named:?}");
+        assert!(named.iter().all(|n| n.to_lowercase().ends_with(".exe")));
     }
 }

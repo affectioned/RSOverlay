@@ -54,6 +54,8 @@ pub struct WindowPanelAction {
     pub toggle_pin: bool,
     /// Resize the real window to (w, h) pixels (Size menu).
     pub resize: Option<(u32, u32)>,
+    /// "Keep smooth when not looking" toggled.
+    pub toggle_smooth: bool,
 }
 
 /// Window sizes on the toolbar's Size menu (outer size, pixels).
@@ -76,6 +78,7 @@ pub fn show(
     opacity: f32,
     pinned: Option<bool>,
     show_toolbar: bool,
+    smooth: bool,
     accent: egui::Color32,
 ) -> WindowPanelAction {
     let mut out = WindowPanelAction::default();
@@ -125,18 +128,29 @@ pub fn show(
         }
 
         let mut op = opacity;
-        // Size menu: only for real windows Windows lets us touch.
-        let resizable = mirror.is_some_and(|m| m.resizable) && !input_blocked;
+        // Window menu: smooth refresh for any capture; sizes only for
+        // real windows Windows lets us touch.
+        let menu = mirror.map(|m| WindowMenu { resizable: m.resizable && !input_blocked, smooth });
         // Auto-hidden toolbars leave their strip empty (no layout jump).
         if show_toolbar {
-            let t = toolbar(ui, bar, title, icon, attach, linked, pinned, resizable, Some(&mut op), accent);
-            (out.attach, out.close, out.unlink, out.toggle_pin, out.resize) = (t.attach, t.close, t.unlink, t.toggle_pin, t.resize);
+            let t = toolbar(ui, bar, title, icon, attach, linked, pinned, menu, Some(&mut op), accent);
+            (out.attach, out.close, out.unlink, out.toggle_pin, out.resize, out.toggle_smooth) =
+                (t.attach, t.close, t.unlink, t.toggle_pin, t.resize, t.toggle_smooth);
         }
         if (op - opacity).abs() > f32::EPSILON {
             out.opacity = Some(op);
         }
     });
     out
+}
+
+/// The toolbar's Window menu: what it offers for this panel.
+#[derive(Copy, Clone, Debug)]
+pub struct WindowMenu {
+    /// A real window we may resize (Size presets).
+    pub resizable: bool,
+    /// "Keep smooth when not looking" is on.
+    pub smooth: bool,
 }
 
 /// What the toolbar's controls asked for this frame.
@@ -147,6 +161,8 @@ pub struct ToolbarOut {
     pub unlink: bool,
     pub toggle_pin: bool,
     pub resize: Option<(u32, u32)>,
+    /// "Keep smooth when not looking" toggled.
+    pub toggle_smooth: bool,
 }
 
 /// A window panel's bottom toolbar: app icon + title, dock + close, and
@@ -162,7 +178,7 @@ pub fn toolbar(
     attach: Attach,
     linked: bool,
     pinned: Option<bool>,
-    resizable: bool,
+    menu: Option<WindowMenu>,
     opacity: Option<&mut f32>,
     accent: egui::Color32,
 ) -> ToolbarOut {
@@ -194,30 +210,43 @@ pub fn toolbar(
             }
             ui.label(theme::caption("Opacity"));
         }
-        if resizable {
+        if let Some(m) = menu {
             ui.add_space(12.0);
-            out.resize = size_menu(ui);
+            (out.resize, out.toggle_smooth) = window_menu(ui, m);
         }
     });
     out
 }
 
-/// "Size": resize the real window so its text reads well at the panel's
-/// size (smaller window = bigger text in VR).
-fn size_menu(ui: &mut egui::Ui) -> Option<(u32, u32)> {
-    let mut pick = None;
-    ui.menu_button("Size", |ui| {
-        ui.label(theme::caption("Resize the real window"));
-        for (w, h) in SIZE_PRESETS {
-            if ui.button(format!("{w} × {h}")).clicked() {
-                pick = Some((w, h));
-                ui.close_menu();
+/// "Window" menu: keep this panel at full frame rate when you look
+/// away, and (real windows) resize the window so its text reads well at
+/// the panel's size. Returns (size picked, smooth toggled).
+fn window_menu(ui: &mut egui::Ui, m: WindowMenu) -> (Option<(u32, u32)>, bool) {
+    let (mut pick, mut toggle) = (None, false);
+    ui.menu_button("Window", |ui| {
+        let mut on = m.smooth;
+        if ui
+            .checkbox(&mut on, "Keep smooth when not looking")
+            .on_hover_text("Full frame rate even out of the corner of your eye (videos, a game you watch). Uses a little more GPU.")
+            .changed()
+        {
+            toggle = true;
+            ui.close_menu();
+        }
+        if m.resizable {
+            ui.separator();
+            ui.label(theme::caption("Resize the real window"));
+            for (w, h) in SIZE_PRESETS {
+                if ui.button(format!("{w} × {h}")).clicked() {
+                    pick = Some((w, h));
+                    ui.close_menu();
+                }
             }
         }
     })
     .response
-    .on_hover_text("Change the real window's size: bigger fits more, smaller makes text larger in VR");
-    pick
+    .on_hover_text("Refresh and size options for this window");
+    (pick, toggle)
 }
 
 /// Shown over an elevated window's capture when RSOverlay isn't elevated:
@@ -324,6 +353,15 @@ pub fn source_grid(ui: &mut egui::Ui, sources: &mut SourcePicker, open: &[Captur
         }
         let monitors = sources.choices.iter().filter(|s| matches!(s, CaptureSource::Monitor(_))).count();
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if !sources.hidden_apps.is_empty() {
+                let label = if sources.show_hidden { "Hide hidden".to_string() } else { format!("Show hidden ({})", sources.hidden_apps.len()) };
+                if pill(ui, &label, sources.show_hidden, accent)
+                    .on_hover_text("Apps you hid from this list: show them again to open or unhide one")
+                    .clicked()
+                {
+                    sources.show_hidden = !sources.show_hidden;
+                }
+            }
             if monitors > 1
                 && pill(ui, "All monitors", false, accent)
                     .on_hover_text("Open every monitor at once, arranged in an arc around you (left to right as on your desk)")
@@ -342,8 +380,22 @@ pub fn source_grid(ui: &mut egui::Ui, sources: &mut SourcePicker, open: &[Captur
     });
     ui.add_space(theme::GUTTER);
     let needle = sources.filter.trim().to_lowercase();
-    let choices: Vec<CaptureSource> =
-        sources.choices.iter().filter(|s| needle.is_empty() || s.label().to_lowercase().contains(&needle)).cloned().collect();
+    // Snapshots: the grid below needs `sources` mutably.
+    let (apps, hidden_apps, show_hidden) = (sources.apps.clone(), sources.hidden_apps.clone(), sources.show_hidden);
+    let app_of = |s: &CaptureSource| match s {
+        CaptureSource::Window { hwnd, .. } => apps.get(hwnd).cloned(),
+        _ => None,
+    };
+    let is_hidden = |s: &CaptureSource| app_of(s).is_some_and(|a| hidden_apps.contains(&a));
+    let choices: Vec<CaptureSource> = sources
+        .choices
+        .iter()
+        .filter(|s| needle.is_empty() || s.label().to_lowercase().contains(&needle))
+        .filter(|s| show_hidden || !is_hidden(s))
+        .cloned()
+        .collect();
+    // (tile, hide / unhide) asked for this frame.
+    let mut toggle_app: Option<String> = None;
     if !needle.is_empty() {
         ui.label(egui::RichText::new(format!("{} of {}", choices.len(), sources.choices.len())).size(theme::SIZE_CAPTION + 1.0).color(theme::FG_MUTED));
         ui.add_space(6.0);
@@ -403,12 +455,38 @@ pub fn source_grid(ui: &mut egui::Ui, sources: &mut SourcePicker, open: &[Captur
                 let label: String = ui.fonts(|f| label.chars().filter(|c| f.has_glyph(&font, *c)).collect());
                 painter.text(caption + egui::vec2(50.0, 0.0), egui::Align2::LEFT_CENTER,
                     shell_truncate(label.trim(), 28), font, theme::FG_PRIMARY);
-                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !is_open {
+                // Hide / unhide this app from the list (top-right of the tile).
+                let mut hide_clicked = false;
+                if let Some(app) = app_of(src) {
+                    let hidden = hidden_apps.contains(&app);
+                    if hidden || resp.hovered() {
+                        let r = egui::Rect::from_min_size(egui::pos2(rect.right() - 86.0, rect.top() + 14.0), egui::vec2(72.0, 30.0));
+                        let mut sub = ui.child_ui(r, egui::Layout::right_to_left(egui::Align::Center));
+                        let tip = if hidden { format!("Show {app} in this list again") } else { format!("Hide every {app} window from this list") };
+                        if pill(&mut sub, if hidden { "Unhide" } else { "Hide" }, hidden, accent).on_hover_text(tip).clicked() {
+                            hide_clicked = true;
+                            toggle_app = Some(app);
+                        }
+                    }
+                }
+                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !is_open && !hide_clicked {
                     sources.request = Some(src.clone());
                 }
             }
         });
         ui.add_space(gap);
+    }
+    if let Some(app) = toggle_app {
+        match sources.hidden_apps.iter().position(|a| *a == app) {
+            Some(i) => {
+                sources.hidden_apps.remove(i);
+            }
+            None if sources.hidden_apps.len() < 100 => sources.hidden_apps.push(app),
+            None => {}
+        }
+        if sources.hidden_apps.is_empty() {
+            sources.show_hidden = false;
+        }
     }
 }
 

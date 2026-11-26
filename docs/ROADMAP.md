@@ -11,7 +11,7 @@ scratch against public Windows / OpenVR APIs.
 
 ---
 
-## What's shipped (M0 → M77)
+## What's shipped (M0 → M78)
 
 Last reviewed 2026-11-26. Parity detail lives in
 [XSO_PARITY.md](XSO_PARITY.md).
@@ -96,6 +96,12 @@ Last reviewed 2026-11-26. Parity detail lives in
   (optional); gamepad shortcuts; wrist background image; touch input for
   windows; block game input while pointing (experimental); refresh rate
   for panels you aren't looking at.
+- **M78:** in-app updates (Install update: download with progress,
+  SHA-256 check, swap, restart) and what's new before / after updating;
+  Focus follow-ups (dimmed windows throttled, auto-off when the last
+  window closes); auto-hide window toolbars; per-window "Keep smooth
+  when not looking"; hide apps from the window picker; language picker
+  hidden until the UI is translated.
 
 ## XSOverlay parity: remaining gaps
 
@@ -112,8 +118,9 @@ physical-style keyboard that types in any language, global search,
 macros, DPI-correct input, dock-anywhere panels. The VR preview's
 "work" scene (`--vr-preview --scene work`) shows the target setup.
 
-1. **Focus mode follow-ups** — auto-off when you leave the window, and
-   optional throttling of the dimmed panels.
+1. **Translate the UI** — route every string through the i18n tables,
+   then translations checked by native speakers (the language picker is
+   hidden until then).
 
 ## Mid-term
 
@@ -125,7 +132,6 @@ macros, DPI-correct input, dock-anywhere panels. The VR preview's
   *XSO #185/#316/#337; OVR #6.*
 - **Service discovery via mDNS** so companion apps autoconnect to the
   notification server (XSO #188).
-- **Toolbar whitelist / blacklist**, window frame chrome toggles (OVR #7).
 - **Discord button bar** (mute / deafen) next to the media controls
   (XSO #119/#120).
 - **Hand-tracking input** (OVR #5): fingertip typing via OpenXR
