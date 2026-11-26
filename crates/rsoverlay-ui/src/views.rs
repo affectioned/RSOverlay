@@ -354,6 +354,8 @@ pub struct DevView {
     pub vr_stick_axis_lock: bool,
     /// Panel render resolution multiplier (1, 1.5, 2).
     pub vr_render_scale: f32,
+    /// Refresh rate of panels you aren't looking at (fps).
+    pub vr_background_fps: f32,
     pub run_as_admin: bool,
     /// Set by the app: is this process elevated right now?
     pub elevated: bool,
@@ -484,6 +486,7 @@ impl Default for DevView {
             vr_grab_tilt: false,
             vr_stick_axis_lock: true,
             vr_render_scale: 1.0,
+            vr_background_fps: 5.0,
             run_as_admin: false,
             elevated: false,
             restart_elevated_requested: false,
@@ -850,7 +853,7 @@ impl DevView {
                         Some("vr")
                     }
                     3 => {
-                        vr_panels_card(ui, &mut self.vr_windows_follow_dash, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, accent);
+                        vr_panels_card(ui, &mut self.vr_windows_follow_dash, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, &mut self.vr_background_fps, accent);
                         Some("vr-panels")
                     }
                     4 => {
@@ -1299,7 +1302,7 @@ impl DevView {
                     l.add_space(theme::GUTTER);
                     vr_card(l, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, &mut self.vr_hide_wrist, accent);
                     l.add_space(theme::GUTTER);
-                    vr_panels_card(l, &mut self.vr_windows_follow_dash, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, accent);
+                    vr_panels_card(l, &mut self.vr_windows_follow_dash, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, &mut self.vr_background_fps, accent);
                     l.add_space(theme::GUTTER);
                     gamepad_card(l, &mut self.gamepad, self.gamepad_held, &mut self.gamepad_capture, accent);
                     l.add_space(theme::GUTTER);
@@ -1557,6 +1560,7 @@ fn gamepad_card(
 }
 
 /// How panels show, hide, move and render in VR.
+#[allow(clippy::too_many_arguments)]
 fn vr_panels_card(
     ui: &mut egui::Ui,
     follow_dash: &mut bool,
@@ -1564,6 +1568,7 @@ fn vr_panels_card(
     grab_tilt: &mut bool,
     axis_lock: &mut bool,
     render_scale: &mut f32,
+    background_fps: &mut f32,
     accent: egui::Color32,
 ) {
     theme::card().show(ui, |ui| {
@@ -1595,6 +1600,13 @@ fn vr_panels_card(
                 }
             }
         });
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Unwatched panels"));
+            crate::theme::fit_slider(ui);
+            ui.add(egui::Slider::new(background_fps, 1.0..=90.0).fixed_decimals(0).suffix(" fps"));
+        })
+        .response
+        .on_hover_text("How often panels you aren't looking at refresh. Lower saves GPU for your game; raise it to watch a video out of the corner of your eye.");
     });
 }
 

@@ -158,6 +158,7 @@ pub fn seed_dev_view(
     dev.vr_stick_axis_lock = cfg.vr.stick_axis_lock;
     dev.vr_pointer_size = cfg.vr.pointer_size.clamp(0.5, 2.5);
     dev.vr_render_scale = cfg.vr.render_scale.clamp(1.0, 2.0);
+    dev.vr_background_fps = cfg.vr.background_fps.clamp(1.0, 90.0);
     let nc = &cfg.notifications;
     dev.notif.size_m = nc.size_m.clamp(0.15, 0.6);
     dev.notif.offset_y = nc.offset_y.clamp(-0.4, 0.2);
@@ -353,6 +354,7 @@ pub fn config_from_dev_view(
         stick_axis_lock: dev.vr_stick_axis_lock,
         pointer_size: dev.vr_pointer_size,
         render_scale: dev.vr_render_scale,
+        background_fps: dev.vr_background_fps,
     };
     out.vr_state = dev.vr_state.clone();
     out.discord = dev.discord.clone();
@@ -1448,6 +1450,7 @@ mod config_roundtrip_tests {
         v.stick_axis_lock = false;
         v.pointer_size = 1.5;
         v.render_scale = 2.0;
+        v.background_fps = 15.0;
         c.vr_state = VrState {
             wrist_pose: Some([[1.0, 0.0, 0.0, 0.1], [0.0, 1.0, 0.0, 0.2], [0.0, 0.0, 1.0, 0.3]]),
             wrist_width: Some(0.3),

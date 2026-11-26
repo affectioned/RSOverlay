@@ -120,6 +120,8 @@ pub struct VrCfg {
     /// Panel render resolution multiplier (1, 1.5 or 2): sharper text on
     /// high-resolution headsets, more VRAM.
     pub render_scale: f32,
+    /// Refresh rate of panels you aren't looking at, fps (1-90).
+    pub background_fps: f32,
 }
 
 /// Where things were left in VR — not choices made in Settings, but
@@ -255,7 +257,7 @@ pub const DEFAULT_WRIST_COMPACT: u32 = 0x0F | (1 << 8) | (1 << 9) | (1 << 10) | 
 
 impl Default for VrCfg {
     fn default() -> Self {
-        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0xFF, wrist_actions_rev: 1, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new(), long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, mouse_follows_laser: true, window_touch: false, block_game_input: false, restore_session: true, hide_wrist: false, hide_with_steamvr_dashboard: true, windows_follow_dashboard: true, grab_tilt: false, stick_axis_lock: true, pointer_size: 1.0, render_scale: 1.0 }
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.5, scroll_speed: 1.0, wrist_buttons: 0xFF, wrist_actions_rev: 1, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new(), long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, mouse_follows_laser: true, window_touch: false, block_game_input: false, restore_session: true, hide_wrist: false, hide_with_steamvr_dashboard: true, windows_follow_dashboard: true, grab_tilt: false, stick_axis_lock: true, pointer_size: 1.0, render_scale: 1.0, background_fps: 5.0 }
     }
 }
 

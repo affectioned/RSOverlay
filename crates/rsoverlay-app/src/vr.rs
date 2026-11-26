@@ -115,9 +115,9 @@ mod imp {
     /// smoothing 0..1); the default 0.3 ≈ 0.05 s kills hand tremor on big
     /// panels without feeling laggy.
     const GRAB_TAU: (f32, f32) = (0.005, 0.15);
-    /// Panels outside your view cone re-render at this interval instead
-    /// of every frame (XSO: "active" overlays are the ones you look at).
-    const BACKGROUND_FRAME_S: f64 = 0.2;
+    // Panels outside your view cone re-render at Settings › VR panels ›
+    // Unwatched panels fps instead of every frame (XSO: "active"
+    // overlays are the ones you look at).
 
     /// Laser beam strip: 256 × 16 texels, 3.5 mm thick at any length.
     const BEAM_TEX: (u32, u32) = (256, 16);
@@ -1958,7 +1958,8 @@ mod imp {
                 win_haptics.extend(lf.haptic);
                 // Looked-away panels refresh ~5×/s: the GPU only works
                 // hard for what you're looking at.
-                if !w.panel.in_view && time - w.panel.last_render < BACKGROUND_FRAME_S && lf.events.is_empty() {
+                let background_s = 1.0 / f64::from(dev_view.vr_background_fps.clamp(1.0, 90.0));
+                if !w.panel.in_view && time - w.panel.last_render < background_s && lf.events.is_empty() {
                     continue;
                 }
                 let accent = dev_view.effective_accent();

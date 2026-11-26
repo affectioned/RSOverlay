@@ -11,7 +11,7 @@ scratch against public Windows / OpenVR APIs.
 
 ---
 
-## What's shipped (M0 → M76)
+## What's shipped (M0 → M77)
 
 Last reviewed 2026-11-26. Parity detail lives in
 [XSO_PARITY.md](XSO_PARITY.md).
@@ -91,6 +91,11 @@ Last reviewed 2026-11-26. Parity detail lives in
   (12 h / 24 h) and date format, keyboard language quick-switch;
   XSO_PARITY.md re-reviewed. Release notes are hand-written per tag
   (`docs/releases/`).
+- **M77 (parity, continued):** no console window (log file + crash
+  dialog, Report a problem / Open logs); mouse follows the laser
+  (optional); gamepad shortcuts; wrist background image; touch input for
+  windows; block game input while pointing (experimental); refresh rate
+  for panels you aren't looking at.
 
 ## XSOverlay parity: remaining gaps
 
