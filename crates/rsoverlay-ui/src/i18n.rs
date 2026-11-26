@@ -9,6 +9,11 @@
 
 use serde::{Deserialize, Serialize};
 
+/// The UI's text isn't routed through these tables yet (it's English in
+/// code), so the language picker stays hidden until it is: offering
+/// languages that change nothing would only confuse.
+pub const UI_TRANSLATED: bool = false;
+
 /// Locales we ship UI translations for. More get added here as the
 /// research on top VR regions lands.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]

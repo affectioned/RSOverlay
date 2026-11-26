@@ -99,7 +99,7 @@ Last reviewed: M77 (2026-11-26).
 | Do-not-disturb | ✅ | M73: Focus mode on the wrist (also dims the windows you aren't working in) |
 | OSC device events (battery etc. → VRChat) | ✅ | M37, see [OSC.md](OSC.md) |
 | Discord Rich Presence | ✅ | M25 + built-in app, live toggle and sharing choices in Settings › Discord |
-| Localization | 🟡 | 9 languages, but only ~40 core strings are translated; most of the UI is still English in code. Next step is moving every string into the tables, not adding languages |
+| Localization | ❌ | English only for now. Translation tables exist for 9 languages (~40 keys) but the UI doesn't use them yet, so the language picker is hidden. Planned: route every string through the tables, then translations (ideally checked by native speakers) |
 | Updates | ✅ | M71: GitHub builds show an opt-in notice (never auto-install); Steam builds update through Steam |
 | Plugin applications | ❌ | WASM-only, see ROADMAP non-goals |
 | Analytics | ⛔ | no telemetry |

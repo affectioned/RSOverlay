@@ -103,7 +103,7 @@ frame time live, so you can check the claim yourself.
 - Batteries for HMD, controllers and trackers, with playtime estimates,
   low-battery alerts and an optional VRChat avatar parameter (OSC)
 - VRChat OSC chatbox, including "share now playing"
-- Macros, night light, 9 UI languages
+- Macros, night light (the interface is English for now; translations are planned)
 - Discord Rich Presence ("In VR · 3 windows open", headset battery,
   optionally your music), switched on / off live in Settings › Discord
 - Custom sounds for typing and every alert: drop in your own WAVs

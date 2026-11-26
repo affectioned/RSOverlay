@@ -2425,14 +2425,17 @@ fn appearance_card(
         });
         ui.add_space(8.0);
         // Language picker — shows the native-script name so a Russian
-        // user sees Русский.
-        egui::ComboBox::from_label("Language")
-            .selected_text(language.native_name())
-            .show_ui(ui, |ui| {
-                for l in crate::i18n::Lang::all() {
-                    ui.selectable_value(language, *l, l.native_name());
-                }
-            });
+        // user sees Русский. Hidden until the UI text is actually
+        // translated (see `i18n::UI_TRANSLATED`).
+        if crate::i18n::UI_TRANSLATED {
+            egui::ComboBox::from_label("Language")
+                .selected_text(language.native_name())
+                .show_ui(ui, |ui| {
+                    for l in crate::i18n::Lang::all() {
+                        ui.selectable_value(language, *l, l.native_name());
+                    }
+                });
+        }
         egui::ComboBox::from_label("Layout")
             .selected_text(keyboard_layout.label())
             .show_ui(ui, |ui| {
