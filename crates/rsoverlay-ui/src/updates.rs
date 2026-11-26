@@ -132,6 +132,8 @@ fn run_install(s: &Shared, r: &Release) {
 pub struct Updates {
     /// This build may check / install (false for Steam builds and tests).
     pub supported: bool,
+    /// Screenshots: show the real card (and defaults) but never go online.
+    pub offline: bool,
     pub prefs: UpdatesCfg,
     worker: Option<UpdateWorker>,
     pub status: Status,
@@ -169,7 +171,7 @@ impl Updates {
         if let Some(w) = &self.worker {
             self.install = w.install_state();
         }
-        if !self.supported || (!self.prefs.check && !self.check_now) {
+        if !self.supported || self.offline || (!self.prefs.check && !self.check_now) {
             return None;
         }
         let pre = self.prefs.prereleases;
