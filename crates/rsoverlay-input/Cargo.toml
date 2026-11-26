@@ -22,4 +22,5 @@ windows = { workspace = true, features = [
     "Win32_UI_Shell",
     "Win32_Globalization",
     "Win32_UI_Input_XboxController",
+    "Win32_UI_Input_Pointer",
 ] }

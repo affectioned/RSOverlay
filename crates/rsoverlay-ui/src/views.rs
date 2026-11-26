@@ -1775,11 +1775,14 @@ pub struct PointerPrefs {
     /// The real mouse follows the laser over a window (off: it only
     /// moves when you click or drag).
     pub mouse_follows: bool,
+    /// Windows get touch input (the trigger is a finger) instead of
+    /// mouse clicks.
+    pub touch_input: bool,
 }
 
 impl Default for PointerPrefs {
     fn default() -> Self {
-        Self { long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, mouse_follows: true }
+        Self { long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, mouse_follows: true, touch_input: false }
     }
 }
 
@@ -1923,6 +1926,8 @@ fn pointer_card(ui: &mut egui::Ui, smoothing: &mut f32, scroll: &mut f32, ptr: &
         })
         .response
         .on_hover_text("Steadier panels while you carry them (higher = calmer, a little more lag)");
+        ui.checkbox(&mut ptr.touch_input, "Touch input for windows")
+            .on_hover_text("The trigger touches the window like a finger (tap, drag, swipe) instead of clicking a mouse. For touch-friendly apps; right / middle click and scrolling still use the mouse.");
         ui.checkbox(&mut ptr.mouse_follows, "Mouse follows the laser")
             .on_hover_text("On: pointing at a window moves your real mouse (hover menus, tooltips). Off: the mouse only moves when you click or drag, so it stays put while you look around.");
         ui.checkbox(&mut ptr.long_press, "Long-press for right click")

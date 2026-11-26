@@ -28,6 +28,7 @@ pub mod elevation;
 pub mod gamepad;
 pub mod physical;
 pub mod shortcut;
+pub mod touch;
 
 pub use shortcut::Shortcut;
 

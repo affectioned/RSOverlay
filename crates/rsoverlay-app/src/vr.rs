@@ -402,6 +402,8 @@ mod imp {
         wheel_acc: f32,
         /// Same, horizontal (tilt-wheel).
         hwheel_acc: f32,
+        /// Touch input: a finger is down on the real window.
+        touching: bool,
         /// Stable id (survives index shifts when others close).
         seq: u32,
         /// Edge-docked group: members move together while one is grabbed.
@@ -598,6 +600,7 @@ mod imp {
             down: None,
             wheel_acc: 0.0,
             hwheel_acc: 0.0,
+            touching: false,
             seq,
             group: None,
             opacity: 1.0,
@@ -690,6 +693,7 @@ mod imp {
             down: None,
             wheel_acc: 0.0,
             hwheel_acc: 0.0,
+            touching: false,
             seq,
             group: None,
             opacity: 1.0,
@@ -1961,6 +1965,7 @@ mod imp {
                     }
                     let (title, handle_m, attach, cursor, blocked) =
                         (mirror.source.label(), mirror.handle(), w.attach, lf.cursor, w.input_blocked);
+                    let touch_mode = dev_view.pointer.touch_input;
                     let icon = w.icon.as_ref().map(|t| t.id());
                     let (linked, opacity, pinned) = (w.group.is_some(), w.opacity, follow.then_some(w.pinned));
                     let events = lf.events.clone();
@@ -1985,13 +1990,32 @@ mod imp {
                             match ev {
                                 // Hover moves the real mouse only with "Mouse follows the
                                 // laser"; a held button (drag) always does.
-                                egui::Event::PointerMoved(p) if rect.contains(*p) || w.down.is_some() => {
+                                egui::Event::PointerMoved(p) if rect.contains(*p) || w.down.is_some() || w.touching => {
                                     let (x, y) = to_px(*p);
                                     if w.last_hit != Some((x, y)) {
-                                        if dev_view.pointer.mouse_follows || w.down.is_some() {
+                                        if w.touching {
+                                            // The finger slides (drag / swipe).
+                                            let _ = rsoverlay_input::touch::touch(&geom, x, y, rsoverlay_input::touch::Phase::Move);
+                                        } else if (dev_view.pointer.mouse_follows && !touch_mode) || w.down.is_some() {
                                             let _ = inj.move_to(&geom, x, y);
                                         }
                                         w.last_hit = Some((x, y));
+                                    }
+                                }
+                                // Touch input: the trigger is a finger (right / middle
+                                // clicks and the wheel stay on the mouse).
+                                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, .. } if touch_mode && (w.touching || rect.contains(*pos)) => {
+                                    let (x, y) = to_px(*pos);
+                                    if *pressed && !w.touching {
+                                        if let Some(hwnd) = mirror.window_hwnd() {
+                                            rsoverlay_capture::window::focus_window(hwnd);
+                                        }
+                                        w.touching = rsoverlay_input::touch::touch(&geom, x, y, rsoverlay_input::touch::Phase::Down)
+                                            .map_err(|e| warn!("touch: {e:#}"))
+                                            .is_ok();
+                                    } else if !*pressed && w.touching {
+                                        let _ = rsoverlay_input::touch::touch(&geom, x, y, rsoverlay_input::touch::Phase::Up);
+                                        w.touching = false;
                                     }
                                 }
                                 egui::Event::PointerButton { pos, button, pressed, .. } => {
