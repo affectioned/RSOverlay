@@ -61,6 +61,7 @@ fn static_entries() -> Vec<Entry> {
         card("One stick action at a time", "Settings › VR panels", "push pull scale resize stick decouple axis grab", Settings, "VR panels"),
         card("Panel resolution", "Settings › VR panels", "sharp text blurry resolution supersampling bigscreen beyond pimax quality", Settings, "VR panels"),
         card("Clock and date format", "Settings › Wrist toolbar", "12h 24h time clock date format am pm iso", Settings, "Wrist toolbar"),
+        card("Mouse follows the laser", "Settings › Pointer", "automatic mouse control hover cursor follow move", Settings, "Pointer"),
         card("Vibration", "Settings › Pointer", "haptics vibration rumble strength off", Settings, "Pointer"),
         card("Grab smoothing", "Settings › Pointer", "grab dampening smoothing shaky tremor sensitivity", Settings, "Pointer"),
         card("Pointer size", "Settings › Accessibility", "cursor laser dot beam size big", Settings, "Accessibility"),

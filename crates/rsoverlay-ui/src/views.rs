@@ -1653,11 +1653,14 @@ pub struct PointerPrefs {
     pub haptics: f32,
     /// Grab smoothing: 0 = raw hand motion, 1 = heavy dampening.
     pub grab_smoothing: f32,
+    /// The real mouse follows the laser over a window (off: it only
+    /// moves when you click or drag).
+    pub mouse_follows: bool,
 }
 
 impl Default for PointerPrefs {
     fn default() -> Self {
-        Self { long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3 }
+        Self { long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, mouse_follows: true }
     }
 }
 
@@ -1801,6 +1804,8 @@ fn pointer_card(ui: &mut egui::Ui, smoothing: &mut f32, scroll: &mut f32, ptr: &
         })
         .response
         .on_hover_text("Steadier panels while you carry them (higher = calmer, a little more lag)");
+        ui.checkbox(&mut ptr.mouse_follows, "Mouse follows the laser")
+            .on_hover_text("On: pointing at a window moves your real mouse (hover menus, tooltips). Off: the mouse only moves when you click or drag, so it stays put while you look around.");
         ui.checkbox(&mut ptr.long_press, "Long-press for right click")
             .on_hover_text("Hold the trigger still to right-click. Moving first still drags; letting go early still clicks.");
         ui.add_enabled_ui(ptr.long_press, |ui| {

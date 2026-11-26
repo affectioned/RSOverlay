@@ -1969,10 +1969,14 @@ mod imp {
                         };
                         for ev in &events {
                             match ev {
+                                // Hover moves the real mouse only with "Mouse follows the
+                                // laser"; a held button (drag) always does.
                                 egui::Event::PointerMoved(p) if rect.contains(*p) || w.down.is_some() => {
                                     let (x, y) = to_px(*p);
                                     if w.last_hit != Some((x, y)) {
-                                        let _ = inj.move_to(&geom, x, y);
+                                        if dev_view.pointer.mouse_follows || w.down.is_some() {
+                                            let _ = inj.move_to(&geom, x, y);
+                                        }
                                         w.last_hit = Some((x, y));
                                     }
                                 }
@@ -1996,6 +2000,11 @@ mod imp {
                                     }
                                 }
                                 egui::Event::Scroll(v) if w.last_hit.is_some() => {
+                                    // The wheel goes where the real cursor is: bring
+                                    // it to the laser first when it doesn't follow.
+                                    if let (false, Some((x, y))) = (dev_view.pointer.mouse_follows, w.last_hit) {
+                                        let _ = inj.move_to(&geom, x, y);
+                                    }
                                     // ~2 wheel units per point: smooth in
                                     // modern apps, one notch per ~60 pt.
                                     w.wheel_acc += v.y * 2.0;

@@ -147,6 +147,7 @@ pub fn seed_dev_view(
     dev.pointer.double_click_s = cfg.vr.double_click_s.clamp(0.0, 0.8);
     dev.pointer.haptics = cfg.vr.haptics.clamp(0.0, 1.5);
     dev.pointer.grab_smoothing = cfg.vr.grab_smoothing.clamp(0.0, 1.0);
+    dev.pointer.mouse_follows = cfg.vr.mouse_follows_laser;
     dev.restore_session = cfg.vr.restore_session;
     dev.vr_hide_wrist = cfg.vr.hide_wrist;
     dev.vr_hide_with_steamvr = cfg.vr.hide_with_steamvr_dashboard;
@@ -336,6 +337,7 @@ pub fn config_from_dev_view(
         double_click_s: dev.pointer.double_click_s,
         haptics: dev.pointer.haptics,
         grab_smoothing: dev.pointer.grab_smoothing,
+        mouse_follows_laser: dev.pointer.mouse_follows,
         restore_session: dev.restore_session,
         hide_wrist: dev.vr_hide_wrist,
         hide_with_steamvr_dashboard: dev.vr_hide_with_steamvr,
@@ -1423,6 +1425,7 @@ mod config_roundtrip_tests {
         v.double_click_s = 0.2;
         v.haptics = 0.5;
         v.grab_smoothing = 0.8;
+        v.mouse_follows_laser = false;
         v.restore_session = false;
         v.hide_wrist = true;
         v.hide_with_steamvr_dashboard = false;
