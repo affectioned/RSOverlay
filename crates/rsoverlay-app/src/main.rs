@@ -11,6 +11,10 @@
 //! process. It hosts the notification websocket server (and any other async
 //! work later), independent of the UI mode.
 
+// A GUI app: double-clicking never opens a console window. Run from a
+// terminal, it re-attaches to that console (see `attach_console`).
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod mirror_source;
 mod device_icons;
 mod preview;
@@ -250,13 +254,74 @@ fn vr_ready() -> bool {
     }
 }
 
+/// Launched from a terminal: write to it (logs, `--list-*` output).
+/// Double-clicked: there's no parent console and nothing is shown.
+fn attach_console() -> bool {
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+        // SAFETY: plain Win32 call; fails harmlessly without a parent console.
+        unsafe { AttachConsole(ATTACH_PARENT_PROCESS).is_ok() }
+    }
+    #[cfg(not(windows))]
+    true
+}
+
+/// Logs go to `%APPDATA%\RSOverlay\logs\rsoverlay.log` (the previous
+/// run is kept as `rsoverlay.prev.log`), and to the console when there
+/// is one. Panics are logged too, so testers can attach the file.
+fn init_logging(console: bool) {
+    use tracing_subscriber::fmt::writer::MakeWriterExt;
+    let filter = || EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let dir = rsoverlay_core::config::logs_dir();
+    let file = std::fs::create_dir_all(&dir).ok().and_then(|()| {
+        let log = dir.join("rsoverlay.log");
+        let _ = std::fs::rename(&log, dir.join("rsoverlay.prev.log"));
+        std::fs::File::create(log).ok()
+    });
+    let builder = tracing_subscriber::fmt().with_env_filter(filter()).with_target(false).with_ansi(false);
+    match (file, console) {
+        (Some(f), true) => builder.with_writer(std::io::stdout.and(std::sync::Mutex::new(f))).init(),
+        (Some(f), false) => builder.with_writer(std::sync::Mutex::new(f)).init(),
+        (None, _) => builder.with_writer(std::io::stdout).init(),
+    }
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!("panic: {info}");
+        prev(info);
+    }));
+    info!("RSOverlay {} starting", env!("CARGO_PKG_VERSION"));
+}
+
+/// A fatal error with no console to print it on: say so in a dialog.
+fn report_fatal(e: &anyhow::Error, console: bool) {
+    tracing::error!("fatal: {e:#}");
+    #[cfg(windows)]
+    if !console {
+        use windows::core::{w, HSTRING};
+        use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+        let text = HSTRING::from(format!(
+            "RSOverlay couldn't start:\n\n{e:#}\n\nDetails are in {}",
+            rsoverlay_core::config::logs_dir().join("rsoverlay.log").display()
+        ));
+        // SAFETY: valid wide strings for the call's duration.
+        unsafe { MessageBoxW(None, &text, w!("RSOverlay"), MB_OK | MB_ICONERROR) };
+    }
+    #[cfg(not(windows))]
+    let _ = console;
+}
+
 fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .with_target(false)
-        .init();
+    let console = attach_console();
+    init_logging(console);
+    let result = run_main();
+    if let Err(e) = &result {
+        report_fatal(e, console);
+    }
+    result
+}
+
+fn run_main() -> Result<()> {
 
     let args = Args::parse();
 

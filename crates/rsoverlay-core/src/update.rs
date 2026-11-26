@@ -13,6 +13,9 @@ pub const REPO: &str = "affectioned/RSOverlay";
 /// browser, so never trust a URL from the response blindly).
 pub const RELEASES_URL: &str = "https://github.com/affectioned/RSOverlay/releases";
 
+/// Where testers report problems.
+pub const ISSUES_URL: &str = "https://github.com/affectioned/RSOverlay/issues";
+
 /// This build's version (workspace `version`).
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
@@ -125,6 +128,18 @@ pub fn open_release_page(url: &str) -> bool {
         return false;
     }
     open_url(url)
+}
+
+/// Open the issue tracker in the browser.
+pub fn open_issues() -> bool {
+    open_url(ISSUES_URL)
+}
+
+/// Open RSOverlay's log folder in Explorer (created if missing).
+pub fn open_logs_folder() -> bool {
+    let dir = crate::config::logs_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    open_url(&dir.to_string_lossy())
 }
 
 #[cfg(windows)]

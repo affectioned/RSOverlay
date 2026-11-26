@@ -208,6 +208,12 @@ impl Default for DiscordCfg {
     }
 }
 
+/// Log files (`rsoverlay.log`, previous run in `rsoverlay.prev.log`),
+/// next to config.toml.
+pub fn logs_dir() -> std::path::PathBuf {
+    Config::default_path().with_file_name("logs")
+}
+
 /// Folder holding user typing-sound packs (`sounds/<pack>/key.wav` …),
 /// next to config.toml.
 pub fn sounds_dir() -> std::path::PathBuf {

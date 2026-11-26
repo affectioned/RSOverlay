@@ -133,6 +133,10 @@ impl Updates {
             ui.label(theme::body_muted(&format!("You have RSOverlay {}", update::CURRENT)));
             if !self.supported {
                 ui.label(theme::body_muted("Updates are handled by Steam."));
+                ui.add_space(6.0);
+                if ui.button("Open logs").on_hover_text("Attach rsoverlay.log when you report a problem").clicked() {
+                    update::open_logs_folder();
+                }
                 return;
             }
             ui.add_space(4.0);
@@ -175,6 +179,15 @@ impl Updates {
                 .on_hover_text("Asks GitHub at startup and every few hours. Only a notice: you choose when to update.");
             ui.checkbox(&mut self.prefs.prereleases, "Include test builds")
                 .on_hover_text("Also tell me about pre-release builds for testers (may be less stable)");
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("Report a problem").on_hover_text("Opens the issue tracker in your browser").clicked() {
+                    update::open_issues();
+                }
+                if ui.button("Open logs").on_hover_text("The log files help us find bugs: attach rsoverlay.log to your report").clicked() {
+                    update::open_logs_folder();
+                }
+            });
         });
     }
 }
