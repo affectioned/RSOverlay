@@ -1608,6 +1608,8 @@ fn vr_panels_card(
             .on_hover_text("Fade all RSOverlay panels out while SteamVR's own dashboard is up");
         ui.checkbox(grab_tilt, "Tilt panels with the controller")
             .on_hover_text("While grabbing, the panel rotates with your hand. Off: it stays upright and faces you.");
+        ui.checkbox(&mut ptr.autohide_toolbars, "Auto-hide window toolbars")
+            .on_hover_text("A window's toolbar (dock, opacity, size, close) only appears while your laser is on it. Cleaner for watching a game or video.");
         ui.checkbox(axis_lock, "One stick action at a time")
             .on_hover_text("While grabbing: push/pull (stick up/down) and resize (stick left/right) don't mix. The direction you push first wins until the stick returns to centre.");
         ui.horizontal(|ui| {
@@ -1847,11 +1849,13 @@ pub struct PointerPrefs {
     /// Experimental: the game doesn't get controller input while the
     /// laser is on a panel.
     pub block_game_input: bool,
+    /// Window toolbars only while the laser is on the window.
+    pub autohide_toolbars: bool,
 }
 
 impl Default for PointerPrefs {
     fn default() -> Self {
-        Self { long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, mouse_follows: true, touch_input: false, block_game_input: false }
+        Self { long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, mouse_follows: true, touch_input: false, block_game_input: false, autohide_toolbars: false }
     }
 }
 

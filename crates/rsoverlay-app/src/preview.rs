@@ -152,6 +152,7 @@ pub fn seed_dev_view(
     dev.pointer.mouse_follows = cfg.vr.mouse_follows_laser;
     dev.pointer.touch_input = cfg.vr.window_touch;
     dev.pointer.block_game_input = cfg.vr.block_game_input;
+    dev.pointer.autohide_toolbars = cfg.vr.autohide_toolbars;
     dev.restore_session = cfg.vr.restore_session;
     dev.vr_hide_wrist = cfg.vr.hide_wrist;
     dev.vr_hide_with_steamvr = cfg.vr.hide_with_steamvr_dashboard;
@@ -348,6 +349,7 @@ pub fn config_from_dev_view(
         mouse_follows_laser: dev.pointer.mouse_follows,
         window_touch: dev.pointer.touch_input,
         block_game_input: dev.pointer.block_game_input,
+        autohide_toolbars: dev.pointer.autohide_toolbars,
         restore_session: dev.restore_session,
         hide_wrist: dev.vr_hide_wrist,
         hide_with_steamvr_dashboard: dev.vr_hide_with_steamvr,
@@ -1444,6 +1446,7 @@ mod config_roundtrip_tests {
         v.mouse_follows_laser = false;
         v.window_touch = true;
         v.block_game_input = true;
+        v.autohide_toolbars = true;
         v.restore_session = false;
         v.hide_wrist = true;
         v.hide_with_steamvr_dashboard = false;

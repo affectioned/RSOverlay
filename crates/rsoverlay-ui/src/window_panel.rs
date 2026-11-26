@@ -75,6 +75,7 @@ pub fn show(
     linked: bool,
     opacity: f32,
     pinned: Option<bool>,
+    show_toolbar: bool,
     accent: egui::Color32,
 ) -> WindowPanelAction {
     let mut out = WindowPanelAction::default();
@@ -126,8 +127,11 @@ pub fn show(
         let mut op = opacity;
         // Size menu: only for real windows Windows lets us touch.
         let resizable = mirror.is_some_and(|m| m.resizable) && !input_blocked;
-        let t = toolbar(ui, bar, title, icon, attach, linked, pinned, resizable, Some(&mut op), accent);
-        (out.attach, out.close, out.unlink, out.toggle_pin, out.resize) = (t.attach, t.close, t.unlink, t.toggle_pin, t.resize);
+        // Auto-hidden toolbars leave their strip empty (no layout jump).
+        if show_toolbar {
+            let t = toolbar(ui, bar, title, icon, attach, linked, pinned, resizable, Some(&mut op), accent);
+            (out.attach, out.close, out.unlink, out.toggle_pin, out.resize) = (t.attach, t.close, t.unlink, t.toggle_pin, t.resize);
+        }
         if (op - opacity).abs() > f32::EPSILON {
             out.opacity = Some(op);
         }

@@ -127,6 +127,8 @@ mod imp {
 
     /// View-angle fade time constant (XSO-style auto-hide).
     const FADE_TAU: f32 = 0.08;
+    /// Auto-hidden window toolbars stay up this long after the laser leaves.
+    const TOOLBAR_LINGER_S: f64 = 1.5;
     /// Focus mode: opacity of the windows you aren't working in.
     const FOCUS_DIM: f32 = 0.3;
     /// Focus moves to another window only when it's this many degrees
@@ -404,6 +406,8 @@ mod imp {
         hwheel_acc: f32,
         /// Touch input: a finger is down on the real window.
         touching: bool,
+        /// Last time the laser was on this window (toolbar auto-hide).
+        toolbar_seen: f64,
         /// Stable id (survives index shifts when others close).
         seq: u32,
         /// Edge-docked group: members move together while one is grabbed.
@@ -601,6 +605,7 @@ mod imp {
             wheel_acc: 0.0,
             hwheel_acc: 0.0,
             touching: false,
+            toolbar_seen: f64::NEG_INFINITY,
             seq,
             group: None,
             opacity: 1.0,
@@ -694,6 +699,7 @@ mod imp {
             wheel_acc: 0.0,
             hwheel_acc: 0.0,
             touching: false,
+            toolbar_seen: f64::NEG_INFINITY,
             seq,
             group: None,
             opacity: 1.0,
@@ -992,6 +998,8 @@ mod imp {
         let mut device_icons = crate::device_icons::DeviceIcons::default();
         // Focus mode: the window being worked in (by seq).
         let mut focus_win: Option<u32> = None;
+        // Were windows open last frame (Focus auto-off when the last closes).
+        let mut had_windows = false;
         // Block game input: the panel whose overlay currently carries the
         // input-capture flag.
         let mut capture_on: Option<rsoverlay_openvr::VROverlayHandle_t> = None;
@@ -1959,7 +1967,9 @@ mod imp {
                 // Looked-away panels refresh ~5×/s: the GPU only works
                 // hard for what you're looking at.
                 let background_s = 1.0 / f64::from(dev_view.vr_background_fps.clamp(1.0, 90.0));
-                if !w.panel.in_view && time - w.panel.last_render < background_s && lf.events.is_empty() {
+                // Focus mode: dimmed windows are background too.
+                let dimmed = focus_win.is_some_and(|f| f != w.seq);
+                if (!w.panel.in_view || dimmed) && time - w.panel.last_render < background_s && lf.events.is_empty() {
                     continue;
                 }
                 let accent = dev_view.effective_accent();
@@ -1997,9 +2007,15 @@ mod imp {
                     let touch_mode = dev_view.pointer.touch_input;
                     let icon = w.icon.as_ref().map(|t| t.id());
                     let (linked, opacity, pinned) = (w.group.is_some(), w.opacity, follow.then_some(w.pinned));
+                    // Auto-hide: the toolbar shows while the laser is on the
+                    // window or it's held, and lingers a moment after.
+                    if lf.cursor.is_some() || grab.as_ref().is_some_and(|g| g.panel == k + WIN0) {
+                        w.toolbar_seen = time;
+                    }
+                    let show_toolbar = !dev_view.pointer.autohide_toolbars || time - w.toolbar_seen < TOOLBAR_LINGER_S;
                     let events = lf.events.clone();
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
-                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, opacity, pinned, accent);
+                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, opacity, pinned, show_toolbar, accent);
                         if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
                             rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                         }
@@ -2408,6 +2424,12 @@ mod imp {
             dash.apply_tint(&overlay, tint);
             kb.apply_tint(&overlay, [tint[0], tint[1], tint[2], tint[3] * dev_view.kb_prefs.opacity]);
             // Focus mode: everything but the window you work in steps back.
+            // Nothing left to focus on (every window closed): Focus ends.
+            if dev_view.focus_mode && wins.iter().all(|w| w.mirror.is_none()) && had_windows {
+                dev_view.focus_mode = false;
+                info!("focus mode off: no windows left");
+            }
+            had_windows = wins.iter().any(|w| w.mirror.is_some());
             focus_win = match (dev_view.focus_mode, hmd.as_ref().map(to_affine)) {
                 (true, Some(h)) => {
                     let laser = hand_hit.iter().flatten().find_map(|(i, _)| i.checked_sub(WIN0)).and_then(|k| wins.get(k)).map(|w| w.seq);
