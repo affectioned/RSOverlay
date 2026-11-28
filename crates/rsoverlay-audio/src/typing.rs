@@ -49,7 +49,9 @@ pub fn builtin(kind: KeySound, volume: f32) -> Vec<u8> {
     scale_pcm16(keychron_takes(kind)[0], volume).unwrap_or_default()
 }
 
-/// Minimal RIFF/WAVE container around mono PCM16 samples.
+/// Minimal RIFF/WAVE container around mono PCM16 samples (tests build
+/// sample files with it).
+#[cfg(test)]
 pub(crate) fn wav_pcm16_mono(samples: &[i16], rate: u32) -> Vec<u8> {
     let data_len = (samples.len() * 2) as u32;
     let mut w = Vec::with_capacity(44 + data_len as usize);
