@@ -251,6 +251,54 @@ impl RayStabilizer {
     }
 }
 
+/// The real mouse is yours: after you move it, the laser leaves it
+/// alone for this long (clicks and drags still move it).
+pub(crate) const MOUSE_YIELD_S: f64 = 2.0;
+/// Laser hover only moves the real mouse once its point has moved this
+/// far (screen px), so hand tremor doesn't keep grabbing it.
+pub(crate) const MOUSE_DEADBAND_PX: i32 = 4;
+
+/// Who owns the real mouse: notices when it moved without us (you, on
+/// the PC mouse) and yields hover moves for [`MOUSE_YIELD_S`].
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct MouseYield {
+    prev: Option<(i32, i32)>,
+    expected: Option<(i32, i32)>,
+    yield_until: f64,
+}
+
+impl MouseYield {
+    /// Once per frame, before any laser moves, with the real cursor
+    /// position (screen px; None if unknown / hidden).
+    pub fn observe(&mut self, actual: Option<(i32, i32)>, now: f64) {
+        let far = |a: (i32, i32), b: (i32, i32)| (a.0 - b.0).abs() > 2 || (a.1 - b.1).abs() > 2;
+        if let (Some(a), Some(p)) = (actual, self.prev) {
+            if far(a, p) && self.expected.is_none_or(|e| far(a, e)) {
+                self.yield_until = now + MOUSE_YIELD_S;
+            }
+        }
+        self.prev = actual.or(self.prev);
+        self.expected = None;
+    }
+
+    /// May a laser *hover* move the real mouse now?
+    pub fn may_hover(&self, now: f64) -> bool {
+        now >= self.yield_until
+    }
+
+    /// We moved the real mouse to `p` (screen px) this frame.
+    pub fn moved(&mut self, p: (i32, i32)) {
+        self.expected = Some(p);
+        self.prev = Some(p);
+    }
+}
+
+/// Has the laser point moved far enough from where it last put the
+/// mouse to move it again?
+pub(crate) fn beyond_deadband(last: Option<(i32, i32)>, now: (i32, i32)) -> bool {
+    last.is_none_or(|l| (l.0 - now.0).abs() >= MOUSE_DEADBAND_PX || (l.1 - now.1).abs() >= MOUSE_DEADBAND_PX)
+}
+
 /// Laser cursor: how far it sits back from the surface along the beam
 /// (keeps it in front of the panel), metres.
 pub(crate) const CURSOR_LIFT_M: f32 = 0.002;
@@ -691,5 +739,37 @@ mod sim {
             out = f.step(Vec3A::ZERO, aim(60.0), 1.0, 1.0 / 90.0).1;
         }
         assert!(deg(out, aim(60.0)) < 0.3, "settled {}°", deg(out, aim(60.0)));
+    }
+
+    /// Tester: with the laser resting on a window, the PC mouse couldn't
+    /// be moved — the laser kept pulling it back.
+    #[test]
+    fn the_real_mouse_wins_over_a_resting_laser() {
+        let mut m = MouseYield::default();
+        // Laser drives the mouse; its own moves don't count as yours.
+        m.observe(Some((100, 100)), 0.0);
+        assert!(m.may_hover(0.0));
+        m.moved((120, 100));
+        m.observe(Some((120, 100)), 0.016);
+        assert!(m.may_hover(0.016), "our own move isn't the user's");
+        // You move the PC mouse: the laser yields.
+        m.observe(Some((400, 300)), 0.032);
+        assert!(!m.may_hover(0.5));
+        assert!(!m.may_hover(0.032 + MOUSE_YIELD_S - 0.01));
+        // Still moving it: the yield extends.
+        m.observe(Some((420, 310)), 1.5);
+        assert!(!m.may_hover(1.5 + MOUSE_YIELD_S - 0.01));
+        // Hands off the mouse long enough: the laser may hover again.
+        assert!(m.may_hover(1.5 + MOUSE_YIELD_S));
+        // Hidden cursor (unknown): no false alarm.
+        m.observe(None, 5.0);
+        assert!(m.may_hover(5.0));
+    }
+
+    #[test]
+    fn tremor_inside_the_deadband_does_not_move_the_mouse() {
+        assert!(beyond_deadband(None, (10, 10)));
+        assert!(!beyond_deadband(Some((10, 10)), (12, 8)), "a couple of px of shake");
+        assert!(beyond_deadband(Some((10, 10)), (10, 10 + MOUSE_DEADBAND_PX)));
     }
 }

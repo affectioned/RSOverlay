@@ -943,6 +943,8 @@ mod imp {
         let mut prev_menu = false;
         // Steady pointer filters, [left, right].
         let mut steady = [RayStabilizer::default(); 2];
+        // The PC mouse: yields laser hover while you use it.
+        let mut mouse_owner = MouseYield::default();
         // Window count last frame (a new one shows the windows).
         let mut prev_win_count = 0usize;
         dev_view.windows_up = true;
@@ -1013,6 +1015,7 @@ mod imp {
             // cursor at, so the laser clicks exactly where it's drawn
             // (SteamVR's own keyboard does the same).
             let predict = system.as_ref().map_or(0.0, |s| s.seconds_to_photons());
+            mouse_owner.observe(rsoverlay_capture::window::cursor_pos(), time);
             let (hmd, mut controllers) = system.as_ref().map(|s| s.tracking(predict)).unwrap_or_default();
             // Buttons/axes from SteamVR Input (user's bindings), poses
             // from the tracking API. [left, right].
@@ -1165,10 +1168,33 @@ mod imp {
                         Some(2) => "keyboard".into(),
                         Some(k) => format!("window {}", k - WIN0 + 1),
                     };
-                    let probe = |h| overlay.intersect(h, c.origin, c.dir).is_some();
+                    // Geometry check: SteamVR's hit vs our own on the panel
+                    // we placed, and where the cursor lands relative to its
+                    // surface (+ = in front, toward you).
+                    let panel_pose = match now_on {
+                        Some(0) => wrist_parent.and_then(|d| device_pose(d, hmd.as_ref(), &controllers)).map(|p| (p * wrist_rel, wrist.width_m, wrist.tex)),
+                        Some(1) => dash_pose.map(|p| (p, dash.width_m, dash.tex)),
+                        Some(2) => kb_pose.map(|p| (p, kb.width_m, kb.tex)),
+                        _ => None,
+                    };
+                    let geo = match (panel_pose, best, hmd.as_ref().map(|h| to_affine(h).translation)) {
+                        (Some((p, w, tex)), Some((_, uv, d)), Some(e)) => {
+                            let quad = SimOverlay { pose: p, width: w, aspect: tex.1 as f32 / tex.0 as f32 };
+                            let ours = quad.intersect(Vec3A::from(c.origin), Vec3A::from(c.dir).normalize_or_zero());
+                            let cur = cursor_pose(Vec3A::from(c.origin), Vec3A::from(c.dir), d, e).translation;
+                            let front = (cur - p.translation).dot(p.matrix3.z_axis);
+                            format!(
+                                " | steamvr uv ({:.3},{:.3}) d {d:.3}; ours {:?}; cursor {:+.4} m off the surface",
+                                uv[0], uv[1],
+                                ours.map(|(u, dd)| format!("uv ({:.3},{:.3}) d {dd:.3}", u[0], u[1])),
+                                front
+                            )
+                        }
+                        _ => String::new(),
+                    };
                     info!(
-                        "laser {:?} → {name} (wrist shown {} fade {:.2} ray {}; dashboard shown {} fade {:.2} ray {})",
-                        c.hand, wrist.visible, wrist.fade, probe(wrist.handle), dash.visible, dash.fade, probe(dash.handle)
+                        "laser {:?} → {name} (wrist shown {} fade {:.2}; dashboard shown {} fade {:.2}){geo}",
+                        c.hand, wrist.visible, wrist.fade, dash.visible, dash.fade
                     );
                 }
                 for (i, list) in samples.iter_mut().enumerate() {
@@ -2041,8 +2067,20 @@ mod imp {
                                         if w.touching {
                                             // The finger slides (drag / swipe).
                                             let _ = rsoverlay_input::touch::touch(&geom, x, y, rsoverlay_input::touch::Phase::Move);
-                                        } else if (dev_view.pointer.mouse_follows && !touch_mode) || w.down.is_some() {
+                                        } else if w.down.is_some() {
+                                            // Dragging: always follow.
                                             let _ = inj.move_to(&geom, x, y);
+                                            mouse_owner.moved((geom.origin_x + x, geom.origin_y + y));
+                                        } else if dev_view.pointer.mouse_follows && !touch_mode {
+                                            // Hover: only past the tremor deadband,
+                                            // and never while you use the PC mouse.
+                                            if !beyond_deadband(w.last_hit, (x, y)) {
+                                                continue;
+                                            }
+                                            if mouse_owner.may_hover(time) {
+                                                let _ = inj.move_to(&geom, x, y);
+                                                mouse_owner.moved((geom.origin_x + x, geom.origin_y + y));
+                                            }
                                         }
                                         w.last_hit = Some((x, y));
                                     }
