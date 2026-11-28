@@ -611,11 +611,26 @@ impl<'a> System<'a> {
 
     /// Left + right hand controllers with a valid pose this frame.
     pub fn controllers(&self) -> Vec<Controller> {
-        self.tracking().1
+        self.tracking(0.0).1
+    }
+
+    /// Seconds from now until this frame's photons reach the eyes (what
+    /// the compositor predicts device-relative overlays to). Hit-testing
+    /// with poses predicted this far means the laser clicks where its
+    /// beam is drawn — on streamed headsets the gap is tens of ms.
+    pub fn seconds_to_photons(&self) -> f32 {
+        let hz = self.display_hz().unwrap_or(90.0);
+        let to_photons = self.float_prop(0, sys::Prop_SecondsFromVsyncToPhotons_Float).unwrap_or(0.0);
+        let (mut since, mut frame) = (0f32, 0u64);
+        // SAFETY: IVRSystem slot 5 (pinned in sys.rs); valid out-pointers.
+        let ok = unsafe { (self.table().GetTimeSinceLastVsync)(&mut since, &mut frame) };
+        let since = if ok { since } else { 0.0 };
+        (1.0 / hz - since + to_photons).clamp(0.0, 0.1)
     }
 
     /// HMD pose (device 0) + hand controllers, from one pose fetch.
-    pub fn tracking(&self) -> (Option<HmdMatrix34_t>, Vec<Controller>) {
+    /// `predict`: seconds ahead (see [`System::seconds_to_photons`]).
+    pub fn tracking(&self, predict: f32) -> (Option<HmdMatrix34_t>, Vec<Controller>) {
         let t = self.table();
         let mut poses = [sys::TrackedDevicePose_t {
             mDeviceToAbsoluteTracking: HmdMatrix34_t { m: [[0.0; 4]; 3] },
@@ -628,7 +643,7 @@ impl<'a> System<'a> {
         unsafe {
             (t.GetDeviceToAbsoluteTrackingPose)(
                 sys::ETrackingUniverseOrigin_Standing,
-                0.0,
+                predict,
                 poses.as_mut_ptr(),
                 poses.len() as u32,
             );
@@ -888,7 +903,8 @@ impl Input<'_> {
     }
 
     /// Pump SteamVR Input and read both hands. [left, right].
-    pub fn poll(&self) -> [HandInput; 2] {
+    /// `predict`: seconds ahead, the same as the device poses.
+    pub fn poll(&self, predict: f32) -> [HandInput; 2] {
         let mut set = sys::VRActiveActionSet_t { ulActionSet: self.set, ..Default::default() };
         unsafe { (self.t().UpdateActionState)(&mut set, std::mem::size_of_val(&set) as u32, 1) };
         self.hands.map(|dev| {
@@ -900,13 +916,13 @@ impl Input<'_> {
             let edit = self.digital(self.toggle_edit, dev);
             let mut pose = std::mem::MaybeUninit::<sys::InputPoseActionData_t>::zeroed();
             let aim = unsafe {
-                // "Now", not next-frame: the same clock as the raw device
-                // poses, so tip-vs-grip stays a constant offset (mixing
-                // clocks made the beam drift while the hand moved).
+                // Same prediction as the raw device poses, so tip-vs-grip
+                // stays a constant offset (mixing clocks made the beam
+                // drift while the hand moved).
                 let r = (self.t().GetPoseActionDataRelativeToNow)(
                     self.pointer,
                     sys::ETrackingUniverseOrigin_Standing,
-                    0.0,
+                    predict,
                     pose.as_mut_ptr(),
                     std::mem::size_of::<sys::InputPoseActionData_t>() as u32,
                     dev,

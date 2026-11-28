@@ -163,6 +163,7 @@ pub type ETrackedDeviceProperty = i32;
 pub const Prop_ModelNumber_String: ETrackedDeviceProperty = 1001;
 /// Headset refresh rate, Hz.
 pub const Prop_DisplayFrequency_Float: ETrackedDeviceProperty = 2002;
+pub const Prop_SecondsFromVsyncToPhotons_Float: ETrackedDeviceProperty = 2001;
 /// Driver resource folder name, e.g. "indexcontroller".
 pub const Prop_ResourceRoot_String: ETrackedDeviceProperty = 1035;
 /// Icon SteamVR shows for the device when it's ready, e.g.
@@ -180,9 +181,10 @@ pub struct IVRSystemFnTable {
     pub GetRecommendedRenderTargetSize: unsafe extern "system" fn(pnWidth: *mut u32, pnHeight: *mut u32), // 0
     pub _pad_00a: [*const c_void; 1], // 1 GetProjectionMatrix
     pub GetProjectionRaw: unsafe extern "system" fn(eEye: i32, pfLeft: *mut f32, pfRight: *mut f32, pfTop: *mut f32, pfBottom: *mut f32), // 2
-    /// Slots 3..=10: distortion, eye transform, vsync, adapter /
-    /// display. Unused here.
-    pub _pad_00: [*const c_void; 8],
+    pub _pad_00b0: [*const c_void; 2], // 3 ComputeDistortion, 4 GetEyeToHeadTransform
+    pub GetTimeSinceLastVsync: unsafe extern "system" fn(pfSecondsSinceLastVsync: *mut f32, pulFrameCounter: *mut u64) -> bool, // 5
+    /// Slots 6..=10: adapter / display. Unused here.
+    pub _pad_00: [*const c_void; 5],
     pub GetDeviceToAbsoluteTrackingPose: unsafe extern "system" fn(eOrigin: ETrackingUniverseOrigin, fPredictedSecondsToPhotonsFromNow: f32, pTrackedDevicePoseArray: *mut TrackedDevicePose_t, unTrackedDevicePoseArrayCount: u32), // 11
     pub _pad_00b: [*const c_void; 5], // 12..=16
     pub GetTrackedDeviceIndexForControllerRole: unsafe extern "system" fn(unDeviceType: ETrackedControllerRole) -> TrackedDeviceIndex_t, // 17
@@ -314,6 +316,7 @@ pub struct VROverlayIntersectionResults_t {
 const _: () = {
     const P: usize = std::mem::size_of::<*const c_void>();
     assert!(std::mem::offset_of!(IVRSystemFnTable, GetProjectionRaw) == 2 * P);
+    assert!(std::mem::offset_of!(IVRSystemFnTable, GetTimeSinceLastVsync) == 5 * P);
     assert!(std::mem::offset_of!(IVRSystemFnTable, GetDeviceToAbsoluteTrackingPose) == 11 * P);
     assert!(std::mem::offset_of!(IVRSystemFnTable, GetTrackedDeviceIndexForControllerRole) == 17 * P);
     assert!(std::mem::offset_of!(IVRSystemFnTable, GetControllerState) == 33 * P);

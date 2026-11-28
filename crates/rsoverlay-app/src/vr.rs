@@ -941,6 +941,8 @@ mod imp {
         dev_view.toasts_external = true;
         let sounds_dir = rsoverlay_core::config::sounds_dir();
         let mut prev_menu = false;
+        // Steady pointer filters, [left, right].
+        let mut steady = [RayStabilizer::default(); 2];
         // Window count last frame (a new one shows the windows).
         let mut prev_win_count = 0usize;
         dev_view.windows_up = true;
@@ -1006,10 +1008,15 @@ mod imp {
             // Settings › VR › Hide wrist toolbar applies immediately.
             wrist.set_visible(&overlay, wrist_parent.is_some() && !dev_view.vr_hide_wrist);
 
-            let (hmd, mut controllers) = system.as_ref().map(|s| s.tracking()).unwrap_or_default();
+            // Poses predicted to when this frame reaches the eyes: the
+            // time the compositor draws the controller-parented beam and
+            // cursor at, so the laser clicks exactly where it's drawn
+            // (SteamVR's own keyboard does the same).
+            let predict = system.as_ref().map_or(0.0, |s| s.seconds_to_photons());
+            let (hmd, mut controllers) = system.as_ref().map(|s| s.tracking(predict)).unwrap_or_default();
             // Buttons/axes from SteamVR Input (user's bindings), poses
             // from the tracking API. [left, right].
-            let actions = input.as_ref().map(|i| i.poll());
+            let actions = input.as_ref().map(|i| i.poll(predict));
             let mut mods = [(false, false); 2];
             // Dedicated right / middle click buttons (pressed = clicking).
             let mut direct = [(false, false); 2];
@@ -1046,6 +1053,15 @@ mod imp {
                     let d = rot * glam::Vec3::from(c.dir);
                     c.dir = d.into();
                 }
+            }
+
+            // Steady pointer (Accessibility): the ray itself is smoothed,
+            // so beam, cursor, keyboard and clicks agree.
+            for c in controllers.iter_mut() {
+                let s = hand_slot(c.hand);
+                let (o, d) = steady[s].step(Vec3A::from(c.origin), Vec3A::from(c.dir), dev_view.cursor_smoothing, dt);
+                c.origin = o.into();
+                c.dir = d.into();
             }
 
             // Show/hide the dashboard: XSO's double-press left A / X via
@@ -1531,7 +1547,9 @@ mod imp {
 
             // Pointer settings (Settings › Pointer) on every panel's laser.
             for p in [&mut wrist.laser, &mut dash.laser].into_iter().chain(wins.iter_mut().map(|w| &mut w.panel.laser)) {
-                p.smoothing = dev_view.cursor_smoothing;
+                // The ray is already steadied (RayStabilizer): smoothing
+                // here again would put clicks off the drawn cursor.
+                p.smoothing = 0.0;
                 p.scroll_mult = dev_view.scroll_speed;
                 p.long_press_s = dev_view.pointer.long_press_secs();
                 p.double_click_s = dev_view.pointer.double_click_s;

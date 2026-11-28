@@ -873,7 +873,7 @@ impl DevView {
                         Some("vr-panels")
                     }
                     3 => {
-                        pointer_card(ui, &mut self.cursor_smoothing, &mut self.scroll_speed, &mut self.pointer, accent);
+                        pointer_card(ui, &mut self.scroll_speed, &mut self.pointer, accent);
                         Some("pointer")
                     }
                     4 => {
@@ -885,7 +885,7 @@ impl DevView {
                         Some("keyboard")
                     }
                     6 => {
-                        accessibility_card(ui, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.vr_pointer_size, &mut self.reduce_motion, accent);
+                        accessibility_card(ui, &mut self.cursor_smoothing, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.vr_pointer_size, &mut self.reduce_motion, accent);
                         Some("accessibility")
                     }
                     7 => {
@@ -1341,13 +1341,13 @@ impl DevView {
                     l.add_space(theme::GUTTER);
                     vr_panels_card(l, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, &mut self.vr_background_fps, &mut self.pointer, accent);
                     l.add_space(theme::GUTTER);
-                    pointer_card(l, &mut self.cursor_smoothing, &mut self.scroll_speed, &mut self.pointer, accent);
+                    pointer_card(l, &mut self.scroll_speed, &mut self.pointer, accent);
                     l.add_space(theme::GUTTER);
                     window_input_card(l, &mut self.pointer, accent);
                     l.add_space(theme::GUTTER);
                     keyboard_card(l, &mut self.kb_prefs, accent);
                     l.add_space(theme::GUTTER);
-                    accessibility_card(l, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.vr_pointer_size, &mut self.reduce_motion, accent);
+                    accessibility_card(l, &mut self.cursor_smoothing, &mut self.vr_ui_scale, &mut self.vr_show_lasers, &mut self.vr_laser_angle, &mut self.vr_pointer_size, &mut self.reduce_motion, accent);
                     // Right column: beside the left one, or below it when narrow.
                     let r_min = if narrow { egui::pos2(top.x, l.min_rect().bottom() + gap) } else { egui::pos2(top.x + col_w + gap, top.y) };
                     let mut r = ui.child_ui(column(r_min), plain);
@@ -1483,7 +1483,7 @@ fn reset_card(ui: &mut egui::Ui, armed_at: &mut Option<f64>) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn accessibility_card(ui: &mut egui::Ui, scale: &mut f32, lasers: &mut bool, laser_angle: &mut f32, pointer_size: &mut f32, reduce_motion: &mut bool, accent: egui::Color32) {
+fn accessibility_card(ui: &mut egui::Ui, steady: &mut f32, scale: &mut f32, lasers: &mut bool, laser_angle: &mut f32, pointer_size: &mut f32, reduce_motion: &mut bool, accent: egui::Color32) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         card_header(ui, icons::SETTINGS, "Accessibility", accent);
@@ -1493,6 +1493,16 @@ fn accessibility_card(ui: &mut egui::Ui, scale: &mut f32, lasers: &mut bool, las
             crate::theme::fit_slider(ui);
             ui.add(egui::Slider::new(scale, 0.8..=1.6).fixed_decimals(1).suffix("×"));
         });
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Steady pointer"));
+            crate::theme::fit_slider(ui);
+            ui.add(egui::Slider::new(steady, 0.0..=1.0).fixed_decimals(2).custom_formatter(|v, _| match v {
+                v if v < 0.01 => "Off".into(),
+                v => format!("{:.0}%", v * 100.0),
+            }));
+        })
+        .response
+        .on_hover_text("For shaky hands: steadies the laser while you hold it still, and stays quick when you move on purpose. The beam, cursor, keys and clicks all follow the steadied laser.");
         ui.checkbox(lasers, "Laser beams").on_hover_text("Draw a beam from each controller while it points at a panel");
         ui.horizontal(|ui| {
             ui.label(theme::body_muted("Laser angle"));
@@ -2006,18 +2016,11 @@ fn window_input_card(ui: &mut egui::Ui, ptr: &mut PointerPrefs, accent: egui::Co
     });
 }
 
-fn pointer_card(ui: &mut egui::Ui, smoothing: &mut f32, scroll: &mut f32, ptr: &mut PointerPrefs, accent: egui::Color32) {
+fn pointer_card(ui: &mut egui::Ui, scroll: &mut f32, ptr: &mut PointerPrefs, accent: egui::Color32) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         card_header(ui, icons::POINTER, "Pointer", accent);
         ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.label(theme::body_muted("Cursor smoothing"));
-            crate::theme::fit_slider(ui);
-            ui.add(egui::Slider::new(smoothing, 0.0..=1.0).fixed_decimals(2));
-        })
-        .response
-        .on_hover_text("Steadier cursor when moving slowly; stays responsive when moving fast");
         ui.horizontal(|ui| {
             ui.label(theme::body_muted("Scroll speed"));
             crate::theme::fit_slider(ui);

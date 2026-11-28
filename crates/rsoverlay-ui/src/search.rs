@@ -53,7 +53,7 @@ fn static_entries() -> Vec<Entry> {
         card("Reset all settings", "Settings › Reset", "defaults factory restore", Settings, "Reset"),
         card("Wrist toolbar buttons", "Settings › Wrist toolbar", "customize customise wrist buttons", Settings, "Wrist toolbar"),
         card("Media theme", "Settings › Wrist toolbar", "album art colour color accent", Settings, "Wrist toolbar"),
-        card("Cursor smoothing", "Settings › Pointer", "jitter steady laser", Settings, "Pointer"),
+        card("Steady pointer", "Settings › Accessibility", "shaky hands tremor jitter smoothing steady laser cursor smoothing", Settings, "Accessibility"),
         card("Scroll speed", "Settings › Pointer", "wheel scrolling", Settings, "Pointer"),
         card("Windows hide with the dashboard", "Settings › VR panels", "pin pinned layout mode hide show all windows xsoverlay", Settings, "VR panels"),
         card("Hide while the SteamVR menu is open", "Settings › VR panels", "steamvr dashboard system menu hide fade", Settings, "VR panels"),

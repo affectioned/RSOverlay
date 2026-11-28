@@ -201,6 +201,56 @@ pub(crate) fn native_render_k(current_k: f32, src_px: u32, content_texels: f32) 
     (current_k * src_px as f32 / content_texels).clamp(RENDER_K.0, RENDER_K.1)
 }
 
+/// Steady pointer (Accessibility): an adaptive low-pass on the laser
+/// ray itself, before anything uses it, so the beam, cursor, keyboard
+/// and clicks all follow the same steadied ray. Nearly still (tremor)
+/// → heavy smoothing; moving on purpose → almost none (a "1€ filter":
+/// the cut-off frequency rises with the filtered angular speed).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct RayStabilizer {
+    /// (origin, direction, low-passed angular velocity vector).
+    state: Option<(Vec3A, Vec3A, Vec3A)>,
+}
+
+/// Cut-off when still, Hz: from barely-there (strength 0+) to strong.
+const STEADY_FC: (f32, f32) = (4.0, 0.3);
+/// Cut-off rise per rad/s of deliberate motion.
+const STEADY_BETA: f32 = 3.0;
+/// Cut-off for the speed estimate itself, Hz (averages tremor out).
+const STEADY_DFC: f32 = 1.0;
+
+fn lp_alpha(fc: f32, dt: f32) -> f32 {
+    let tau = 1.0 / (std::f32::consts::TAU * fc);
+    1.0 / (1.0 + tau / dt.max(1e-4))
+}
+
+impl RayStabilizer {
+    /// Filter one frame's ray. `strength` 0 = off (raw ray), 1 = strongest.
+    pub fn step(&mut self, origin: Vec3A, dir: Vec3A, strength: f32, dt: f32) -> (Vec3A, Vec3A) {
+        let dir = dir.normalize_or_zero();
+        if strength <= 0.0 || dir == Vec3A::ZERO {
+            self.state = None;
+            return (origin, dir);
+        }
+        let Some((o0, d0, vel0)) = self.state else {
+            self.state = Some((origin, dir, Vec3A::ZERO));
+            return (origin, dir);
+        };
+        // Angular velocity (rad/s) as a vector, low-passed, then its size:
+        // a tremor's back-and-forth cancels out; a deliberate move doesn't.
+        let raw_vel = (dir - d0) / dt.max(1e-4);
+        let vel = vel0 + (raw_vel - vel0) * lp_alpha(STEADY_DFC, dt);
+        let speed = vel.length();
+        let s = strength.clamp(0.0, 1.0);
+        let fc = STEADY_FC.0 + (STEADY_FC.1 - STEADY_FC.0) * s + STEADY_BETA * speed;
+        let a = lp_alpha(fc, dt);
+        let d = (d0 + (dir - d0) * a).normalize_or_zero();
+        let o = o0 + (origin - o0) * a;
+        self.state = Some((o, d, vel));
+        (o, d)
+    }
+}
+
 /// Laser cursor: how far it sits back from the surface along the beam
 /// (keeps it in front of the panel), metres.
 pub(crate) const CURSOR_LIFT_M: f32 = 0.002;
@@ -579,5 +629,67 @@ mod sim {
         let (_, dist) = kb.intersect(o, d.normalize()).expect("ray hits the keyboard");
         let hit = o + d.normalize() * dist;
         assert!((cursor_pose(o, d, dist, eye).translation - hit).length() <= CURSOR_LIFT_M + 1e-5);
+    }
+
+    /// Angle (degrees) between two directions.
+    fn deg(a: Vec3A, b: Vec3A) -> f32 {
+        a.normalize().dot(b.normalize()).clamp(-1.0, 1.0).acos().to_degrees()
+    }
+
+    /// Aim straight ahead plus a 10 Hz, ±0.6° tremor (a shaky hand).
+    fn tremor(t: f32) -> Vec3A {
+        let a = 0.6f32.to_radians() * (std::f32::consts::TAU * 10.0 * t).sin();
+        Vec3A::new(a.sin(), 0.0, -a.cos())
+    }
+
+    #[test]
+    fn steady_pointer_off_is_the_raw_ray() {
+        let mut f = RayStabilizer::default();
+        for i in 0..50 {
+            let d = tremor(i as f32 / 90.0);
+            let (_, out) = f.step(Vec3A::ZERO, d, 0.0, 1.0 / 90.0);
+            assert!(deg(out, d) < 1e-3);
+        }
+    }
+
+    /// Tester: shaky hands. Strong steadying cuts a 10 Hz tremor to a
+    /// fraction; the default still takes most of it out.
+    #[test]
+    fn steady_pointer_takes_out_tremor() {
+        let wobble = |strength: f32| {
+            let mut f = RayStabilizer::default();
+            let mut worst = 0f32;
+            for i in 0..(90 * 3) {
+                let t = i as f32 / 90.0;
+                let (_, out) = f.step(Vec3A::ZERO, tremor(t), strength, 1.0 / 90.0);
+                if t > 1.0 {
+                    worst = worst.max(deg(out, -Vec3A::Z));
+                }
+            }
+            worst
+        };
+        let raw = 0.6;
+        assert!(wobble(1.0) < raw * 0.15, "strong: {}°", wobble(1.0));
+        assert!(wobble(0.5) < raw * 0.5, "default: {}°", wobble(0.5));
+    }
+
+    /// …without making deliberate moves feel laggy: a 60°/s sweep stays
+    /// within a few degrees, and it settles on the target once you stop.
+    #[test]
+    fn steady_pointer_keeps_up_with_deliberate_moves() {
+        let mut f = RayStabilizer::default();
+        let aim = |deg: f32| Vec3A::new(deg.to_radians().sin(), 0.0, -deg.to_radians().cos());
+        let mut out = -Vec3A::Z;
+        for i in 0..90 {
+            let target = aim(60.0 * i as f32 / 90.0);
+            out = f.step(Vec3A::ZERO, target, 1.0, 1.0 / 90.0).1;
+            if i > 30 {
+                assert!(deg(out, target) < 4.0, "lag {}° at frame {i}", deg(out, target));
+            }
+        }
+        for _ in 0..90 {
+            out = f.step(Vec3A::ZERO, aim(60.0), 1.0, 1.0 / 90.0).1;
+        }
+        assert!(deg(out, aim(60.0)) < 0.3, "settled {}°", deg(out, aim(60.0)));
     }
 }
