@@ -143,14 +143,17 @@ pub fn paint_bolt(painter: &egui::Painter, rect: egui::Rect, color: egui::Color3
 /// Some devices don't tell SteamVR they're charging until they're full
 /// (tester: the charging mark only ever showed at 100 %). A battery whose
 /// level climbs [`CHARGE_RISE`] above its low point counts as charging
-/// until it drops [`CHARGE_RISE`] below its high point.
+/// until it drops [`CHARGE_FALL`] below its high point. The rise is 2 %:
+/// a resting battery can bounce up 1 %, which marked controllers as
+/// charging and hid their playtime estimates (tester).
 #[derive(Default)]
 pub struct ChargeSense {
     /// Per device: (low point, high point, rising).
     seen: std::collections::HashMap<u32, (f32, f32, bool)>,
 }
 
-pub const CHARGE_RISE: f32 = 0.01;
+pub const CHARGE_RISE: f32 = 0.02;
+pub const CHARGE_FALL: f32 = 0.01;
 
 impl ChargeSense {
     pub fn apply(&mut self, readings: &mut [BatteryReading]) {
@@ -159,7 +162,7 @@ impl ChargeSense {
             let e = self.seen.entry(r.id).or_insert((f, f, false));
             if e.2 {
                 e.1 = e.1.max(f);
-                if f <= e.1 - CHARGE_RISE + 1e-4 {
+                if f <= e.1 - CHARGE_FALL + 1e-4 {
                     *e = (f, f, false);
                 }
             } else {
@@ -410,7 +413,8 @@ mod tests {
         assert!(!at(0.50, false));
         assert!(!at(0.49, false), "discharging");
         assert!(!at(0.495, false), "jitter isn't charging");
-        assert!(at(0.50, false), "climbed 1 % from its low: charging");
+        assert!(!at(0.50, false), "a 1 % bounce isn't charging");
+        assert!(at(0.51, false), "climbed 2 % from its low: charging");
         assert!(at(0.62, false));
         assert!(at(0.615, false), "a wobble keeps it");
         assert!(!at(0.61, false), "dropped 1 % from its high: unplugged");

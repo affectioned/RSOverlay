@@ -53,6 +53,7 @@ pub struct TestHooks {
     pub show_keyboard: bool,
     pub show_history: bool,
     pub demo_batteries: bool,
+    pub demo_media: bool,
     pub switch_to_window: Option<String>,
     pub page: Option<String>,
     pub dock: bool,
@@ -225,6 +226,10 @@ pub fn seed_dev_view(
         dev.page = p;
     }
     dev.wrist_editing = test.wrist_edit;
+    if test.demo_media {
+        dev.set_demo_media("Northern Lights", "Ambient Works");
+        dev.set_demo_art();
+    }
     if test.demo_batteries {
         use rsoverlay_ui::battery::BatteryReading;
         let mut icons = crate::device_icons::DeviceIcons::default();

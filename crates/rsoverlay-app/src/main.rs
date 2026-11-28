@@ -155,6 +155,11 @@ struct Args {
     #[arg(long)]
     demo_batteries: bool,
 
+    /// A made-up track and album cover instead of what's really playing
+    /// (screenshots: nobody's listening history).
+    #[arg(long)]
+    demo_media: bool,
+
     /// Test hook: request a live switch to the window matching TITLE
     /// at frame 30, exercising the pipeline teardown/rebuild path the
     /// Desktop card's source picker uses.
@@ -453,6 +458,7 @@ fn run_main() -> Result<()> {
         show_keyboard: args.show_keyboard,
         show_history: args.show_history,
         demo_batteries: args.demo_batteries,
+        demo_media: args.demo_media,
         switch_to_window: args.switch_to_window.clone(),
         page: args.page.clone(),
         dock: args.dock,

@@ -1011,6 +1011,13 @@ impl DevView {
         self.demo_media = true;
     }
 
+    /// With [`Self::set_demo_media`]: a made-up cover for the Media theme.
+    pub fn set_demo_art(&mut self) {
+        let cover = crate::media::demo_cover();
+        let accent = crate::media::vivid_color(cover.as_raw(), false);
+        self.art = Some(crate::media::ArtLook { accent, cover: std::sync::Arc::new(cover) });
+    }
+
     fn maybe_refresh_media(&mut self) {
         if self.demo_media {
             return;

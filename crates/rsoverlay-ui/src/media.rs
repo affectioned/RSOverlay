@@ -103,6 +103,38 @@ pub fn cover_image(px: &[u8], w: usize, h: usize, bgra: bool, max: usize) -> Opt
     Some(egui::ColorImage::from_rgba_unmultiplied([ow, oh], &out))
 }
 
+/// A made-up "Northern Lights" cover (aurora bands over a night sky)
+/// for previews and screenshots: nobody's real album art.
+pub fn demo_cover() -> egui::ColorImage {
+    const N: usize = 256;
+    let mut px = Vec::with_capacity(N * N * 4);
+    for y in 0..N {
+        for x in 0..N {
+            let (u, v) = (x as f32 / N as f32, y as f32 / N as f32);
+            // Night sky: deep blue at the top to near-black at the bottom.
+            let sky = [0.04 + 0.05 * (1.0 - v), 0.06 + 0.08 * (1.0 - v), 0.16 + 0.18 * (1.0 - v)];
+            // Two wavy aurora curtains, green fading to violet upward.
+            let mut glow = [0.0_f32; 3];
+            for (k, (amp, base, col)) in [(0.08, 0.42, [0.20, 0.95, 0.62]), (0.06, 0.30, [0.55, 0.40, 0.95])].iter().enumerate() {
+                let line = base + amp * (u * 6.3 + k as f32 * 1.7).sin() + 0.03 * (u * 17.0).sin();
+                let d = v - line;
+                let a = if d > 0.0 { (-(d / 0.035).powi(2)).exp() } else { (-(d / 0.16).powi(2)).exp() * 0.8 };
+                for c in 0..3 {
+                    glow[c] += col[c] * a;
+                }
+            }
+            // Dark hills along the bottom.
+            let hill = 0.80 + 0.05 * (u * 4.0).sin() + 0.03 * (u * 11.0 + 1.0).sin();
+            let land = if v > hill { 0.15 } else { 1.0 };
+            for c in 0..3 {
+                px.push(((sky[c] + glow[c]).min(1.0) * land * 255.0) as u8);
+            }
+            px.push(255);
+        }
+    }
+    egui::ColorImage::from_rgba_unmultiplied([N, N], &px)
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum MediaCommand {
     PlayPause,
