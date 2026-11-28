@@ -201,6 +201,22 @@ pub(crate) fn native_render_k(current_k: f32, src_px: u32, content_texels: f32) 
     (current_k * src_px as f32 / content_texels).clamp(RENDER_K.0, RENDER_K.1)
 }
 
+/// Laser cursor: how far it sits back from the surface along the beam
+/// (keeps it in front of the panel), metres.
+pub(crate) const CURSOR_LIFT_M: f32 = 0.002;
+
+/// Where the laser cursor goes: on the beam, `dist` along it (just short
+/// of the surface), facing the eye. Its own overlay, parented to the
+/// controller like the beam, so it rides the beam's tip every frame
+/// instead of being drawn into the panel (a frame or two late).
+pub(crate) fn cursor_pose(origin: Vec3A, dir: Vec3A, dist: f32, eye: Vec3A) -> Affine3A {
+    let d = dir.normalize_or_zero();
+    let p = origin + d * (dist - CURSOR_LIFT_M).max(0.0);
+    let z = (eye - p).try_normalize().unwrap_or(-d);
+    let x = Vec3A::Y.cross(z).try_normalize().unwrap_or(Vec3A::X);
+    Affine3A::from_cols(x, z.cross(x), z, p)
+}
+
 /// Debounce for texture rebuilds: a new multiplier is applied once it
 /// has been wanted for [`RES_SETTLE_S`] and the panel isn't held.
 pub(crate) const RES_SETTLE_S: f64 = 0.75;
@@ -542,5 +558,27 @@ mod sim {
         // Readable means ≤ READ_RATIO source px per headset px.
         let px_on_screen = angular_width(w, 1.0) * PPR;
         assert!((1200.0 / px_on_screen - READ_RATIO).abs() < 0.01);
+    }
+
+    /// Tester: the keyboard cursor sat off from where the controller
+    /// pointed. The cursor is on the beam itself now, at the hit.
+    #[test]
+    fn cursor_sits_on_the_beam_tip_facing_you() {
+        let (o, d, eye) = (Vec3A::new(0.1, 1.0, -0.2), Vec3A::new(0.0, -0.6, -0.8), Vec3A::new(0.0, 1.6, 0.0));
+        let c = cursor_pose(o, d, 0.45, eye);
+        let p = c.translation;
+        // On the ray, just short of the hit.
+        let along = (p - o).dot(d.normalize());
+        assert!((along - (0.45 - CURSOR_LIFT_M)).abs() < 1e-5);
+        assert!(((p - o) - d.normalize() * along).length() < 1e-5, "off the beam");
+        // Faces the eye; upright.
+        assert!((c.matrix3.z_axis - (eye - p).normalize()).length() < 1e-5);
+        assert!(c.matrix3.x_axis.y.abs() < 1e-5);
+        // Same hit through a simulated keyboard (45 cm, tilted 40°):
+        // the cursor is where SimOverlay says the ray lands.
+        let kb = SimOverlay { pose: Affine3A::from_translation(glam::Vec3::new(0.1, 0.64, -0.68)) * Affine3A::from_rotation_x(-40f32.to_radians()), width: 0.75, aspect: 0.39 };
+        let (_, dist) = kb.intersect(o, d.normalize()).expect("ray hits the keyboard");
+        let hit = o + d.normalize() * dist;
+        assert!((cursor_pose(o, d, dist, eye).translation - hit).length() <= CURSOR_LIFT_M + 1e-5);
     }
 }

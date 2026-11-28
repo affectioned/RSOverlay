@@ -420,6 +420,17 @@ pub fn paint_grab_hud(ctx: &egui::Context, hud: GrabHud, accent: egui::Color32) 
 
 /// Laser-beam strip texture: white, fading in from the controller end
 /// (left) so the beam reads as emitted, not a stick. Tinted at runtime.
+/// The laser cursor's own texture (VR): white ring + dot with a dark
+/// rim, tinted to the accent by the overlay colour.
+pub fn paint_cursor_dot(ctx: &egui::Context) {
+    let p = ctx.layer_painter(egui::LayerId::background());
+    let r = ctx.screen_rect();
+    let (c, s) = (r.center(), r.width().min(r.height()) / 2.0);
+    p.circle_filled(c, s * 0.95, egui::Color32::from_black_alpha(150));
+    p.circle_stroke(c, s * 0.72, egui::Stroke::new(s * 0.16, egui::Color32::WHITE));
+    p.circle_filled(c, s * 0.2, egui::Color32::WHITE);
+}
+
 pub fn paint_beam(ctx: &egui::Context) {
     let p = ctx.layer_painter(egui::LayerId::background());
     let r = ctx.screen_rect();

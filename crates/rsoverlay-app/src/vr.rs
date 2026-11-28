@@ -118,6 +118,9 @@ mod imp {
     /// Laser beam strip: 256 × 16 texels, 3.5 mm thick at any length.
     const BEAM_TEX: (u32, u32) = (256, 16);
     const BEAM_THICKNESS_M: f32 = 0.0035;
+    /// Laser cursor: its own small overlay on the beam tip.
+    const CURSOR_TEX: (u32, u32) = (64, 64);
+    const CURSOR_M: f32 = 0.016;
     /// Grab / release haptic: a firmer tick than a click.
     const GRAB_HAPTIC_S: f32 = 0.025;
 
@@ -866,6 +869,16 @@ mod imp {
             beams.push(b);
         }
         let mut beam_tint = [[f32::NAN; 4]; 2];
+        // Laser cursors (one per hand), above the beams.
+        let mut cursors = Vec::with_capacity(2);
+        for side in ["left", "right"] {
+            let mut c = VrPanel::new(&overlay, &gpu, &format!("rsoverlay.cursor.{side}"), "RSOverlay Cursor", CURSOR_TEX, 1.0, CURSOR_M, 0.0)?;
+            c.egui.set_clear(wgpu::Color::TRANSPARENT);
+            c.render(&gpu, &overlay, 0.0, 0.016, Vec::new(), rsoverlay_ui::shell::paint_cursor_dot);
+            let _ = overlay.set_sort_order(c.handle, 101);
+            cursors.push(c);
+        }
+        let mut cursor_tint = [[f32::NAN; 4]; 2];
         let mut keyboard = rsoverlay_ui::vrkeyboard::VrKeyboard::default();
         // Restore hands-on state from last session.
         {
@@ -1447,6 +1460,25 @@ mod imp {
                     b.set_visible(&overlay, false);
                 }
             }
+            // ── Laser cursors: on the beam tip, parented to the
+            // controller like the beam (see vr_logic::cursor_pose).
+            for (s, cur) in cursors.iter_mut().enumerate() {
+                let c = controllers.iter().find(|c| hand_slot(c.hand) == s);
+                let place = c.zip(hand_hit[s]).zip(eye);
+                cur.set_visible(&overlay, place.is_some());
+                let Some(((c, (_, dist)), e)) = place else { continue };
+                let pose = cursor_pose(Vec3A::from(c.origin), Vec3A::from(c.dir), dist, e);
+                let pressed = c.trigger > 0.5;
+                let _ = overlay.set_width(cur.handle, CURSOR_M * dev_view.vr_pointer_size * if pressed { 0.8 } else { 1.0 });
+                let rel = to_affine(&c.pose).inverse() * pose;
+                let _ = overlay.set_transform_device_relative(cur.handle, c.index, &from_affine(&rel));
+                let a = dev_view.effective_accent();
+                let tint = [a.r() as f32 / 255.0, a.g() as f32 / 255.0, a.b() as f32 / 255.0, 1.0];
+                if tint != cursor_tint[s] {
+                    let _ = overlay.set_color(cur.handle, [tint[0], tint[1], tint[2]]);
+                    cursor_tint[s] = tint;
+                }
+            }
 
             // Grab / release: a firmer haptic tick than a click.
             for h in grabbed_hand.into_iter().chain(released_hand) {
@@ -1502,13 +1534,11 @@ mod imp {
             let mut act = rsoverlay_ui::wrist::WristAction::default();
             if wrist.visible {
                 let accent = dev_view.effective_accent();
-                let cursor = wf.cursor;
                 wrist.render(&gpu, &overlay, time, dt, wf.events, |ctx| {
                     act = dev_view.wrist_ui(ctx);
                     if let Some((0, h)) = hud {
                         rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                     }
-                    laser::paint_cursor(ctx, cursor, accent);
                 });
             }
             // Gamepad shortcuts drive the same actions as the wrist.
@@ -1646,14 +1676,12 @@ mod imp {
             }
             if dash.visible {
                 let accent = dev_view.effective_accent();
-                let cursor = df.cursor;
                 let inj = injector.as_ref();
                 dash.render(&gpu, &overlay, time, dt, df.events, |ctx| {
                     dev_view.ui_with(ctx, inj);
                     if let Some((1, h)) = hud {
                         rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                     }
-                    laser::paint_cursor(ctx, cursor, accent);
                 });
             }
 
@@ -1891,7 +1919,7 @@ mod imp {
                 let mut act = window_panel::WindowPanelAction::default();
                 if let Some((tabs, active)) = w.widgets.clone() {
                     // Widget group: tabs + live card + dock bar.
-                    let (attach, cursor, linked) = (w.attach, lf.cursor, w.group.is_some());
+                    let (attach, linked) = (w.attach, w.group.is_some());
                     let pinned = Some(w.pinned);
                     let inj = injector.as_ref();
                     let mut wa = rsoverlay_ui::widgets::WidgetAction::default();
@@ -1900,7 +1928,6 @@ mod imp {
                         if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
                             rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                         }
-                        laser::paint_cursor(ctx, cursor, accent);
                     });
                     if let Some(i) = wa.select {
                         w.widgets = Some((tabs.clone(), i));
@@ -1917,8 +1944,8 @@ mod imp {
                         w.blocked_checked = Some(Instant::now());
                         w.input_blocked = mirror.window_hwnd().is_some_and(rsoverlay_input::elevation::input_blocked);
                     }
-                    let (title, handle_m, attach, cursor, blocked) =
-                        (mirror.source.label(), mirror.handle(), w.attach, lf.cursor, w.input_blocked);
+                    let (title, handle_m, attach, blocked) =
+                        (mirror.source.label(), mirror.handle(), w.attach, w.input_blocked);
                     let touch_mode = dev_view.pointer.touch_input;
                     let icon = w.icon.as_ref().map(|t| t.id());
                     let (linked, opacity, pinned, smooth) = (w.group.is_some(), w.opacity, Some(w.pinned), w.smooth);
@@ -1935,7 +1962,6 @@ mod imp {
                         if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
                             rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                         }
-                        laser::paint_cursor(ctx, cursor, accent);
                     });
                     if let Some(r) = act.image_rect {
                         w.content_frac = (r.width() / w.panel.points.x).clamp(0.05, 1.0);
@@ -2417,6 +2443,9 @@ mod imp {
         kb.destroy(&overlay);
         for b in &beams {
             b.destroy(&overlay);
+        }
+        for c in &cursors {
+            c.destroy(&overlay);
         }
         wrist.destroy(&overlay);
         dash.destroy(&overlay);
