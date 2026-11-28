@@ -1500,6 +1500,8 @@ mod config_roundtrip_tests {
             kb_auto_repeat: true,
             kb_full: true,
             kb_vrchat: true,
+            dash_pinned: true,
+            dash_pose: Some([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 1.5], [0.0, 0.0, 1.0, -0.8]]),
         };
         c.notifications = rsoverlay_core::config::NotificationsCfg {
             size_m: 0.4,

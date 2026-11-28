@@ -80,11 +80,14 @@ mod imp {
     const MERGE_DIST_M: f32 = 0.18;
     /// Window edge docking: a dropped window whose edge lands within
     /// this distance of a neighbour's opposite edge snaps flush to it.
-    const SNAP_DIST_M: f32 = 0.12;
+    const SNAP_DIST_M: f32 = 0.20;
     /// …only if the two are roughly coplanar (depth apart, in the
     /// neighbour's frame) and facing the same way (cos of max angle).
-    const SNAP_DEPTH_M: f32 = 0.15;
-    const SNAP_COS: f32 = 0.866;
+    const SNAP_DEPTH_M: f32 = 0.30;
+    /// Up to ~52 degrees apart: carried windows turn to face you, so two
+    /// side by side are already ~45 degrees apart (tester: joining was
+    /// hard; it allowed 30).
+    const SNAP_COS: f32 = 0.62;
     /// Centre-align along the shared edge when this close to aligned.
     const SNAP_ALIGN_M: f32 = 0.08;
     /// Seam left between docked windows.
@@ -913,6 +916,15 @@ mod imp {
             beams.push(b);
         }
         let mut beam_tint = [[f32::NAN; 4]; 2];
+        // Docking outline: shows where a carried window will snap, and
+        // flashes when one docks / is unlinked (tester: no indication).
+        let mut ghost = VrPanel::new(&overlay, &gpu, "rsoverlay.dockghost", "RSOverlay Dock", (512, 512), 1.0, 1.0, 0.0)?;
+        ghost.render_static(&gpu, &overlay, rsoverlay_ui::shell::paint_dock_ghost);
+        let _ = overlay.set_sort_order(ghost.handle, 99);
+        let mut ghost_tint = [f32::NAN; 4];
+        // (pose, size m, started) of a dock / unlink flash.
+        let mut dock_flash: Option<(Affine3A, (f32, f32), f64)> = None;
+        let mut snap_was = false;
         // Cursor rings: their own static overlays, placed by transform at
         // the hit (XSO's way). Nothing about the laser is re-rendered per
         // frame: a texture reaches SteamVR a frame or more after a
@@ -959,6 +971,10 @@ mod imp {
             keyboard.auto_repeat = st.kb_auto_repeat;
             keyboard.full = st.kb_full;
             keyboard.vrchat = st.kb_vrchat;
+            dev_view.dash_pinned = st.dash_pinned;
+            if st.dash_pinned {
+                dash_pose = st.dash_pose.map(|m| to_affine(&HmdMatrix34_t { m }));
+            }
         }
         // Last session: reopened once tracking is up, unless a starred
         // layout is set (that wins). Autosaved every few seconds after.
@@ -1723,10 +1739,67 @@ mod imp {
                         if let (Some(h), Some(i)) = (released_hand, &input) {
                             i.haptic(h, GRAB_HAPTIC_S, dev_view.pointer.haptics);
                         }
+                        dock_flash = Some((wins[k].world, wins[k].size_m(), time));
                         info!("docked panel edges");
                     }
                 }
             }
+            // ── Docking outline: while a carried window is close enough to
+            // snap, show where it will land (+ a tick as it comes in
+            // range); flash on dock / unlink.
+            {
+                let snap_now = grab.as_ref().filter(|g| g.panel >= WIN0).and_then(|g| {
+                    let k = g.panel - WIN0;
+                    let w = wins.get(k).filter(|w| w.attach == Attach::World)?;
+                    let own = w.group;
+                    let others: Vec<_> = wins
+                        .iter()
+                        .enumerate()
+                        .filter(|&(j, o)| j != k && o.attach == Attach::World && (own.is_none() || o.group != own))
+                        .map(|(j, o)| (j, o.world, o.size_m()))
+                        .collect();
+                    snap_pose(&w.world, w.size_m(), &others).map(|(_, p)| (p, w.size_m(), g.hand))
+                });
+                if let (Some((_, _, hand)), false) = (snap_now, snap_was) {
+                    if let Some(i) = &input {
+                        i.haptic(hand, 0.012, 0.5 * dev_view.pointer.haptics);
+                    }
+                }
+                snap_was = snap_now.is_some();
+                const FLASH_S: f64 = 0.45;
+                let show = match (snap_now, dock_flash) {
+                    (Some((p, size, _)), _) => Some((p, size, 0.85)),
+                    (None, Some((p, size, t0))) if time - t0 < FLASH_S => Some((p, size, (1.0 - (time - t0) / FLASH_S) as f32)),
+                    _ => None,
+                };
+                match show {
+                    Some((p, (w, h), alpha)) => {
+                        let m = 0.02;
+                        let _ = overlay.set_width(ghost.handle, w + m);
+                        let _ = overlay.set_texel_aspect(ghost.handle, (w + m) / (h + m));
+                        let lifted = Affine3A { translation: p.translation + p.matrix3.z_axis * 0.004, ..p };
+                        let _ = overlay.set_transform_absolute(ghost.handle, &from_affine(&lifted));
+                        let a = dev_view.effective_accent();
+                        let t = [a.r() as f32 / 255.0, a.g() as f32 / 255.0, a.b() as f32 / 255.0, alpha];
+                        if t.iter().zip(ghost_tint).any(|(x, y)| (x - y).abs() > 0.01 || y.is_nan()) {
+                            let _ = overlay.set_color(ghost.handle, [t[0], t[1], t[2]]);
+                            let _ = overlay.set_alpha(ghost.handle, alpha);
+                            ghost_tint = t;
+                        }
+                        if !ghost.visible {
+                            ghost.resubmit(&overlay);
+                        }
+                        ghost.set_visible(&overlay, true);
+                    }
+                    None => {
+                        ghost.set_visible(&overlay, false);
+                        if dock_flash.is_some_and(|(_, _, t0)| time - t0 >= FLASH_S) {
+                            dock_flash = None;
+                        }
+                    }
+                }
+            }
+
             // The grabbing hand's stick drives push/scale, not scrolling.
             if let Some(g) = &grab {
                 let h = match g.hand {
@@ -2048,7 +2121,15 @@ mod imp {
             // ── Summon / dismiss the dashboard.
             if toggle_dash {
                 let show = !dash.visible;
-                if show && dash_rel.is_none() {
+                let stay = dev_view.dash_pinned && dash_pose.is_some();
+                if show && dash_rel.is_none() && stay {
+                    // Pinned: reopen right where it was left.
+                    if let Some(p) = dash_pose {
+                        if let Err(e) = overlay.set_transform_absolute(dash.handle, &from_affine(&p)) {
+                            warn!("place dashboard: {e:#}");
+                        }
+                    }
+                } else if show && dash_rel.is_none() {
                     // Re-summon in front of you every time, XSO-style; a
                     // grabbed position lasts until the next dismiss. A
                     // docked dashboard stays where it's docked.
@@ -2354,6 +2435,7 @@ mod imp {
                     let touch_mode = dev_view.pointer.touch_input;
                     let icon = w.icon.as_ref().map(|t| t.id());
                     let (linked, opacity, pinned, smooth) = (w.group.is_some(), w.opacity, Some(w.pinned), w.smooth);
+                    let tilt_on = dev_view.vr_grab_tilt;
                     // Auto-hide: the toolbar shows while the laser is on the
                     // window or it's held, and lingers a moment after.
                     if lf.cursor.is_some() || grab.as_ref().is_some_and(|g| g.panel == k + WIN0) {
@@ -2363,7 +2445,7 @@ mod imp {
                     let events = lf.events.clone();
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
                         mirror.refresh(&gpu);
-                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, opacity, pinned, show_toolbar, smooth, accent);
+                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, opacity, pinned, show_toolbar, smooth, Some(tilt_on), accent);
                         if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
                             rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                         }
@@ -2474,8 +2556,14 @@ mod imp {
                 }
                 if act.unlink {
                     w.group = None;
+                    dock_flash = Some((w.world, w.size_m(), time));
                 }
                 w.pinned ^= act.toggle_pin;
+                // Tilt is one setting for every window (Settings › VR
+                // panels › Tilt panels with the controller).
+                if act.toggle_tilt {
+                    dev_view.vr_grab_tilt = !dev_view.vr_grab_tilt;
+                }
                 w.smooth ^= act.toggle_smooth;
                 // Readable size: widen (or shrink) the panel so the text
                 // is legible from where you are (see vr_logic).
@@ -2703,6 +2791,8 @@ mod imp {
                 kb_auto_repeat: keyboard.auto_repeat,
                 kb_full: keyboard.full,
                 kb_vrchat: keyboard.vrchat,
+                dash_pinned: dev_view.dash_pinned,
+                dash_pose: dash_pose.filter(|_| dev_view.dash_pinned && dash_rel.is_none()).map(|p| from_affine(&p).m),
             };
 
             // ── Laser masks: only the surfaces a panel drew catch the
@@ -2936,6 +3026,7 @@ mod imp {
         for c in &cursors {
             c.destroy(&overlay);
         }
+        ghost.destroy(&overlay);
         for b in &beams {
             b.destroy(&overlay);
         }
@@ -3126,6 +3217,13 @@ mod imp {
             let (_, p) = snap_pose(&moving, W, &[(0, Affine3A::IDENTITY, W)]).expect("should snap");
             assert!((p.translation.y - (0.5625 + SNAP_GAP_M)).abs() < 1e-5);
             assert!((p.translation.x - 0.3).abs() < 1e-5, "offset along the edge is kept");
+        }
+
+        #[test]
+        fn windows_turned_to_face_you_still_snap() {
+            // Side by side, each facing the head: ~45 degrees apart.
+            let beside = Affine3A::from_rotation_translation(glam::Quat::from_rotation_y(0.78), glam::Vec3::new(0.95, 0.0, 0.1));
+            assert!(snap_pose(&beside, W, &[(0, Affine3A::IDENTITY, W)]).is_some());
         }
 
         #[test]

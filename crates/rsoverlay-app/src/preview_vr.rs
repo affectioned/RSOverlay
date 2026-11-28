@@ -432,7 +432,7 @@ pub fn run(
                                     let body = egui::Rect::from_min_max(full.min, egui::pos2(full.right(), bar.top() - 6.0));
                                     app.paint(ui, body);
                                     let mut opacity = 1.0;
-                                    let _ = window_panel::toolbar(ui, bar, app.title(), None, Attach::World, false, None, Some(window_panel::WindowMenu { resizable: true, smooth: false }), Some(&mut opacity), accent);
+                                    let _ = window_panel::toolbar(ui, bar, app.title(), None, Attach::World, false, None, Some(window_panel::WindowMenu { resizable: true, smooth: false, tilt: Some(true) }), Some(&mut opacity), accent);
                                 });
                             }
                         }

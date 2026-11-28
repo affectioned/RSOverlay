@@ -523,6 +523,16 @@ pub fn paint_laser(ctx: &egui::Context, l: &LaserLook) {
 /// The laser beam's texture (VR), white, tinted to the accent by the
 /// overlay colour: across, a bright core with a soft glow; along, it
 /// fades in from the controller and softens at the tip.
+/// Docking outline (VR): where a carried window will snap, and a flash
+/// when it docks / undocks. White, tinted to the accent by the overlay
+/// colour; stretched to the window's shape.
+pub fn paint_dock_ghost(ctx: &egui::Context) {
+    let p = ctx.layer_painter(egui::LayerId::background());
+    let r = ctx.screen_rect().shrink(10.0);
+    p.rect_filled(r, 26.0, crate::theme::veil(46));
+    p.rect_stroke(r.shrink(4.5), 22.0, egui::Stroke::new(9.0_f32, egui::Color32::WHITE));
+}
+
 pub fn paint_beam(ctx: &egui::Context) {
     paint_beam_anim(ctx, None);
 }

@@ -355,7 +355,7 @@ mod native_gpu_tests {
         for _ in 0..2 {
             let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(tw as f32 / ppp, th as f32 / ppp))), ..Default::default() };
             panel.render(&gpu.device, &gpu.queue, &view, raw, |ctx| {
-                let a = window_panel::show(ctx, "test", Some(MirrorHandle::full(id, sw, sh)), Attach::World, false, None, false, 1.0, None, false, false, egui::Color32::WHITE);
+                let a = window_panel::show(ctx, "test", Some(MirrorHandle::full(id, sw, sh)), Attach::World, false, None, false, 1.0, None, false, false, None, egui::Color32::WHITE);
                 rect = a.image_rect;
             });
         }

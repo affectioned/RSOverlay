@@ -187,7 +187,7 @@ impl DevHarness {
                 }
             }
             Surface::WindowPanel => {
-                let act = window_panel::show(ctx, "Example window — capture placeholder", None, self.win_attach, false, None, self.win_linked, self.win_opacity, Some(self.win_pinned), true, false, dev.accent);
+                let act = window_panel::show(ctx, "Example window — capture placeholder", None, self.win_attach, false, None, self.win_linked, self.win_opacity, Some(self.win_pinned), true, false, Some(dev.vr_grab_tilt), dev.accent);
                 if let Some(a) = act.attach {
                     self.win_attach = a;
                 }

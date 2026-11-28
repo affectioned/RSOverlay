@@ -256,6 +256,8 @@ pub struct DevView {
     /// Requests from that bar, taken by the VR shell.
     pub dash_dock: Option<crate::window_panel::Attach>,
     pub dash_close: bool,
+    /// Dashboard pinned: reopens where it was left (Pin on its bar).
+    pub dash_pinned: bool,
     /// Wrist shows everything (layouts, devices, views) vs the compact set.
     pub wrist_expanded: bool,
     /// Wrist edit mode (tap items to show / hide them on the compact wrist).
@@ -444,6 +446,7 @@ impl Default for DevView {
             dash_attach: crate::window_panel::Attach::World,
             dash_dock: None,
             dash_close: false,
+            dash_pinned: false,
             wrist_expanded: false,
             wrist_editing: false,
             show_history: false,
@@ -507,7 +510,7 @@ impl Default for DevView {
             date_format: "system".into(),
             vr_hide_with_steamvr: true,
             vr_windows_follow_dash: true,
-            vr_grab_tilt: false,
+            vr_grab_tilt: true,
             vr_stick_axis_lock: true,
             vr_render_scale: 1.0,
             vr_background_fps: 5.0,
@@ -1148,7 +1151,8 @@ impl DevView {
                         // Version in view, so screenshots in bug reports carry it.
                         ui.label(egui::RichText::new(rsoverlay_core::update::CURRENT).color(theme::FG_FAINT).size(theme::SIZE_CAPTION));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let (dock, close, _) = crate::window_panel::dock_controls(ui, self.dash_attach, None, accent);
+                            let (dock, close, pin) = crate::window_panel::dock_controls_with(ui, self.dash_attach, Some(self.dash_pinned), crate::window_panel::PIN_TIPS_DASHBOARD, accent);
+                            self.dash_pinned ^= pin;
                             self.dash_dock = dock.or(self.dash_dock);
                             self.dash_close |= close;
                         });

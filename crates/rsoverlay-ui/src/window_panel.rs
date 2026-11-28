@@ -58,6 +58,8 @@ pub struct WindowPanelAction {
     pub toggle_smooth: bool,
     /// "Readable size": size the panel so its text is legible.
     pub readable: bool,
+    /// Tilt pill clicked (panels rotate with the controller while held).
+    pub toggle_tilt: bool,
 }
 
 /// Window sizes on the toolbar's Size menu (outer size, pixels).
@@ -81,6 +83,7 @@ pub fn show(
     pinned: Option<bool>,
     show_toolbar: bool,
     smooth: bool,
+    tilt: Option<bool>,
     accent: egui::Color32,
 ) -> WindowPanelAction {
     let mut out = WindowPanelAction::default();
@@ -133,12 +136,12 @@ pub fn show(
         let mut op = opacity;
         // Window menu: smooth refresh for any capture; sizes only for
         // real windows Windows lets us touch.
-        let menu = mirror.map(|m| WindowMenu { resizable: m.resizable && !input_blocked, smooth });
+        let menu = mirror.map(|m| WindowMenu { resizable: m.resizable && !input_blocked, smooth, tilt });
         // Auto-hidden toolbars leave their strip empty (no layout jump).
         if show_toolbar {
             let t = toolbar(ui, bar, title, icon, attach, linked, pinned, menu, Some(&mut op), accent);
-            (out.attach, out.close, out.unlink, out.toggle_pin, out.resize, out.toggle_smooth, out.readable) =
-                (t.attach, t.close, t.unlink, t.toggle_pin, t.resize, t.toggle_smooth, t.readable);
+            (out.attach, out.close, out.unlink, out.toggle_pin, out.resize, out.toggle_smooth, out.readable, out.toggle_tilt) =
+                (t.attach, t.close, t.unlink, t.toggle_pin, t.resize, t.toggle_smooth, t.readable, t.toggle_tilt);
         }
         if (op - opacity).abs() > f32::EPSILON {
             out.opacity = Some(op);
@@ -175,6 +178,9 @@ pub struct WindowMenu {
     pub resizable: bool,
     /// "Keep smooth when not looking" is on.
     pub smooth: bool,
+    /// Tilt pill: panels rotate with the controller while held (Some =
+    /// shown, with its state).
+    pub tilt: Option<bool>,
 }
 
 /// What the toolbar's controls asked for this frame.
@@ -189,6 +195,8 @@ pub struct ToolbarOut {
     pub toggle_smooth: bool,
     /// "Readable size" picked.
     pub readable: bool,
+    /// Tilt pill clicked.
+    pub toggle_tilt: bool,
 }
 
 /// A window panel's bottom toolbar: app icon + title, dock + close, and
@@ -224,6 +232,17 @@ pub fn toolbar(
         if linked {
             ui.add_space(8.0);
             out.unlink = unlink_pill(ui, accent);
+        }
+        if let Some(on) = menu.and_then(|m| m.tilt) {
+            ui.add_space(8.0);
+            let tip = if on {
+                "Tilt on: a held window rotates with your controller (twist or tilt your wrist). Click to have windows face you instead."
+            } else {
+                "Tilt off: a held window always turns to face you. Click to rotate windows with your controller."
+            };
+            if pill(ui, "Tilt", on, accent).on_hover_text(tip).clicked() {
+                out.toggle_tilt = true;
+            }
         }
         if let Some(op) = opacity {
             ui.add_space(12.0);
@@ -310,17 +329,29 @@ fn uac_banner(ui: &egui::Ui, content: egui::Rect) {
 /// right-to-left layout. `pinned`: show the Pin pill (stays up when the Windows button hides the rest;
 /// `None` = not applicable). Returns (dock request, close, pin toggled).
 pub fn dock_controls(ui: &mut egui::Ui, attach: Attach, pinned: Option<bool>, accent: egui::Color32) -> (Option<Attach>, bool, bool) {
+    dock_controls_with(ui, attach, pinned, PIN_TIPS_WINDOW, accent)
+}
+
+/// Pin tooltips (pinned, not pinned) for a window / widget.
+pub const PIN_TIPS_WINDOW: (&str, &str) = (
+    "Pinned: stays visible when the wrist Windows button hides your windows. Click to unpin.",
+    "Pin to keep this one visible when the wrist Windows button hides your windows.",
+);
+/// Pin tooltips for the dashboard.
+pub const PIN_TIPS_DASHBOARD: (&str, &str) = (
+    "Pinned: the dashboard reopens right here instead of in front of you. Click to unpin.",
+    "Pin to have the dashboard reopen right here instead of in front of you.",
+);
+
+/// [`dock_controls`] with the Pin pill's own tooltips (pinned, unpinned).
+pub fn dock_controls_with(ui: &mut egui::Ui, attach: Attach, pinned: Option<bool>, tips: (&str, &str), accent: egui::Color32) -> (Option<Attach>, bool, bool) {
     let mut out = (None, false, false);
     if pill(ui, "✕", false, theme::DANGER).on_hover_text("Close").clicked() {
         out.1 = true;
     }
     ui.add_space(8.0);
     if let Some(on) = pinned {
-        let tip = if on {
-            "Pinned: stays visible when the wrist Windows button hides your windows. Click to unpin."
-        } else {
-            "Pin to keep this one visible when the wrist Windows button hides your windows."
-        };
+        let tip = if on { tips.0 } else { tips.1 };
         if pill(ui, if on { "Pinned" } else { "Pin" }, on, accent).on_hover_text(tip).clicked() {
             out.2 = true;
         }
