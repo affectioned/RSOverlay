@@ -593,6 +593,30 @@ pub(crate) fn trigger_value(pull: f32, click: bool, point: f32) -> f32 {
     (pull.clamp(0.0, 1.0) / point * rsoverlay_ui::laser::PRESS).min(1.0)
 }
 
+/// The beam's overlay transform with its length and thickness baked in
+/// as a scale (the overlay itself is a fixed 1 m wide, square-texel
+/// quad whose natural height is `natural_h`). One transform call then
+/// moves, lengthens and thickens it at once. Tester: the cursor
+/// desynced from the beam's tip while moving up and down, when the hit
+/// distance (beam length, set separately as the overlay width) changes
+/// fastest and SteamVR applied width and transform on different frames.
+pub(crate) fn beam_transform(origin: Vec3A, dir: Vec3A, len: f32, eye: Vec3A, thickness: f32, natural_h: f32) -> Affine3A {
+    let d = dir.normalize_or_zero();
+    let mid = origin + d * (len * 0.5);
+    let to_eye = eye - mid;
+    // Billboard around its own axis so it never goes edge-on.
+    let z = (to_eye - d * to_eye.dot(d)).try_normalize().unwrap_or(Vec3A::Y);
+    let y = z.cross(d);
+    Affine3A::from_cols(d * len, y * (thickness / natural_h), z, mid)
+}
+
+/// The cursor's transform with its size baked in (a 1 m overlay scaled
+/// to `size`), for the same reason as [`beam_transform`].
+pub(crate) fn cursor_transform(origin: Vec3A, dir: Vec3A, dist: f32, eye: Vec3A, size: f32) -> Affine3A {
+    let p = cursor_pose(origin, dir, dist, eye);
+    Affine3A::from_cols(p.matrix3.x_axis * size, p.matrix3.y_axis * size, p.matrix3.z_axis, p.translation)
+}
+
 /// Laser look and feel: fade in / out, the cursor's pop on arrival, and
 /// the click flash (brighter, thicker beam; squeezed cursor). Only
 /// overlay properties change per frame (alpha, width), nothing redraws.
@@ -1322,5 +1346,25 @@ mod sim {
         assert_eq!(l.beam_alpha, 0.0);
         // Coming back pops again.
         assert!(a.step(true, false, dt).cursor_scale < 0.8);
+    }
+
+    /// The beam's far end (local x = +0.5 on its 1 m quad) is the cursor's
+    /// centre, for any length, so one transform each keeps them together.
+    #[test]
+    fn beam_tip_is_the_cursor_for_any_length() {
+        let (o, d, eye) = (Vec3A::new(0.2, 1.1, -0.3), Vec3A::new(0.1, 0.4, -0.9), Vec3A::new(0.0, 1.6, 0.0));
+        for len in [0.05, 0.3, 0.9, 2.5] {
+            let beam = beam_transform(o, d, len, eye, 0.007, 0.125);
+            let tip = beam.transform_point3a(Vec3A::new(0.5, 0.0, 0.0));
+            let start = beam.transform_point3a(Vec3A::new(-0.5, 0.0, 0.0));
+            assert!((start - o).length() < 1e-5, "starts at the controller");
+            let cursor = cursor_transform(o, d, len, eye, 0.013);
+            assert!((tip - cursor.translation).length() <= CURSOR_LIFT_M + 1e-5, "len {len}: tip {tip:?} vs cursor {:?}", cursor.translation);
+            // Thickness: the 1 m quad's natural height scaled to 7 mm.
+            let h = (beam.transform_vector3a(Vec3A::new(0.0, 0.125, 0.0))).length();
+            assert!((h - 0.007).abs() < 1e-5);
+            // Cursor 13 mm across, facing the eye.
+            assert!((cursor.transform_vector3a(Vec3A::X).length() - 0.013).abs() < 1e-6);
+        }
     }
 }

@@ -175,7 +175,7 @@ mod imp {
     use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
     use windows::Win32::Media::Audio::{
         eConsole, eRender, AudioSessionStateExpired, IAudioSessionControl2, IAudioSessionManager2,
-        IMMDevice, IMMDeviceEnumerator, ISimpleAudioVolume, MMDeviceEnumerator,
+        IMMDevice, IMMDeviceEnumerator, ISimpleAudioVolume, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
     };
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
     use windows::Win32::System::Threading::{
@@ -198,20 +198,22 @@ mod imp {
             // Default device can change (headset plugged in) — resolve it
             // every refresh rather than caching.
             let device = unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eConsole) }.ok();
-            let snap = device.as_ref().map(read_snapshot).unwrap_or_default();
+            // Apps on every active output, not just the default: with
+            // Voicemeeter etc. a player often outputs elsewhere (tester:
+            // Apple Music's volume didn't change from the wrist).
+            let all = active_outputs(&enumerator);
+            let snap = read_snapshot(device.as_ref(), &all);
             if let Ok(mut s) = shared.lock() {
                 *s = snap;
             }
             match rx.recv_timeout(REFRESH) {
                 Ok(cmd) => {
-                    if let Some(d) = &device {
-                        // Drain the burst a slider drag produces; only the
-                        // newest value per target matters, but applying all
-                        // is cheap and keeps ordering obvious.
-                        let _ = run(d, cmd);
-                        while let Ok(cmd) = rx.try_recv() {
-                            let _ = run(d, cmd);
-                        }
+                    // Drain the burst a slider drag produces; only the
+                    // newest value per target matters, but applying all
+                    // is cheap and keeps ordering obvious.
+                    let _ = run(device.as_ref(), &all, cmd);
+                    while let Ok(cmd) = rx.try_recv() {
+                        let _ = run(device.as_ref(), &all, cmd);
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -220,14 +222,26 @@ mod imp {
         }
     }
 
-    fn read_snapshot(device: &IMMDevice) -> Snapshot {
-        let master = endpoint(device).ok().and_then(|ep| unsafe {
+    /// Every active render endpoint.
+    fn active_outputs(enumerator: &IMMDeviceEnumerator) -> Vec<IMMDevice> {
+        let Ok(list) = (unsafe { enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) }) else {
+            return Vec::new();
+        };
+        let n = unsafe { list.GetCount() }.unwrap_or(0);
+        (0..n).filter_map(|i| unsafe { list.Item(i) }.ok()).collect()
+    }
+
+    /// Master from the default output; apps from every active output.
+    fn read_snapshot(device: Option<&IMMDevice>, all: &[IMMDevice]) -> Snapshot {
+        let master = device.and_then(|d| endpoint(d).ok()).and_then(|ep| unsafe {
             Some(Level {
                 volume: ep.GetMasterVolumeLevelScalar().ok()?,
                 muted: ep.GetMute().ok()?.as_bool(),
             })
         });
-        let apps = sessions(device).map(|v| dedupe(v.into_iter().map(|(s, _)| s).collect())).unwrap_or_default();
+        // Default device first, so its level wins for apps on several.
+        let ordered = device.into_iter().chain(all.iter());
+        let apps = dedupe(ordered.flat_map(|d| sessions(d).unwrap_or_default().into_iter().map(|(s, _)| s)).collect());
         Snapshot { master, apps }
     }
 
@@ -285,14 +299,21 @@ mod imp {
         }
     }
 
-    fn run(device: &IMMDevice, cmd: Cmd) -> Result<()> {
+    fn run(device: Option<&IMMDevice>, all: &[IMMDevice], cmd: Cmd) -> Result<()> {
         let ctx: *const GUID = std::ptr::null();
         unsafe {
             match cmd {
-                Cmd::MasterVolume(v) => endpoint(device)?.SetMasterVolumeLevelScalar(v, ctx),
-                Cmd::MasterMute(m) => endpoint(device)?.SetMute(m, ctx),
-                Cmd::AppVolume(pid, v) => for_pid(device, pid, |vol| vol.SetMasterVolume(v, ctx)),
-                Cmd::AppMute(pid, m) => for_pid(device, pid, |vol| vol.SetMute(m, ctx)),
+                Cmd::MasterVolume(v) => match device {
+                    Some(d) => endpoint(d)?.SetMasterVolumeLevelScalar(v, ctx),
+                    None => Ok(()),
+                },
+                Cmd::MasterMute(m) => match device {
+                    Some(d) => endpoint(d)?.SetMute(m, ctx),
+                    None => Ok(()),
+                },
+                // On whichever outputs the app plays to.
+                Cmd::AppVolume(pid, v) => all.iter().try_for_each(|d| for_pid(d, pid, |vol| vol.SetMasterVolume(v, ctx))),
+                Cmd::AppMute(pid, m) => all.iter().try_for_each(|d| for_pid(d, pid, |vol| vol.SetMute(m, ctx))),
             }
         }
     }
@@ -389,6 +410,10 @@ mod tests {
         assert_eq!(pid("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"), Some(10));
         assert_eq!(pid("Chrome"), Some(11));
         assert_eq!(pid("MSEdge"), Some(13));
+        // Apple Music (Store app id) → its AppleMusic process.
+        let mut with_am = apps.clone();
+        with_am.push(app(14, "AppleMusic"));
+        assert_eq!(match_app("AppleInc.AppleMusicWin_nzyj5cx40ttqa!App", &with_am).map(|a| a.pid), Some(14));
         // Firefox reports an opaque id: no match → master volume.
         assert_eq!(pid("308046B0AF4A39CB"), None);
         assert_eq!(pid(""), None);

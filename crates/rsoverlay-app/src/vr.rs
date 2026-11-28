@@ -898,6 +898,8 @@ mod imp {
         // and stretched per frame. Sorted above every panel.
         let mut beams = Vec::with_capacity(2);
         for side in ["left", "right"] {
+            // 1 m wide, square texels: length / thickness are scales in its
+            // transform (vr_logic::beam_transform).
             let mut b = VrPanel::new(&overlay, &gpu, &format!("rsoverlay.beam.{side}"), "RSOverlay Laser", BEAM_TEX, 1.0, 1.0, 0.0)?;
             // Tester: the beam never showed (SteamVR found it where it
             // belongs): its one-time texture was egui's unsettled first
@@ -909,7 +911,8 @@ mod imp {
         let mut beam_tint = [[f32::NAN; 4]; 2];
         let mut cursors = Vec::with_capacity(2);
         for side in ["left", "right"] {
-            let mut c = VrPanel::new(&overlay, &gpu, &format!("rsoverlay.cursor.{side}"), "RSOverlay Cursor", CURSOR_TEX, 1.0, CURSOR_M, 0.0)?;
+            // 1 m overlay, scaled to size in its transform.
+            let mut c = VrPanel::new(&overlay, &gpu, &format!("rsoverlay.cursor.{side}"), "RSOverlay Cursor", CURSOR_TEX, 1.0, 1.0, 0.0)?;
             c.render_static(&gpu, &overlay, rsoverlay_ui::shell::paint_cursor_dot);
             let _ = overlay.set_sort_order(c.handle, 101);
             cursors.push(c);
@@ -1696,16 +1699,20 @@ mod imp {
                 let hit = c.and(hand_hit[s]).filter(|_| dev_view.vr_show_lasers && !sf.engaged);
                 let pressed = c.is_some_and(|c| c.trigger > 0.5);
                 let look = laser_anim[s].step(hit.is_some(), pressed, dt);
+                // Length, thickness and size are baked into one transform
+                // each (vr_logic::beam_transform): width changes applied a
+                // frame apart from moves split the tip from the cursor.
+                let size = dev_view.vr_pointer_size;
                 if let (Some(c), Some((_, len)), Some(e)) = (c, hit, eye) {
-                    let o = Vec3A::from(c.origin);
-                    let d = Vec3A::from(c.dir);
-                    let len = len.max(0.05);
-                    let mid = o + d * (len * 0.5);
-                    let to_eye = e - mid;
-                    let z = (to_eye - d * to_eye.dot(d)).try_normalize().unwrap_or(Vec3A::Y);
-                    let beam_pose = Affine3A::from_cols(d, z.cross(d), z, mid);
+                    let (o, d, len) = (Vec3A::from(c.origin), Vec3A::from(c.dir), len.max(0.05));
+                    let natural_h = BEAM_TEX.1 as f32 / BEAM_TEX.0 as f32;
                     let inv = to_affine(&c.pose).inverse();
-                    laser_last[s] = Some((c.index, inv * beam_pose, len, inv * cursor_pose(o, d, len, e)));
+                    laser_last[s] = Some((
+                        c.index,
+                        inv * beam_transform(o, d, len, e, BEAM_THICKNESS_M * size, natural_h),
+                        len,
+                        inv * cursor_transform(o, d, len, e, CURSOR_M * size),
+                    ));
                 }
                 let (beam, cur) = (&mut beams[s], &mut cursors[s]);
                 let Some((dev, beam_rel, len, cur_rel)) = laser_last[s].filter(|_| look.beam_alpha > 0.0 || look.cursor_alpha > 0.0) else {
@@ -1720,11 +1727,12 @@ mod imp {
                 if !cur.visible {
                     cur.resubmit(&overlay);
                 }
-                let size = dev_view.vr_pointer_size;
-                let _ = overlay.set_width(beam.handle, len);
-                let _ = overlay.set_texel_aspect(beam.handle, len * BEAM_TEX.1 as f32 / (BEAM_TEX.0 as f32 * BEAM_THICKNESS_M * size * look.beam_thick));
+                let _ = len;
+                // Animation scales on top (thicker flash, cursor pop): still
+                // one transform per overlay.
+                let beam_rel = beam_rel * Affine3A::from_scale(glam::Vec3::new(1.0, look.beam_thick, 1.0));
+                let cur_rel = cur_rel * Affine3A::from_scale(glam::Vec3::new(look.cursor_scale, look.cursor_scale, 1.0));
                 let _ = overlay.set_transform_device_relative(beam.handle, dev, &from_affine(&beam_rel));
-                let _ = overlay.set_width(cur.handle, CURSOR_M * size * look.cursor_scale);
                 let _ = overlay.set_transform_device_relative(cur.handle, dev, &from_affine(&cur_rel));
                 let a = dev_view.effective_accent();
                 let rgb = [a.r() as f32 / 255.0, a.g() as f32 / 255.0, a.b() as f32 / 255.0];
