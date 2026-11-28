@@ -252,5 +252,13 @@ RSOverlay is an independent project, written from scratch against public
 Windows and OpenVR APIs. It isn't affiliated with any other overlay.
 
 Dual-licensed under either of [MIT](LICENSE-MIT) or
-[Apache-2.0](LICENSE-APACHE), at your option. Bundled fonts (Inter) are
-under the SIL Open Font License, see `crates/rsoverlay-ui/src/fonts/`.
+[Apache-2.0](LICENSE-APACHE), at your option. Bundled third-party assets
+keep their own licences:
+
+- Fonts: Inter, SIL Open Font License (`crates/rsoverlay-ui/src/fonts/`)
+- Icons: [Tabler Icons](https://tabler.io/icons), MIT
+  (`crates/rsoverlay-ui/src/icons/`)
+- Typing sounds: a Keychron V1 Ultra recording by C40115, Wikimedia
+  Commons, CC BY 4.0 (see [docs/SOUNDS.md](docs/SOUNDS.md))
+- Alert sounds: Kenney's [Interface Sounds](https://kenney.nl/assets/interface-sounds),
+  CC0

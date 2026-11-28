@@ -1,6 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
-  <rect x="5" y="13" width="38" height="22" rx="4" stroke="#FFFFFF" stroke-width="3" fill="#FFFFFF" fill-opacity="0.08"/>
-  <path d="M11 20h2M17 20h2M23 20h2M29 20h2M35 20h2M11 25h2M35 25h2M17 29h14"
-        stroke="#FFFFFF" stroke-width="3" stroke-linecap="round"/>
-  <path d="M17 25h14" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" opacity="0.5"/>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="24"
+  height="24"
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="#FFFFFF"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  class="icon icon-tabler icons-tabler-outline icon-tabler-keyboard"
+>
+  <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <path d="M2 6m0 2a2 2 0 0 1 2 -2h16a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-16a2 2 0 0 1 -2 -2z" />
+  <path d="M6 10l0 .01" />
+  <path d="M10 10l0 .01" />
+  <path d="M14 10l0 .01" />
+  <path d="M18 10l0 .01" />
+  <path d="M6 14l0 .01" />
+  <path d="M18 14l0 .01" />
+  <path d="M10 14l4 .01" />
 </svg>

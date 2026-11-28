@@ -2028,18 +2028,13 @@ fn keyboard_card(ui: &mut egui::Ui, kb: &mut KeyboardPrefs, accent: egui::Color3
             });
             ui.horizontal(|ui| {
                 ui.label(theme::body_muted("Sound pack"));
-                let classic = rsoverlay_audio::typing::CLASSIC_PACK;
-                let thock = rsoverlay_audio::typing::THOCK_PACK;
-                let current = match kb.pack.as_str() {
-                    "" => "Keychron (recorded)".to_string(),
-                    p if p == thock => "Thock (synthesised)".to_string(),
-                    p if p == classic => "Classic clicks".to_string(),
-                    p => p.to_string(),
-                };
+                // A retired built-in ("builtin:…") plays the recording too.
+                if !rsoverlay_audio::typing::valid_pack_name(&kb.pack) {
+                    kb.pack.clear();
+                }
+                let current = if kb.pack.is_empty() { "Keychron (recorded)".to_string() } else { kb.pack.clone() };
                 egui::ComboBox::from_id_source("sound-pack").selected_text(current).show_ui(ui, |ui| {
                     ui.selectable_value(&mut kb.pack, String::new(), "Keychron (recorded)");
-                    ui.selectable_value(&mut kb.pack, thock.to_string(), "Thock (synthesised)");
-                    ui.selectable_value(&mut kb.pack, classic.to_string(), "Classic clicks");
                     for p in &kb.packs {
                         ui.selectable_value(&mut kb.pack, p.clone(), p);
                     }

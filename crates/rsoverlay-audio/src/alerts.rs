@@ -10,7 +10,7 @@
 //! [`AlertKind::from_audio_path`]; which file plays is the user's choice,
 //! restricted to plain file names inside the sounds folder.
 
-use crate::typing::{alert_chime, scale_pcm16, valid_pack_name, MAX_WAV_BYTES};
+use crate::typing::{scale_pcm16, valid_pack_name, MAX_WAV_BYTES};
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -73,35 +73,22 @@ pub fn list_sound_files(dir: &Path) -> Vec<String> {
 }
 
 /// One soft tone with a bell-ish decay.
-fn tone(f: f32, len_s: f32, tau: f32) -> Vec<f32> {
-    const RATE: f32 = 44_100.0;
-    (0..(len_s * RATE) as usize)
-        .map(|i| {
-            let t = i as f32 / RATE;
-            let env = (t / 0.006).min(1.0) * (-t / tau).exp();
-            env * ((std::f32::consts::TAU * f * t).sin() + 0.2 * (std::f32::consts::TAU * 2.0 * f * t).sin())
-        })
-        .collect()
-}
-
-fn to_wav(raw: &[f32], volume: f32) -> Vec<u8> {
-    let peak = raw.iter().fold(0.0_f32, |m, s| m.max(s.abs())).max(1e-6);
-    let scale = 0.85 * volume.clamp(0.0, 1.0) * i16::MAX as f32 / peak;
-    let samples: Vec<i16> = raw.iter().map(|s| (s * scale).round() as i16).collect();
-    crate::typing::wav_pcm16_mono(&samples, 44_100)
-}
-
-/// Built-in sound per kind (all synthesised; nothing shipped/borrowed).
-pub fn builtin(kind: AlertKind, volume: f32) -> Vec<u8> {
+/// Built-in sound per kind: recordings from Kenney's "Interface Sounds"
+/// (www.kenney.nl, CC0; `assets/kenney/License.txt`), converted to 16-bit
+/// mono WAV. notification = confirmation_002, warning = question_001,
+/// error = error_006, low battery = glass_004.
+fn builtin_wav(kind: AlertKind) -> &'static [u8] {
     match kind {
-        // A single bright "pop".
-        AlertKind::Notification => to_wav(&tone(1175.0, 0.16, 0.05), volume),
-        // Two rising tones.
-        AlertKind::Warning => to_wav(&[tone(784.0, 0.13, 0.05), tone(1047.0, 0.18, 0.06)].concat(), volume),
-        // Two low, firmer beeps.
-        AlertKind::Error => to_wav(&[tone(330.0, 0.14, 0.08), tone(330.0, 0.16, 0.08)].concat(), volume),
-        AlertKind::LowBattery => alert_chime(volume),
+        AlertKind::Notification => include_bytes!("../assets/kenney/notification.wav"),
+        AlertKind::Warning => include_bytes!("../assets/kenney/warning.wav"),
+        AlertKind::Error => include_bytes!("../assets/kenney/error.wav"),
+        AlertKind::LowBattery => include_bytes!("../assets/kenney/low_battery.wav"),
     }
+}
+
+/// The built-in sound for `kind` at `volume`.
+pub fn builtin(kind: AlertKind, volume: f32) -> Vec<u8> {
+    scale_pcm16(builtin_wav(kind), volume).unwrap_or_default()
 }
 
 /// The WAV a slot should play at `volume`, or `None` for silence.
