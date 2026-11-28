@@ -365,7 +365,9 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
                 egui::FontId::proportional(theme::SIZE_BODY), theme::FG_MUTED);
             edits.push((r5, compact::BATTERY));
         } else if has(compact::BATTERY) && !d.batteries.is_empty() {
-            let r5 = row(&mut y, 52.0, full.width() * 0.16);
+            // Four or more devices: use (nearly) the full width.
+            let inset = if d.batteries.len() >= 4 { 0.03 } else { 0.16 };
+            let r5 = row(&mut y, 52.0, full.width() * inset);
             slab(ui, r5, accent);
             edits.push((r5, compact::BATTERY));
             let tw = r5.width() / d.batteries.len() as f32;
@@ -377,13 +379,26 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
                 let bar = egui::Rect::from_min_size(egui::pos2(c.left() + 6.0, c.bottom() - 7.0), egui::vec2(24.0, 4.0));
                 ui.painter().rect_filled(bar, 2.0, theme::BG_HOVER);
                 ui.painter().rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(24.0 * b.fraction.clamp(0.0, 1.0), 4.0)), 2.0, col);
-                let txt = match (b.charging, d.estimates.get(i).cloned().flatten()) {
-                    (true, _) => format!("⚡{pct}%"),
-                    (false, Some(e)) => format!("{pct}% · {e}"),
-                    (false, None) => format!("{pct}%"),
-                };
-                ui.painter().text(egui::pos2(c.left() + 38.0, c.center().y), egui::Align2::LEFT_CENTER, txt,
-                    egui::FontId::monospace(theme::SIZE_CAPTION + 1.0), theme::FG_PRIMARY);
+                // Text stays inside its own device's slot (tester: the
+                // battery-life estimate ran into the next device). The
+                // estimate goes on its own line under the percentage.
+                let text_clip = egui::Rect::from_min_max(egui::pos2(c.left() + 34.0, c.top()), c.max);
+                let p = ui.painter().with_clip_rect(text_clip);
+                let pct_txt = if b.charging { format!("\u{26a1}{pct}%") } else { format!("{pct}%") };
+                let est = d.estimates.get(i).cloned().flatten().filter(|_| !b.charging);
+                let x = c.left() + 38.0;
+                match est {
+                    Some(e) => {
+                        p.text(egui::pos2(x, c.center().y - 8.0), egui::Align2::LEFT_CENTER, pct_txt,
+                            egui::FontId::monospace(theme::SIZE_CAPTION + 1.0), theme::FG_PRIMARY);
+                        p.text(egui::pos2(x, c.center().y + 9.0), egui::Align2::LEFT_CENTER, e,
+                            egui::FontId::monospace(theme::SIZE_CAPTION - 1.0), theme::FG_MUTED);
+                    }
+                    None => {
+                        p.text(egui::pos2(x, c.center().y), egui::Align2::LEFT_CENTER, pct_txt,
+                            egui::FontId::monospace(theme::SIZE_CAPTION + 1.0), theme::FG_PRIMARY);
+                    }
+                }
             }
         }
         // 5 · Status chips.
@@ -666,6 +681,48 @@ mod tests {
             assert_eq!(a.count_ones(), 1);
             assert!((0..compact::ACTIONS).all(|i| compact::action_bit(i) != *a), "module bits must not overlap the action bits");
             assert!(all[i + 1..].iter().all(|b| b != a));
+        }
+    }
+
+    /// Tester: the battery-life estimate ran into the next device. With
+    /// five devices and long estimates, every device's text must stay
+    /// inside its own slot (nothing drawn over a neighbour).
+    #[test]
+    fn battery_texts_never_overlap_their_neighbours() {
+        let batteries: Vec<BatteryReading> = (0..5)
+            .map(|i| BatteryReading { id: i, label: "Device".into(), fraction: 0.82, charging: i == 3, ..Default::default() })
+            .collect();
+        let estimates: Vec<Option<String>> = (0..5).map(|_| Some("10h 40m".to_string())).collect();
+        let mut d = data(None, 0);
+        d.batteries = &batteries;
+        d.estimates = &estimates;
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        crate::icons::install_loaders(&ctx);
+        let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 520.0))), ..Default::default() };
+        let out = ctx.run(raw, |ctx| {
+            show(ctx, &d);
+        });
+        // Visible boxes of every battery text (galley ∩ clip).
+        let texts: Vec<(String, egui::Rect)> = out
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) if t.galley.job.text.contains('%') || t.galley.job.text.ends_with('m') => {
+                    let r = t.galley.rect.translate(t.pos.to_vec2()).intersect(cs.clip_rect);
+                    (r.width() > 0.0).then(|| (t.galley.job.text.clone(), r))
+                }
+                _ => None,
+            })
+            .filter(|(t, _)| t.contains("82%") || t == "10h 40m")
+            .collect();
+        assert!(texts.len() >= 9, "battery texts drawn: {texts:?}");
+        for (i, (ta, a)) in texts.iter().enumerate() {
+            for (tb, b) in &texts[i + 1..] {
+                let overlap = a.intersect(*b);
+                let same_slot = (a.center().x - b.center().x).abs() < 1.0;
+                assert!(same_slot || overlap.width() <= 0.0 || overlap.height() <= 0.0, "{ta:?} {a:?} overlaps {tb:?} {b:?}");
+            }
         }
     }
 }
