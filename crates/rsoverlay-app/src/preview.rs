@@ -129,17 +129,26 @@ pub fn seed_dev_view(
     dev.vr_laser_angle = cfg.vr.laser_angle.clamp(-30.0, 30.0);
     dev.cursor_smoothing = cfg.vr.cursor_smoothing.clamp(0.0, 1.0);
     dev.scroll_speed = cfg.vr.scroll_speed.clamp(0.25, 3.0);
-    use rsoverlay_ui::wrist::compact::{ALL_ACTIONS, DEFAULT_ACTIONS};
+    use rsoverlay_ui::wrist::compact::{action_bit, ALL_ACTIONS, DEFAULT_ACTIONS, WINDOWS_ACTION};
     let mut buttons = if cfg.vr.wrist_buttons & ALL_ACTIONS == 0 { DEFAULT_ACTIONS } else { cfg.vr.wrist_buttons };
     // Untouched defaults from older builds (all 7, or all 8) become the
     // new, calmer default; anything the user chose is kept.
-    if cfg.vr.wrist_actions_rev < 2 && (buttons == 0x7F || buttons == ALL_ACTIONS) {
+    if cfg.vr.wrist_actions_rev < 2 && (buttons == 0x7F || buttons == 0xFF) {
         buttons = DEFAULT_ACTIONS;
+    }
+    // Rev 3 adds the Windows button: on both wrists, once (it sits next
+    // to Dashboard on the compact wrist, so only where Dashboard is).
+    let mut compact = cfg.vr.wrist_compact;
+    if cfg.vr.wrist_actions_rev < 3 {
+        buttons |= 1 << WINDOWS_ACTION;
+        if compact & action_bit(3) != 0 {
+            compact |= action_bit(WINDOWS_ACTION);
+        }
     }
     dev.wrist_buttons = buttons;
     dev.media_theme = cfg.vr.media_theme;
     dev.wrist_expanded = cfg.vr.wrist_expanded;
-    dev.wrist_compact = cfg.vr.wrist_compact;
+    dev.wrist_compact = compact;
     dev.kb_prefs.opacity = cfg.vr.keyboard_opacity.clamp(0.2, 1.0);
     dev.kb_prefs.sounds = cfg.vr.typing_sounds;
     dev.kb_prefs.volume = cfg.vr.typing_volume.clamp(0.0, 1.0);
@@ -334,7 +343,7 @@ pub fn config_from_dev_view(
         cursor_smoothing: dev.cursor_smoothing,
         scroll_speed: dev.scroll_speed,
         wrist_buttons: dev.wrist_buttons,
-        wrist_actions_rev: 2,
+        wrist_actions_rev: 3,
         media_theme: dev.media_theme,
         wrist_expanded: dev.wrist_expanded,
         wrist_compact: dev.wrist_compact,
@@ -1011,6 +1020,9 @@ pub fn run(
                         // the end of RedrawRequested, handing write
                         // ownership back to the capture thread.
                         let _read_lease = gpu_mirror.as_ref().and_then(|m| m.acquire_read(8));
+                        if let Some(m) = &gpu_mirror {
+                            m.refresh(&gpu);
+                        }
 
                         // 0c. Forward any pending mirror hit to the real
                         // desktop. Move always; click only if a click was
@@ -1502,6 +1514,30 @@ mod config_roundtrip_tests {
         seed_dev_view(&mut dev, &cfg, &TestHooks::default());
         let back = config_from_dev_view(&dev, &cfg);
         assert_eq!(back, cfg);
+    }
+
+    /// Rev 3: configs from before the Windows button get it once, on the
+    /// full toolbar and (where Dashboard is) on the compact wrist; a
+    /// later choice to remove it sticks.
+    #[test]
+    fn windows_button_is_added_once_to_older_wrists() {
+        use rsoverlay_ui::wrist::compact::{action_bit, WINDOWS_ACTION};
+        let mut cfg: rsoverlay_core::Config = toml::from_str("[vr]\nwrist_buttons = 63\nwrist_actions_rev = 2\nwrist_compact = 15\n").unwrap();
+        let mut dev = rsoverlay_ui::views::DevView::default();
+        seed_dev_view(&mut dev, &cfg, &TestHooks::default());
+        assert_eq!(dev.wrist_buttons, 63 | 1 << WINDOWS_ACTION);
+        assert_eq!(dev.wrist_compact, 15 | action_bit(WINDOWS_ACTION));
+        // No Dashboard on the compact wrist → no Windows there either.
+        cfg.vr.wrist_compact = 0x7;
+        seed_dev_view(&mut dev, &cfg, &TestHooks::default());
+        assert_eq!(dev.wrist_compact, 0x7);
+        // Saved at rev 3 without it (the user removed it): left alone.
+        let saved = config_from_dev_view(&dev, &cfg);
+        assert_eq!(saved.vr.wrist_actions_rev, 3);
+        let mut removed = saved.clone();
+        removed.vr.wrist_buttons = 63;
+        seed_dev_view(&mut dev, &removed, &TestHooks::default());
+        assert_eq!(dev.wrist_buttons, 63);
     }
 
     #[test]

@@ -84,8 +84,10 @@ fn vr_rows(ui: &mut egui::Ui, v: &rsoverlay_core::perf::VrPerf, accent: egui::Co
         ui.label(theme::body_muted("VR · SteamVR frame timing"));
     });
     line(ui, "FPS", format!("{:.0} / {:.0}", v.fps, v.hz), behind, "Game frames per second / your headset's refresh rate");
-    line(ui, "Frame", format!("{:.1} ms GPU · {:+.1} ms", v.gpu_ms, v.headroom_ms), v.headroom_ms < 0.0,
-        "GPU time per frame, and how much of the frame budget is left (negative = over budget)");
+    line(ui, "Frame", format!("CPU {:.1} · GPU {:.1} ms", v.cpu_ms, v.gpu_ms), v.cpu_ms.max(v.gpu_ms) > v.budget_ms,
+        "Frame time: CPU (game + SteamVR) and GPU, per frame. Red when either is over the budget below");
+    line(ui, "Budget", format!("{:.1} ms · {:+.1} ms left", v.budget_ms, v.headroom_ms), v.headroom_ms < 0.0,
+        "Time per frame at your headset's refresh rate, and how much of it the GPU leaves (negative = over budget)");
     line(ui, "Reproj", format!("{:.0}% · {} dropped", v.reprojected_pct, v.dropped), v.reprojected_pct > 10.0,
         "Frames SteamVR had to reuse because the game wasn't ready in time (lower is better)");
 }

@@ -21,6 +21,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | **Gamepad** | `crates/rsoverlay-input/src/gamepad.rs` | Scripted fake pads: combining, 2 s rescans, hot-plug, one-shot chords. |
 | **Touch input** | `crates/rsoverlay-input/src/touch.rs` (`harness`, ignored) | Injects real touches into a small topmost test window of our own and checks the pointer messages it receives. Only injects after confirming that window is under the point, so nothing else on the desktop is touched. Needs an interactive desktop. |
 | **Window program names** | `crates/rsoverlay-capture/src/window.rs` (ignored) | Lists the real open windows with their program. |
+| **Desktop stream quality** | `crates/rsoverlay-render/src/mips.rs` | On the real GPU: 1-texel stripes (small text) must average to grey one mip down, i.e. a big desktop drawn into a smaller panel is filtered, not point-sampled. Skips without a GPU adapter. |
 | **Images** | `--settings-cards DIR`, `--vr-preview --scene <preset> --screenshot <png> --exit-after N` | Headless renders of every Settings card and of the VR scenes (see `docs/store/README.md`). Look at them to check layout. |
 | **Version stamping** | `RSO_VERSION=… RSO_NOTES="$(cat docs/releases/<tag>.md)" cargo run -- --settings-cards …` | Renders the Updates card as a release build would show it. |
 

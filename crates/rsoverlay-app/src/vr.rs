@@ -915,6 +915,8 @@ mod imp {
         dev_view.toasts_external = true;
         let sounds_dir = rsoverlay_core::config::sounds_dir();
         let mut prev_menu = false;
+        // Follow-dashboard setting last frame (None = not read yet).
+        let mut prev_follow: Option<bool> = None;
         let mut prev_grip = [false; 2];
         let mut frame = 0u64;
         info!("VR shell up — wrist on the off hand; double-press left A/X (or the wrist Menu button) shows the dashboard");
@@ -1040,6 +1042,8 @@ mod imp {
             }
             // XSO layout mode: unpinned windows only while the dashboard is up.
             let follow = dev_view.vr_windows_follow_dash;
+            dev_view.windows_up = sync_windows_up(prev_follow, follow, dev_view.windows_up);
+            prev_follow = Some(follow);
             if let Some(h) = hmd.as_ref().map(to_affine) {
                 let clip = dev_view.vr_clip_angle;
                 let grabbed = grab.as_ref().map(|g| g.panel);
@@ -1052,7 +1056,7 @@ mod imp {
                 kb.update_fade(up && (grabbed == Some(2) || kb_pose.is_some_and(|p| in_view(&h, &p, clip))), dt);
                 for (k, w) in wins.iter_mut().enumerate() {
                     let p = win_world(w, hmd.as_ref(), &controllers);
-                    w.panel.update_fade(window_shown(steamvr_menu, follow, w.pinned, dash.visible, grabbed == Some(k + WIN0), in_view(&h, &p, clip)), dt);
+                    w.panel.update_fade(window_shown(steamvr_menu, follow, dev_view.windows_up, w.pinned, dash.visible, grabbed == Some(k + WIN0), in_view(&h, &p, clip)), dt);
                 }
             }
 
@@ -1902,6 +1906,7 @@ mod imp {
                     let show_toolbar = toolbar_visible(dev_view.pointer.autohide_toolbars, time, w.toolbar_seen);
                     let events = lf.events.clone();
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
+                        mirror.refresh(&gpu);
                         act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, opacity, pinned, show_toolbar, smooth, accent);
                         if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
                             rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
@@ -2296,7 +2301,7 @@ mod imp {
                     let frames: Vec<rsoverlay_core::perf::Frame> = c
                         .frame_samples(90)
                         .into_iter()
-                        .map(|f| rsoverlay_core::perf::Frame { interval_ms: f.interval_ms, gpu_ms: f.gpu_ms, presents: f.presents, dropped: f.dropped })
+                        .map(|f| rsoverlay_core::perf::Frame { interval_ms: f.interval_ms, gpu_ms: f.gpu_ms, cpu_ms: f.cpu_ms, presents: f.presents, dropped: f.dropped })
                         .collect();
                     rsoverlay_core::perf::summarize(&frames, hz)
                 });

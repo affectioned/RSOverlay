@@ -149,10 +149,22 @@ pub(crate) fn grab_target(hit: Vec3A, offset: Vec3A, width: f32, tilt: Option<Qu
 }
 
 /// Is a window panel visible this frame? Hidden while SteamVR's menu is
-/// open; with windows-follow-dashboard, unpinned ones only show with the
-/// dashboard; and it must be in view (or held).
-pub(crate) fn window_shown(steamvr_menu: bool, follow_dash: bool, pinned: bool, dash_visible: bool, grabbed: bool, in_view: bool) -> bool {
-    !steamvr_menu && (!follow_dash || pinned || dash_visible) && (grabbed || in_view)
+/// open; otherwise shown when pinned, when the Windows button has them
+/// up, or (windows-follow-dashboard) with the dashboard; and it must be
+/// in view (or held).
+pub(crate) fn window_shown(steamvr_menu: bool, follow_dash: bool, windows_up: bool, pinned: bool, dash_visible: bool, grabbed: bool, in_view: bool) -> bool {
+    !steamvr_menu && (pinned || windows_up || (follow_dash && dash_visible)) && (grabbed || in_view)
+}
+
+/// The Windows button's state when the follow-dashboard setting is
+/// (re)read: following → windows start down (they come with the
+/// dashboard); not following → up (always there until hidden).
+pub(crate) fn sync_windows_up(prev_follow: Option<bool>, follow: bool, up: bool) -> bool {
+    if prev_follow == Some(follow) {
+        up
+    } else {
+        !follow
+    }
 }
 
 /// Should a window re-render this frame? Always when looked at (and not
@@ -328,13 +340,49 @@ mod sim {
     fn what_windows_show_over_a_session() {
         // (steamvr menu, dashboard open, pinned) → shown? (in view, not held)
         let follow = true;
-        assert!(!window_shown(false, follow, false, false, false, true), "unpinned hides with the dashboard closed");
-        assert!(window_shown(false, follow, false, true, false, true), "…and shows with it open");
-        assert!(window_shown(false, follow, true, false, false, true), "pinned stays");
-        assert!(!window_shown(true, follow, true, true, false, true), "SteamVR menu hides everything");
-        assert!(window_shown(false, false, false, false, false, true), "follow off: always");
-        assert!(!window_shown(false, false, true, true, false, false), "out of view");
-        assert!(window_shown(false, false, true, true, true, false), "held panels never fade");
+        let up = sync_windows_up(None, follow, true);
+        assert!(!up, "following: windows start down");
+        assert!(!window_shown(false, follow, up, false, false, false, true), "unpinned hides with the dashboard closed");
+        assert!(window_shown(false, follow, up, false, true, false, true), "…and shows with it open");
+        assert!(window_shown(false, follow, up, true, false, false, true), "pinned stays");
+        assert!(!window_shown(true, follow, up, true, true, false, true), "SteamVR menu hides everything");
+        let up = sync_windows_up(Some(true), false, up);
+        assert!(up, "follow off: windows up");
+        assert!(window_shown(false, false, up, false, false, false, true), "follow off: always");
+        assert!(!window_shown(false, false, up, true, true, false, false), "out of view");
+        assert!(window_shown(false, false, up, true, true, true, false), "held panels never fade");
+    }
+
+    /// Tester report: reading Discord, close the dashboard, and the
+    /// windows went with it. The Windows button brings back just the
+    /// windows, without the dashboard, and closing the dashboard no
+    /// longer takes them away.
+    #[test]
+    fn windows_button_shows_windows_without_the_dashboard() {
+        let follow = true;
+        let shown = |up: bool, dash: bool| window_shown(false, follow, up, false, dash, false, true);
+        let mut up = sync_windows_up(None, follow, false);
+        // Dashboard open → Discord is up; close the dashboard → gone.
+        assert!(shown(up, true));
+        assert!(!shown(up, false));
+        // Windows button, dashboard still closed → just the windows.
+        up = !up;
+        assert!(shown(up, false));
+        // Open and close the dashboard: the windows stay.
+        assert!(shown(up, true));
+        assert!(shown(up, false));
+        // Settings re-read with the same value doesn't reset the button.
+        up = sync_windows_up(Some(follow), follow, up);
+        assert!(shown(up, false));
+        // Windows button again → hidden ("minimised").
+        up = !up;
+        assert!(!shown(up, false));
+        // Follow off: the button hides / shows the always-up windows.
+        let mut up = sync_windows_up(Some(true), false, up);
+        assert!(window_shown(false, false, up, false, false, false, true));
+        up = !up;
+        assert!(!window_shown(false, false, up, false, false, false, true), "hidden by the button");
+        assert!(!window_shown(false, false, up, false, true, false, true), "even with the dashboard open");
     }
 
     #[test]

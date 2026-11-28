@@ -10,6 +10,8 @@ pub struct Frame {
     pub interval_ms: f32,
     /// GPU time (game + compositor), ms.
     pub gpu_ms: f32,
+    /// CPU time (game + compositor), ms.
+    pub cpu_ms: f32,
     /// Times the frame was shown; > 1 means SteamVR reprojected it.
     pub presents: u32,
     pub dropped: u32,
@@ -23,6 +25,10 @@ pub struct VrPerf {
     pub fps: f32,
     /// Average GPU frame time, ms.
     pub gpu_ms: f32,
+    /// Average CPU frame time, ms.
+    pub cpu_ms: f32,
+    /// Frame budget at this refresh rate, ms.
+    pub budget_ms: f32,
     /// Frame budget left at this refresh rate, ms (negative = over).
     pub headroom_ms: f32,
     /// Share of frames SteamVR had to show more than once, 0..=100.
@@ -44,12 +50,15 @@ pub fn summarize(frames: &[Frame], hz: f32) -> Option<VrPerf> {
     let n = valid.len() as f32;
     let interval = valid.iter().map(|f| f.interval_ms).sum::<f32>() / n;
     let gpu_ms = valid.iter().map(|f| f.gpu_ms.max(0.0)).sum::<f32>() / n;
+    let cpu_ms = valid.iter().map(|f| f.cpu_ms.max(0.0)).sum::<f32>() / n;
     let reprojected = valid.iter().filter(|f| f.presents > 1).count() as f32;
     Some(VrPerf {
         hz,
         // A game can't usefully exceed the display: clamp tiny overshoot.
         fps: (1000.0 / interval).min(hz),
         gpu_ms,
+        cpu_ms,
+        budget_ms: 1000.0 / hz,
         headroom_ms: 1000.0 / hz - gpu_ms,
         reprojected_pct: 100.0 * reprojected / n,
         dropped: valid.iter().map(|f| f.dropped).sum(),
@@ -61,7 +70,7 @@ mod tests {
     use super::*;
 
     fn f(interval_ms: f32, gpu_ms: f32, presents: u32) -> Frame {
-        Frame { interval_ms, gpu_ms, presents, dropped: 0 }
+        Frame { interval_ms, gpu_ms, cpu_ms: 3.0, presents, dropped: 0 }
     }
 
     #[test]
@@ -71,6 +80,8 @@ mod tests {
         assert!((p.fps - 90.0).abs() < 0.01);
         assert!((p.headroom_ms - (11.111 - 7.0)).abs() < 0.01);
         assert_eq!(p.reprojected_pct, 0.0);
+        assert!((p.cpu_ms - 3.0).abs() < 0.01);
+        assert!((p.budget_ms - 11.111).abs() < 0.01);
     }
 
     #[test]

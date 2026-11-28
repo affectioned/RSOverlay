@@ -286,6 +286,9 @@ pub struct DevView {
     /// Focus mode (wrist): notifications go to history without a toast
     /// or sound, and windows you aren't looking at dim. Session only.
     pub focus_mode: bool,
+    /// Windows up without the dashboard (wrist Windows button; the VR
+    /// shell resets it when the follow-dashboard setting changes).
+    pub windows_up: bool,
     /// Update notifier (Settings > Updates). The app enables it on
     /// GitHub builds; Steam builds and tests leave it off.
     pub updates: crate::updates::Updates,
@@ -380,7 +383,7 @@ pub struct DevView {
     /// Background SMTC poller (spawned on first use).
     media_worker: Option<media::MediaWorker>,
     /// Wrist toolbar: which of the 7 action buttons show (bit i).
-    pub wrist_buttons: u8,
+    pub wrist_buttons: u16,
     /// Compact wrist contents (see `wrist::compact`).
     pub wrist_compact: u32,
     /// VR keyboard look + typing sounds (Settings › Keyboard).
@@ -445,6 +448,7 @@ impl Default for DevView {
             vr_perf: None,
             updates: Default::default(),
             focus_mode: false,
+            windows_up: false,
             gamepad: Default::default(),
             wrist_bg: Default::default(),
             gamepad_held: 0,
@@ -730,6 +734,7 @@ impl DevView {
             slot_favorite: self.layouts.favorite == Some(self.wrist_slot),
             keyboard_open: self.show_keyboard,
             focus: self.focus_mode,
+            windows_up: self.windows_up,
             background: self.wrist_bg.image.as_ref().map(|i| (i, self.wrist_bg.dim)),
             accent: self.effective_accent(),
             buttons: self.wrist_buttons,
@@ -746,6 +751,9 @@ impl DevView {
         }
         if act.toggle_focus {
             self.focus_mode = !self.focus_mode;
+        }
+        if act.toggle_windows {
+            self.windows_up = !self.windows_up;
         }
         if act.toggle_edit {
             self.wrist_editing = !self.wrist_editing;
@@ -1735,7 +1743,7 @@ fn wrist_look_card(
 
 /// What the wrist shows. Modules and status chips up front; the button
 /// lists fold away (they're also editable in VR: More, then Edit).
-fn wrist_toolbar_card(ui: &mut egui::Ui, mask: &mut u8, compact: &mut u32, accent: egui::Color32) {
+fn wrist_toolbar_card(ui: &mut egui::Ui, mask: &mut u16, compact: &mut u32, accent: egui::Color32) {
     use crate::wrist::compact as c;
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -1758,7 +1766,7 @@ fn wrist_toolbar_card(ui: &mut egui::Ui, mask: &mut u8, compact: &mut u32, accen
             ui.label(theme::caption("Compact wrist"));
             ui.horizontal_wrapped(|ui| {
                 for (i, name) in c::ACTION_NAMES.iter().enumerate() {
-                    compact_toggle(ui, compact, 1 << i, name);
+                    compact_toggle(ui, compact, c::action_bit(i), name);
                 }
             });
             ui.add_space(4.0);

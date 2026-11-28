@@ -31,13 +31,25 @@ use chrono::Local;
 /// Bits of the compact-wrist mask (`VrCfg::wrist_compact`).
 pub mod compact {
     /// Action names, bit i = action i (shared with the full-toolbar mask).
-    pub const ACTION_NAMES: [&str; 8] = ["Add", "Recenter", "Keyboard", "Dashboard", "Layouts", "Settings", "Close all", "Focus"];
-    /// Number of action buttons (bits 0..ACTIONS of both masks).
+    pub const ACTION_NAMES: [&str; 9] = ["Add", "Recenter", "Keyboard", "Dashboard", "Layouts", "Settings", "Close all", "Focus", "Windows"];
+    /// Number of action buttons (bit i of the full-toolbar mask).
     pub const ACTIONS: usize = ACTION_NAMES.len();
-    /// Every action bit.
-    pub const ALL_ACTIONS: u8 = 0xFF;
-    /// Full toolbar default: Add … Settings; Close all and Focus opt-in.
-    pub const DEFAULT_ACTIONS: u8 = 0x3F;
+    /// Every action bit of the full-toolbar mask.
+    pub const ALL_ACTIONS: u16 = 0x1FF;
+    /// Full toolbar default: Add … Settings + Windows; Close all and
+    /// Focus opt-in.
+    pub const DEFAULT_ACTIONS: u16 = 0x13F;
+    /// Index of the Windows action.
+    pub const WINDOWS_ACTION: usize = 8;
+    /// Compact-mask bit of action `i`: bits 0..7 for the first eight
+    /// (older configs), later actions after the module bits.
+    pub const fn action_bit(i: usize) -> u32 {
+        if i < 8 {
+            1 << i
+        } else {
+            1 << (20 + i - 8)
+        }
+    }
     pub const CLOCK: u32 = 1 << 8;
     pub const MEDIA: u32 = 1 << 9;
     pub const BATTERY: u32 = 1 << 10;
@@ -52,6 +64,8 @@ pub mod compact {
     pub const VRAM: u32 = 1 << 17;
     /// SteamVR frame rate vs refresh + reprojection.
     pub const VR_FPS: u32 = 1 << 18;
+    /// CPU + GPU frame time vs the frame budget.
+    pub const FRAME: u32 = 1 << 19;
     /// Non-action sections, in settings order.
     pub const SECTIONS: &[(u32, &str)] = &[
         (CLOCK, "Clock"),
@@ -62,9 +76,9 @@ pub mod compact {
         (VIEWS, "Views"),
     ];
     /// Status-chip modules, in row order.
-    pub const CHIPS: &[(u32, &str)] = &[(VR_FPS, "VR FPS"), (PERF, "CPU / GPU"), (VRAM, "VRAM"), (RAM, "RAM"), (ALERTS, "Alerts")];
+    pub const CHIPS: &[(u32, &str)] = &[(VR_FPS, "VR FPS"), (FRAME, "Frame time"), (PERF, "CPU / GPU"), (VRAM, "VRAM"), (RAM, "RAM"), (ALERTS, "Alerts")];
     /// Compact action order: reach order, everyday four first.
-    pub const ORDER: [usize; 8] = [3, 2, 0, 1, 7, 4, 5, 6];
+    pub const ORDER: [usize; ACTIONS] = [3, 8, 2, 0, 1, 7, 4, 5, 6];
 }
 
 /// Everything the wrist shows, gathered by DevView.
@@ -81,11 +95,13 @@ pub struct WristData<'a> {
     pub keyboard_open: bool,
     /// Focus mode is on (lights the Focus button).
     pub focus: bool,
+    /// Windows are up without the dashboard (lights the Windows button).
+    pub windows_up: bool,
     /// Background image behind the clock + media, and how much to darken it.
     pub background: Option<(&'a std::sync::Arc<egui::ColorImage>, f32)>,
     pub accent: egui::Color32,
     /// Which action buttons to show (bit i = actions[i]).
-    pub buttons: u8,
+    pub buttons: u16,
     /// Compact contents (see [`compact`]).
     pub compact: u32,
     /// Full set (layouts, views, devices) vs the compact default.
@@ -110,6 +126,8 @@ pub struct WristAction {
     pub recenter: bool,
     pub close_all: bool,
     pub toggle_focus: bool,
+    /// Show / hide the desktop windows without the dashboard.
+    pub toggle_windows: bool,
     pub popout_stats: bool,
     /// Move the selected layout slot (−1 / +1).
     pub slot_delta: i32,
@@ -149,6 +167,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             (icons::SETTINGS, "Settings", "Settings", false),
             (icons::TRASH, "Close all", "Close all floating panels", false),
             (if d.focus { icons::STAR } else { icons::STAR_OUTLINE }, "Focus", "Focus mode: hold back notifications and dim the windows you aren't looking at", d.focus),
+            (icons::MONITOR, "Windows", "Show or hide your windows without the dashboard", d.windows_up),
         ];
         // Compact: the user's compact picks, in reach order. Expanded:
         // every enabled action in toolbar order. Editing: all of them.
@@ -157,7 +176,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         } else if d.expanded {
             (0..compact::ACTIONS).filter(|&i| d.buttons & (1 << i) != 0).map(|i| (i, actions[i].clone())).collect()
         } else {
-            compact::ORDER.iter().filter(|&&i| d.compact & (1 << i) != 0).map(|&i| (i, actions[i].clone())).collect()
+            compact::ORDER.iter().filter(|&&i| d.compact & compact::action_bit(i) != 0).map(|&i| (i, actions[i].clone())).collect()
         };
         // Section visibility: expanded / editing show everything; compact
         // follows the mask.
@@ -191,7 +210,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             let c = egui::Rect::from_min_size(egui::pos2(r1.left() + slot as f32 * cell, r1.top()), egui::vec2(cell, r1.height()));
             if d.editing {
                 paint_labelled(ui, c.shrink(6.0), src, 24.0, label, theme::FG_PRIMARY, theme::FG_PRIMARY);
-                edits.push((c.shrink(6.0), 1 << i));
+                edits.push((c.shrink(6.0), compact::action_bit(i)));
                 continue;
             }
             if labelled_button(ui, c.shrink(6.0), src, 24.0, on, label, tip, accent) {
@@ -203,7 +222,8 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
                     4 => act.open_page = Some(Page::Layouts),
                     5 => act.open_page = Some(Page::Settings),
                     6 => act.close_all = true,
-                    _ => act.toggle_focus = true,
+                    7 => act.toggle_focus = true,
+                    _ => act.toggle_windows = true,
                 }
             }
         }
@@ -471,6 +491,13 @@ fn chip_content(bit: u32, d: &WristData, accent: egui::Color32) -> (u32, String,
             }
             None => (bit, "VR fps --".into(), icons::HEADSET, theme::FG_MUTED),
         },
+        compact::FRAME => match d.vr_perf {
+            Some(v) => {
+                let over = v.cpu_ms.max(v.gpu_ms) > v.budget_ms;
+                (bit, format!("CPU {:.1} · GPU {:.1} ms", v.cpu_ms, v.gpu_ms), icons::PULSE, if over { theme::DANGER } else { accent })
+            }
+            None => (bit, "Frame time --".into(), icons::PULSE, theme::FG_MUTED),
+        },
         compact::RAM => {
             let gb = |b: u64| b as f64 / (1u64 << 30) as f64;
             let text = match d.system.filter(|s| s.ram_total > 0) {
@@ -577,6 +604,7 @@ mod tests {
             accent: egui::Color32::WHITE,
             buttons: compact::ALL_ACTIONS,
             focus: false,
+            windows_up: false,
             background: None,
             compact: rsoverlay_core::config::DEFAULT_WRIST_COMPACT,
             expanded: false,
@@ -605,11 +633,35 @@ mod tests {
     }
 
     #[test]
+    fn frame_chip_shows_cpu_and_gpu_and_goes_red_over_budget() {
+        let ok = rsoverlay_core::perf::VrPerf { hz: 90.0, fps: 90.0, gpu_ms: 8.4, cpu_ms: 6.1, budget_ms: 11.1, headroom_ms: 2.7, reprojected_pct: 0.0, dropped: 0 };
+        let slow_cpu = rsoverlay_core::perf::VrPerf { cpu_ms: 12.5, ..ok };
+        let mut d = data(None, 0);
+        d.vr_perf = Some(&ok);
+        let (_, text, _, tint) = chip_content(compact::FRAME, &d, egui::Color32::WHITE);
+        assert_eq!(text, "CPU 6.1 · GPU 8.4 ms");
+        assert_eq!(tint, egui::Color32::WHITE);
+        d.vr_perf = Some(&slow_cpu);
+        assert_eq!(chip_content(compact::FRAME, &d, egui::Color32::WHITE).3, theme::DANGER, "CPU over budget");
+        assert_eq!(chip_content(compact::FRAME, &data(None, 0), egui::Color32::WHITE).1, "Frame time --");
+    }
+
+    #[test]
+    fn action_bits_are_distinct() {
+        let bits: Vec<u32> = (0..compact::ACTIONS).map(compact::action_bit).collect();
+        for (i, b) in bits.iter().enumerate() {
+            assert_eq!(b.count_ones(), 1);
+            assert!(bits[i + 1..].iter().all(|o| o != b));
+        }
+        assert!(compact::ORDER.iter().copied().collect::<std::collections::BTreeSet<_>>().len() == compact::ACTIONS);
+    }
+
+    #[test]
     fn module_bits_are_distinct_and_clear_of_actions() {
         let all: Vec<u32> = compact::SECTIONS.iter().chain(compact::CHIPS).map(|&(b, _)| b).collect();
         for (i, a) in all.iter().enumerate() {
             assert_eq!(a.count_ones(), 1);
-            assert!(*a > u32::from(compact::ALL_ACTIONS), "module bits must not overlap the action bits");
+            assert!((0..compact::ACTIONS).all(|i| compact::action_bit(i) != *a), "module bits must not overlap the action bits");
             assert!(all[i + 1..].iter().all(|b| b != a));
         }
     }

@@ -232,6 +232,9 @@ pub struct FrameSample {
     pub interval_ms: f32,
     /// GPU time for the frame (game + compositor), ms.
     pub gpu_ms: f32,
+    /// CPU time for the frame: the game's from new poses to submit, plus
+    /// the compositor's (what SteamVR's own timing graph shows), ms.
+    pub cpu_ms: f32,
     /// Times the compositor showed this frame (> 1 = reprojected).
     pub presents: u32,
     pub dropped: u32,
@@ -257,6 +260,7 @@ impl<'a> Compositor<'a> {
             .map(|t| FrameSample {
                 interval_ms: t.m_flClientFrameIntervalMs,
                 gpu_ms: t.m_flTotalRenderGpuMs,
+                cpu_ms: (t.m_flNewFrameReadyMs - t.m_flNewPosesReadyMs).max(0.0) + t.m_flCompositorRenderCpuMs.max(0.0),
                 presents: t.m_nNumFramePresents,
                 dropped: t.m_nNumDroppedFrames,
             })

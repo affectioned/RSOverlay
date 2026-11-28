@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use rsoverlay_capture::window::{self, ContentSize};
 use rsoverlay_capture::{enumerate_monitors, enumerate_windows, SharedCapture, WindowCapture};
 use rsoverlay_input::MonitorGeom;
+use rsoverlay_render::mips::MipMirror;
 use rsoverlay_render::shared::{wgpu_adapter_luid, ReadLease, SharedMirror};
 use rsoverlay_render::GpuCtx;
 use rsoverlay_ui::views::{CaptureSource, MirrorHandle};
@@ -23,6 +24,8 @@ use tracing::{info, warn};
 pub struct GpuMirror {
     pub source: CaptureSource,
     mirror: SharedMirror,
+    /// Mipmapped copy egui draws from (see `rsoverlay_render::mips`).
+    mips: MipMirror,
     tex_id: egui::TextureId,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -75,14 +78,16 @@ impl GpuMirror {
                 (mirror, thread, Some(content), None)
             }
         };
-        let tex_id = panel.renderer.register_native_texture(&gpu.device, &mirror.view, wgpu::FilterMode::Linear);
+        let mips = MipMirror::new(gpu, mirror.width, mirror.height);
+        mips.refresh(gpu, &mirror.texture);
+        let tex_id = panel.renderer.register_native_texture_with_sampler_options(&gpu.device, &mips.view, MipMirror::sampler());
         info!(
             "mirror source: {} ({}x{} shared texture, GPU-to-GPU)",
             source.label(),
             mirror.width,
             mirror.height
         );
-        Ok(Self { source, mirror, tex_id, stop, thread: Some(thread), content, monitor_geom })
+        Ok(Self { source, mirror, mips, tex_id, stop, thread: Some(thread), content, monitor_geom })
     }
 
     pub fn handle(&self) -> MirrorHandle {
@@ -131,6 +136,12 @@ impl GpuMirror {
             CaptureSource::Window { hwnd, .. } => Some(*hwnd),
             CaptureSource::Monitor(_) => None,
         }
+    }
+
+    /// Pull the latest captured frame into the mipmapped copy. Call
+    /// before each render that draws [`Self::handle`].
+    pub fn refresh(&self, gpu: &GpuCtx) {
+        self.mips.refresh(gpu, &self.mirror.texture);
     }
 
     pub fn acquire_read(&self, timeout_ms: u32) -> Option<ReadLease<'_>> {
