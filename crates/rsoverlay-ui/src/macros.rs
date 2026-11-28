@@ -117,6 +117,7 @@ impl MacroDeck {
                     };
                     if resp.clicked() {
                         if let (Ok(s), Some(inj)) = (parsed, injector) {
+                            tracing::info!("macro fired: {} ({})", e.label, e.keys);
                             fired = Some((e.label.clone(), inj.send_shortcut(&s)));
                         }
                     }

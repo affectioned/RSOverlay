@@ -32,9 +32,19 @@ impl MediaWorker {
         let _ = std::thread::Builder::new().name("rso-media".into()).spawn(move || {
             let mut art_for = String::new();
             let mut art = None;
+            // Logged so a pause we didn't ask for can be lined up with
+            // what the overlay was doing (tester: music paused / resumed
+            // as the overlay opened / closed).
+            let mut was_playing: Option<bool> = None;
             // Exits once the worker (the only strong owner) is dropped.
             while let Some(s) = weak.upgrade() {
                 let info = poll();
+                let playing = info.as_ref().map(|m| m.playing);
+                if playing != was_playing && was_playing.is_some() {
+                    let src = info.as_ref().map(|m| m.source.as_str()).unwrap_or("-");
+                    tracing::info!("media: {} -> {} ({src})", state_name(was_playing), state_name(playing));
+                }
+                was_playing = playing;
                 let want = s.want_art.load(std::sync::atomic::Ordering::Relaxed);
                 let title = info.as_ref().map(|m| m.title.clone()).unwrap_or_default();
                 if !want {
@@ -142,6 +152,14 @@ pub enum MediaCommand {
     Previous,
 }
 
+fn state_name(p: Option<bool>) -> &'static str {
+    match p {
+        Some(true) => "playing",
+        Some(false) => "paused",
+        None => "no session",
+    }
+}
+
 #[cfg(windows)]
 pub fn poll() -> Option<MediaInfo> {
     use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager as Mgr;
@@ -170,6 +188,7 @@ pub fn poll() -> Option<MediaInfo> {
 /// the command silently fails rather than guessing.
 #[cfg(windows)]
 pub fn send(cmd: MediaCommand) -> bool {
+    tracing::info!("media: sending {cmd:?}");
     use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager as Mgr;
     use windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status;
 
