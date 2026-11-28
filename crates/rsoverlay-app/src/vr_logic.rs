@@ -149,22 +149,17 @@ pub(crate) fn grab_target(hit: Vec3A, offset: Vec3A, width: f32, tilt: Option<Qu
 }
 
 /// Is a window panel visible this frame? Hidden while SteamVR's menu is
-/// open; otherwise shown when pinned, when the Windows button has them
-/// up, or (windows-follow-dashboard) with the dashboard; and it must be
-/// in view (or held).
-pub(crate) fn window_shown(steamvr_menu: bool, follow_dash: bool, windows_up: bool, pinned: bool, dash_visible: bool, grabbed: bool, in_view: bool) -> bool {
-    !steamvr_menu && (pinned || windows_up || (follow_dash && dash_visible)) && (grabbed || in_view)
+/// open; otherwise shown while the Windows button has them up (or it's
+/// pinned), and it must be in view (or held). The dashboard plays no
+/// part: opening or closing it never shows or hides windows.
+pub(crate) fn window_shown(steamvr_menu: bool, windows_up: bool, pinned: bool, grabbed: bool, in_view: bool) -> bool {
+    !steamvr_menu && (pinned || windows_up) && (grabbed || in_view)
 }
 
-/// The Windows button's state when the follow-dashboard setting is
-/// (re)read: following → windows start down (they come with the
-/// dashboard); not following → up (always there until hidden).
-pub(crate) fn sync_windows_up(prev_follow: Option<bool>, follow: bool, up: bool) -> bool {
-    if prev_follow == Some(follow) {
-        up
-    } else {
-        !follow
-    }
+/// Windows button state after this frame: a newly opened window brings
+/// the windows back up (you just asked for one, so it must be seen).
+pub(crate) fn windows_up_after(up: bool, prev_count: usize, count: usize) -> bool {
+    up || count > prev_count
 }
 
 /// Should a window re-render this frame? Always when looked at (and not
@@ -180,27 +175,30 @@ pub(crate) fn toolbar_visible(autohide: bool, now: f64, last_seen: f64) -> bool 
     !autohide || now - last_seen < TOOLBAR_LINGER_S
 }
 
-/// Auto resolution: texels per headset pixel. A little over 1 so
-/// SteamVR's own resampling (lens warp, reprojection) never has to
-/// shrink our texture much; all the real shrinking (a 2560-px desktop
-/// into a few hundred headset pixels) happens in our mipmapped draw.
-pub(crate) const AUTO_SS: f32 = 1.5;
-/// Window panel texture multiplier range (on the 1920-texel base).
-pub(crate) const RENDER_K: (f32, f32) = (0.5, 2.0);
+/// Window panel texture multiplier range (on the 1920-texel base):
+/// up to 4800 texels, enough for a 4K monitor at 1:1.
+pub(crate) const RENDER_K: (f32, f32) = (1.0, 2.5);
 
 /// Angle a panel `width_m` wide spans at `dist_m`, radians.
+#[cfg(test)]
 pub(crate) fn angular_width(width_m: f32, dist_m: f32) -> f32 {
     2.0 * (0.5 * width_m / dist_m.max(0.05)).atan()
 }
 
-/// Texture multiplier for a window panel: as many texels across as the
-/// headset shows pixels across it (x [`AUTO_SS`], x the user's
-/// Resolution setting), quantised to quarter octaves so small moves
-/// don't rebuild the texture.
-pub(crate) fn auto_render_k(width_m: f32, dist_m: f32, px_per_rad: f32, base_w: u32, user_k: f32) -> f32 {
-    let want = angular_width(width_m, dist_m) * px_per_rad * AUTO_SS * user_k.max(0.1);
-    let k = (want / base_w.max(1) as f32).clamp(RENDER_K.0, RENDER_K.1);
-    (4.0 * k.log2()).round().exp2().powf(0.25).clamp(RENDER_K.0, RENDER_K.1)
+/// Native resolution: the texture multiplier that draws the capture
+/// one source pixel per texel, so it is copied, not resampled, and
+/// SteamVR's sampling is the only filtering (what XSOverlay's monitor
+/// capture looks like). `content_texels` is how wide the capture was
+/// drawn last frame at `current_k`; the capture's size in points
+/// doesn't depend on k, so this lands exactly in one step. Smaller
+/// sources stay at the base (the toolbar needs its texels).
+pub(crate) fn native_render_k(current_k: f32, src_px: u32, content_texels: f32) -> f32 {
+    if content_texels < 1.0 || src_px == 0 {
+        return current_k;
+    }
+    // Unrounded: base x k must come out a whole texel count exactly
+    // (2560 / 1920, not 1.333 → 2559). ResSettle ignores float noise.
+    (current_k * src_px as f32 / content_texels).clamp(RENDER_K.0, RENDER_K.1)
 }
 
 /// Debounce for texture rebuilds: a new multiplier is applied once it
@@ -409,54 +407,42 @@ mod sim {
         assert!(out[6].0 == 0.0 && out[6].1 < 0.0);
     }
 
-    /// XSO layout mode + the SteamVR menu, over a session.
+    /// The SteamVR menu, pins and the Windows button, over a session.
     #[test]
     fn what_windows_show_over_a_session() {
-        // (steamvr menu, dashboard open, pinned) → shown? (in view, not held)
-        let follow = true;
-        let up = sync_windows_up(None, follow, true);
-        assert!(!up, "following: windows start down");
-        assert!(!window_shown(false, follow, up, false, false, false, true), "unpinned hides with the dashboard closed");
-        assert!(window_shown(false, follow, up, false, true, false, true), "…and shows with it open");
-        assert!(window_shown(false, follow, up, true, false, false, true), "pinned stays");
-        assert!(!window_shown(true, follow, up, true, true, false, true), "SteamVR menu hides everything");
-        let up = sync_windows_up(Some(true), false, up);
-        assert!(up, "follow off: windows up");
-        assert!(window_shown(false, false, up, false, false, false, true), "follow off: always");
-        assert!(!window_shown(false, false, up, true, true, false, false), "out of view");
-        assert!(window_shown(false, false, up, true, true, true, false), "held panels never fade");
+        // (steamvr menu, windows up, pinned, held, in view)
+        assert!(window_shown(false, true, false, false, true), "up and in view");
+        assert!(!window_shown(false, false, false, false, true), "Windows button hid them");
+        assert!(window_shown(false, false, true, false, true), "pinned stays");
+        assert!(!window_shown(true, true, true, false, true), "SteamVR menu hides everything");
+        assert!(!window_shown(false, true, false, false, false), "out of view");
+        assert!(window_shown(false, true, false, true, false), "held panels never fade");
     }
 
-    /// Tester report: reading Discord, close the dashboard, and the
-    /// windows went with it. The Windows button brings back just the
-    /// windows, without the dashboard, and closing the dashboard no
-    /// longer takes them away.
+    /// Tester reports: closing the dashboard took the windows with it.
+    /// Dashboard and Windows are independent: only the Windows button
+    /// (or opening a new window) changes whether windows show.
     #[test]
-    fn windows_button_shows_windows_without_the_dashboard() {
-        let follow = true;
-        let shown = |up: bool, dash: bool| window_shown(false, follow, up, false, dash, false, true);
-        let mut up = sync_windows_up(None, follow, false);
-        // Dashboard open → Discord is up; close the dashboard → gone.
-        assert!(shown(up, true));
-        assert!(!shown(up, false));
-        // Windows button, dashboard still closed → just the windows.
+    fn dashboard_and_windows_button_are_independent() {
+        // window_shown has no dashboard input at all: a session of
+        // dashboard open / close can't change the answer.
+        let mut up = true;
+        let shown = |up: bool| window_shown(false, up, false, false, true);
+        assert!(shown(up), "reading Discord");
+        // Dashboard opened and closed: nothing to do with windows.
+        assert!(shown(up));
+        // Windows button → hidden ("minimised"); dashboard still free.
         up = !up;
-        assert!(shown(up, false));
-        // Open and close the dashboard: the windows stay.
-        assert!(shown(up, true));
-        assert!(shown(up, false));
-        // Settings re-read with the same value doesn't reset the button.
-        up = sync_windows_up(Some(follow), follow, up);
-        assert!(shown(up, false));
-        // Windows button again → hidden ("minimised").
+        assert!(!shown(up));
+        // Windows button again → back, without the dashboard.
         up = !up;
-        assert!(!shown(up, false));
-        // Follow off: the button hides / shows the always-up windows.
-        let mut up = sync_windows_up(Some(true), false, up);
-        assert!(window_shown(false, false, up, false, false, false, true));
-        up = !up;
-        assert!(!window_shown(false, false, up, false, false, false, true), "hidden by the button");
-        assert!(!window_shown(false, false, up, false, true, false, true), "even with the dashboard open");
+        assert!(shown(up));
+        // Hidden, then a new window is opened: everything comes back.
+        up = false;
+        up = windows_up_after(up, 1, 2);
+        assert!(shown(up));
+        // Closing one doesn't bring them back.
+        assert!(!windows_up_after(false, 2, 1));
     }
 
     #[test]
@@ -497,43 +483,46 @@ mod sim {
     /// Steam Frame-ish: ~16 px/deg at the centre (917 px/rad).
     const PPR: f32 = 917.0;
 
+    /// The tester's 2560 x 1440 monitor in the 1920-texel panel was
+    /// drawn ~1920 texels wide: resampled twice (here, then SteamVR),
+    /// blurrier than XSOverlay. Native = exactly 2560 texels.
     #[test]
-    fn auto_resolution_follows_how_big_the_panel_looks() {
-        // Tester's monitor: 1.43 m wide, ~1.6 m away → ~48° → ~770
-        // headset px; x1.5 = ~1150 texels → 0.59 of the 1920 base.
-        let far = auto_render_k(1.43, 1.6, PPR, 1920, 1.0);
-        assert!((0.55..0.65).contains(&far), "{far}");
-        // Pulled in to 0.6 m: fills the view → more texels.
-        let near = auto_render_k(1.43, 0.6, PPR, 1920, 1.0);
-        assert!(near > 1.0 && near <= RENDER_K.1, "{near}");
-        // The Resolution setting biases it up.
-        assert!(auto_render_k(1.43, 1.6, PPR, 1920, 2.0) > far);
-        // Clamped both ways.
-        assert_eq!(auto_render_k(0.2, 5.0, PPR, 1920, 1.0), RENDER_K.0);
-        assert_eq!(auto_render_k(4.0, 0.3, PPR, 1920, 2.0), RENDER_K.1);
-        // Quantised: a few cm of movement gives the same value.
-        assert_eq!(auto_render_k(1.43, 1.60, PPR, 1920, 1.0), auto_render_k(1.43, 1.63, PPR, 1920, 1.0));
+    fn monitor_capture_is_drawn_one_pixel_per_texel() {
+        let k = native_render_k(1.0, 2560, 1920.0);
+        assert!((k - 1.333).abs() < 1e-3);
+        // Next frame the capture is 2560 texels wide: stays put.
+        assert!((native_render_k(k, 2560, 1920.0 * k) - k).abs() < 1e-6);
+        assert_eq!((1920.0 * k).round(), 2560.0, "a whole 2560 texels");
+        // 4K fits; 8K is capped.
+        assert!((native_render_k(1.0, 3840, 1920.0) - 2.0).abs() < 1e-3);
+        assert_eq!(native_render_k(1.0, 7680, 1920.0), RENDER_K.1);
+        // Tall window, height-limited: drawn 1000 texels wide for a
+        // 1200-px window → 1.2x.
+        assert!((native_render_k(1.0, 1200, 1000.0) - 1.2).abs() < 1e-3);
+        // Small windows keep the base; nothing drawn yet → unchanged.
+        assert_eq!(native_render_k(1.0, 800, 1500.0), 1.0);
+        assert_eq!(native_render_k(1.3, 2560, 0.0), 1.3);
     }
 
     #[test]
     fn resolution_changes_wait_until_settled_and_released() {
         let mut s = ResSettle::default();
         assert_eq!(s.step(1.0, 1.0, 0.0, false), None, "nothing to do");
-        assert_eq!(s.step(1.0, 0.5, 0.0, false), None, "just changed");
-        assert_eq!(s.step(1.0, 0.5, 0.5, false), None, "not settled");
-        assert_eq!(s.step(1.0, 0.5, 1.0, true), None, "held: wait");
-        assert_eq!(s.step(1.0, 0.5, 1.1, false), Some(0.5));
+        assert_eq!(s.step(1.0, 1.41, 0.0, false), None, "just changed");
+        assert_eq!(s.step(1.0, 1.41, 0.5, false), None, "not settled");
+        assert_eq!(s.step(1.0, 1.41, 1.0, true), None, "held: wait");
+        assert_eq!(s.step(1.0, 1.41, 1.1, false), Some(1.41));
         // Wobbling between two values restarts the clock.
         let mut s = ResSettle::default();
-        s.step(1.0, 0.7, 0.0, false);
-        s.step(1.0, 0.8, 0.5, false);
-        assert_eq!(s.step(1.0, 0.8, 1.0, false), None);
-        assert_eq!(s.step(1.0, 0.8, 1.3, false), Some(0.8));
+        s.step(1.0, 1.19, 0.0, false);
+        s.step(1.0, 1.41, 0.5, false);
+        assert_eq!(s.step(1.0, 1.41, 1.0, false), None);
+        assert_eq!(s.step(1.0, 1.41, 1.3, false), Some(1.41));
         // Back to the current value cancels.
         let mut s = ResSettle::default();
-        s.step(1.0, 0.5, 0.0, false);
+        s.step(1.0, 1.41, 0.0, false);
         assert_eq!(s.step(1.0, 1.0, 0.5, false), None);
-        assert_eq!(s.step(1.0, 0.5, 1.0, false), None, "clock restarted");
+        assert_eq!(s.step(1.0, 1.41, 1.0, false), None, "clock restarted");
     }
 
     #[test]

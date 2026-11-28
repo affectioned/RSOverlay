@@ -275,3 +275,130 @@ pub fn list_sources() -> Vec<CaptureSource> {
     );
     out
 }
+
+/// On the real GPU, through the real window-panel draw: at native
+/// resolution a capture of 1-pixel black / white columns (the finest
+/// detail text has) must come out as exactly that, not grey. This is
+/// what makes monitor text as sharp as XSOverlay's.
+#[cfg(test)]
+mod native_gpu_tests {
+    use rsoverlay_render::mips::MipMirror;
+    use rsoverlay_render::GpuCtx;
+    use rsoverlay_ui::views::MirrorHandle;
+    use rsoverlay_ui::window_panel::{self, Attach};
+    use rsoverlay_ui::EguiPanel;
+
+    fn readback(gpu: &GpuCtx, tex: &wgpu::Texture, w: u32, h: u32) -> Vec<u8> {
+        let row = (4 * w).div_ceil(256) * 256;
+        let buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: (row * h) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut enc = gpu.device.create_command_encoder(&Default::default());
+        enc.copy_texture_to_buffer(
+            tex.as_image_copy(),
+            wgpu::ImageCopyBuffer { buffer: &buf, layout: wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        gpu.queue.submit(Some(enc.finish()));
+        buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        gpu.device.poll(wgpu::Maintain::Wait);
+        let data = buf.slice(..).get_mapped_range();
+        (0..h as usize).flat_map(|y| data[y * row as usize..][..4 * w as usize].to_vec()).collect()
+    }
+
+    /// Draw a 2560 x 1440 capture of 1-px columns into a window panel at
+    /// render multiplier `k`; returns (fraction of exact texels, panel).
+    fn draw(gpu: &GpuCtx, k: f32) -> f32 {
+        let (sw, sh) = (2560u32, 1440u32);
+        let src = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: sw, height: sh, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let px: Vec<u8> = (0..sw * sh).flat_map(|i| if (i % sw) % 2 == 0 { [0, 0, 0, 255] } else { [255; 4] }).collect();
+        gpu.queue.write_texture(
+            src.as_image_copy(),
+            &px,
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(4 * sw), rows_per_image: Some(sh) },
+            wgpu::Extent3d { width: sw, height: sh, depth_or_array_layers: 1 },
+        );
+        // The window panel as the VR shell builds it: 1920 x 1200 base
+        // at 1.5 px/pt, times k.
+        let (tw, th) = ((1920.0 * k).round() as u32, (1200.0 * k).round() as u32);
+        let ppp = 1.5 * k;
+        let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: tw, height: th, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Bgra8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = target.create_view(&Default::default());
+        let mut panel = EguiPanel::new(&gpu.device, wgpu::TextureFormat::Bgra8Unorm, tw, th);
+        panel.set_pixels_per_point(ppp);
+        let mips = MipMirror::new(gpu, sw, sh);
+        mips.refresh(gpu, &src);
+        let id = panel.renderer.register_native_texture_with_sampler_options(&gpu.device, &mips.view, MipMirror::sampler());
+        let mut rect = None;
+        // Two frames, like the live panel: settings apply from the next.
+        for _ in 0..2 {
+            let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(tw as f32 / ppp, th as f32 / ppp))), ..Default::default() };
+            panel.render(&gpu.device, &gpu.queue, &view, raw, |ctx| {
+                let a = window_panel::show(ctx, "test", Some(MirrorHandle::full(id, sw, sh)), Attach::World, false, None, false, 1.0, None, false, false, egui::Color32::WHITE);
+                rect = a.image_rect;
+            });
+        }
+        assert_eq!(panel.ctx.pixels_per_point(), ppp);
+        let out = readback(gpu, &target, tw, th);
+        let r = rect.expect("capture drawn");
+        if std::env::var("RSO_DEBUG_NATIVE").is_ok() {
+            eprintln!("k {k} tex {tw}x{th} rect {r:?} px {:?}", (r.min.x * ppp, r.min.y * ppp, r.max.x * ppp, r.max.y * ppp));
+        }
+        // Interior of the capture (clear of the rounded corners).
+        let (x0, y0) = ((r.min.x * ppp) as usize + 16, (r.min.y * ppp) as usize + 16);
+        let (x1, y1) = ((r.max.x * ppp) as usize - 16, (r.max.y * ppp) as usize - 16);
+        let (mut exact, mut n) = (0usize, 0usize);
+        for y in (y0..y1).step_by(37) {
+            for x in x0..x1 {
+                let p = out[(y * tw as usize + x) * 4];
+                // Texel x shows source column (x - left edge).
+                let want = if (x - (r.min.x * ppp).round() as usize).is_multiple_of(2) { 0 } else { 255 };
+                // Float rounding in the sampler can leak ~0.4% of a neighbour
+                // (13/255 in sRGB on black): invisible. A blur is ~50%.
+                let ok = p.abs_diff(want) <= 20;
+                if !ok && n % 97 == 0 && std::env::var("RSO_DEBUG_NATIVE").is_ok() {
+                    eprintln!("miss at ({x},{y}): {p} want {want}");
+                }
+                exact += usize::from(ok);
+                n += 1;
+            }
+        }
+        exact as f32 / n as f32
+    }
+
+    #[test]
+    fn native_resolution_copies_the_capture_exactly() {
+        let Ok(gpu) = pollster::block_on(GpuCtx::new(rsoverlay_core::RuntimeMode::Preview)) else {
+            eprintln!("SKIPPED: no GPU adapter");
+            return;
+        };
+        let k = crate::vr_logic::native_render_k(1.0, 2560, 1920.0);
+        let native = draw(&gpu, k);
+        assert!(native > 0.99, "native: only {:.1}% of texels exact", native * 100.0);
+        // The old fixed 1920-texel panel: the columns blur together.
+        let old = draw(&gpu, 1.0);
+        assert!(old < 0.5, "base size should be resampled ({:.1}% exact)", old * 100.0);
+        println!("exact texels: native {:.1}%, old 1920 {:.1}%", native * 100.0, old * 100.0);
+    }
+}

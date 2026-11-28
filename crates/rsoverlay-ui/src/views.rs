@@ -355,7 +355,9 @@ pub struct DevView {
     pub date_format: String,
     /// Fade all panels while SteamVR's own dashboard is open.
     pub vr_hide_with_steamvr: bool,
-    /// XSO layout mode: unpinned windows only show with the dashboard.
+    /// Old XSO layout-mode setting, kept so saved configs round-trip.
+    /// No longer used: the dashboard never shows or hides windows (the
+    /// wrist Windows button does).
     pub vr_windows_follow_dash: bool,
     /// Grabbed panels tilt/roll with the controller.
     pub vr_grab_tilt: bool,
@@ -863,7 +865,7 @@ impl DevView {
                         Some("vr")
                     }
                     2 => {
-                        vr_panels_card(ui, &mut self.vr_windows_follow_dash, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, &mut self.vr_background_fps, &mut self.pointer, accent);
+                        vr_panels_card(ui, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, &mut self.vr_background_fps, &mut self.pointer, accent);
                         Some("vr-panels")
                     }
                     3 => {
@@ -1333,7 +1335,7 @@ impl DevView {
                     l.add_space(theme::GUTTER);
                     vr_card(l, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, &mut self.vr_hide_wrist, accent);
                     l.add_space(theme::GUTTER);
-                    vr_panels_card(l, &mut self.vr_windows_follow_dash, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, &mut self.vr_background_fps, &mut self.pointer, accent);
+                    vr_panels_card(l, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, &mut self.vr_background_fps, &mut self.pointer, accent);
                     l.add_space(theme::GUTTER);
                     pointer_card(l, &mut self.cursor_smoothing, &mut self.scroll_speed, &mut self.pointer, accent);
                     l.add_space(theme::GUTTER);
@@ -1612,7 +1614,6 @@ fn gamepad_card(
 #[allow(clippy::too_many_arguments)]
 fn vr_panels_card(
     ui: &mut egui::Ui,
-    follow_dash: &mut bool,
     hide_with_steamvr: &mut bool,
     grab_tilt: &mut bool,
     axis_lock: &mut bool,
@@ -1625,8 +1626,6 @@ fn vr_panels_card(
         ui.set_width(ui.available_width());
         card_header(ui, icons::LAYERS, "VR panels", accent);
         ui.add_space(6.0);
-        ui.checkbox(follow_dash, "Windows hide with the dashboard")
-            .on_hover_text("Like XSOverlay: closing the dashboard hides every window that isn't pinned. Use Pin on a window's toolbar to keep it up.");
         ui.checkbox(hide_with_steamvr, "Hide while the SteamVR menu is open")
             .on_hover_text("Fade all RSOverlay panels out while SteamVR's own dashboard is up");
         ui.checkbox(grab_tilt, "Tilt panels with the controller")

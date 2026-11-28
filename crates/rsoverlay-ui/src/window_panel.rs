@@ -50,7 +50,7 @@ pub struct WindowPanelAction {
     pub unlink: bool,
     /// Content opacity changed on the toolbar slider.
     pub opacity: Option<f32>,
-    /// Pin pill clicked (stay visible with the dashboard closed).
+    /// Pin pill clicked (stays visible when Windows hides the rest).
     pub toggle_pin: bool,
     /// Resize the real window to (w, h) pixels (Size menu).
     pub resize: Option<(u32, u32)>,
@@ -94,7 +94,7 @@ pub fn show(
             Some(m) => {
                 let aspect = m.width as f32 / m.height.max(1) as f32;
                 let (w, h) = fit(aspect, content.width(), content.height());
-                let rect = egui::Rect::from_center_size(content.center(), egui::vec2(w, h));
+                let rect = snap_to_texels(egui::Rect::from_center_size(content.center(), egui::vec2(w, h)), ui.ctx().pixels_per_point());
                 // Per-window opacity fades only the content (the toolbar
                 // stays solid so it can always be found): OpenVR honours
                 // the texture's alpha.
@@ -144,6 +144,27 @@ pub fn show(
         }
     });
     out
+}
+
+/// Put a rect's corners on whole texels. At native resolution the
+/// capture is then drawn one source pixel per texel, every sample at a
+/// texel centre: an exact copy, not a blend of neighbours.
+pub fn snap_to_texels(r: egui::Rect, ppp: f32) -> egui::Rect {
+    let snap = |v: f32| (v * ppp).round() / ppp;
+    egui::Rect::from_min_max(egui::pos2(snap(r.min.x), snap(r.min.y)), egui::pos2(snap(r.max.x), snap(r.max.y)))
+}
+
+#[cfg(test)]
+mod snap_tests {
+    #[test]
+    fn capture_rect_lands_on_whole_texels() {
+        let ppp = 2.0;
+        let r = super::snap_to_texels(egui::Rect::from_min_size(egui::pos2(0.3, 10.77), egui::vec2(1280.0, 720.1)), ppp);
+        for v in [r.min.x, r.min.y, r.max.x, r.max.y] {
+            assert_eq!((v * ppp).fract(), 0.0, "{v}");
+        }
+        assert_eq!(r.width() * ppp, 2560.0);
+    }
 }
 
 /// The toolbar's Window menu: what it offers for this panel.
@@ -282,7 +303,7 @@ fn uac_banner(ui: &egui::Ui, content: egui::Rect) {
 
 /// The controls every floating panel carries (windows, widgets, the
 /// dashboard; not the keyboard): dock target + close. Call inside a
-/// right-to-left layout. `pinned`: show the Pin pill (XSO layout mode;
+/// right-to-left layout. `pinned`: show the Pin pill (stays up when the Windows button hides the rest;
 /// `None` = not applicable). Returns (dock request, close, pin toggled).
 pub fn dock_controls(ui: &mut egui::Ui, attach: Attach, pinned: Option<bool>, accent: egui::Color32) -> (Option<Attach>, bool, bool) {
     let mut out = (None, false, false);
@@ -292,9 +313,9 @@ pub fn dock_controls(ui: &mut egui::Ui, attach: Attach, pinned: Option<bool>, ac
     ui.add_space(8.0);
     if let Some(on) = pinned {
         let tip = if on {
-            "Pinned: stays visible when the dashboard is closed. Click to unpin."
+            "Pinned: stays visible when the wrist Windows button hides your windows. Click to unpin."
         } else {
-            "Shown only while the dashboard is open. Pin it to keep it visible."
+            "Pin to keep this one visible when the wrist Windows button hides your windows."
         };
         if pill(ui, if on { "Pinned" } else { "Pin" }, on, accent).on_hover_text(tip).clicked() {
             out.2 = true;

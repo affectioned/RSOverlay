@@ -925,8 +925,9 @@ mod imp {
         dev_view.toasts_external = true;
         let sounds_dir = rsoverlay_core::config::sounds_dir();
         let mut prev_menu = false;
-        // Follow-dashboard setting last frame (None = not read yet).
-        let mut prev_follow: Option<bool> = None;
+        // Window count last frame (a new one shows the windows).
+        let mut prev_win_count = 0usize;
+        dev_view.windows_up = true;
         let mut prev_grip = [false; 2];
         let mut frame = 0u64;
         info!("VR shell up — wrist on the off hand; double-press left A/X (or the wrist Menu button) shows the dashboard");
@@ -1050,10 +1051,10 @@ mod imp {
             if steamvr_menu && grab.is_some() {
                 grab = None;
             }
-            // XSO layout mode: unpinned windows only while the dashboard is up.
-            let follow = dev_view.vr_windows_follow_dash;
-            dev_view.windows_up = sync_windows_up(prev_follow, follow, dev_view.windows_up);
-            prev_follow = Some(follow);
+            // Windows button: independent of the dashboard; a newly
+            // opened window brings them back up.
+            dev_view.windows_up = windows_up_after(dev_view.windows_up, prev_win_count, wins.len());
+            prev_win_count = wins.len();
             if let Some(h) = hmd.as_ref().map(to_affine) {
                 let clip = dev_view.vr_clip_angle;
                 let grabbed = grab.as_ref().map(|g| g.panel);
@@ -1066,7 +1067,7 @@ mod imp {
                 kb.update_fade(up && (grabbed == Some(2) || kb_pose.is_some_and(|p| in_view(&h, &p, clip))), dt);
                 for (k, w) in wins.iter_mut().enumerate() {
                     let p = win_world(w, hmd.as_ref(), &controllers);
-                    w.panel.update_fade(window_shown(steamvr_menu, follow, dev_view.windows_up, w.pinned, dash.visible, grabbed == Some(k + WIN0), in_view(&h, &p, clip)), dt);
+                    w.panel.update_fade(window_shown(steamvr_menu, dev_view.windows_up, w.pinned, grabbed == Some(k + WIN0), in_view(&h, &p, clip)), dt);
                 }
             }
 
@@ -1476,23 +1477,16 @@ mod imp {
             for p in [&mut wrist, &mut dash, &mut kb, &mut toasts] {
                 p.set_render_scale(&gpu, k);
             }
-            // Window captures: auto resolution — about as many texels as
-            // the headset shows pixels across the panel (see vr_logic).
+            // Window captures: native resolution — one capture pixel
+            // per texel (see vr_logic::native_render_k).
             let held = grab.as_ref().map(|g| g.panel);
-            let head = hmd.as_ref().map(to_affine);
             for (i, w) in wins.iter_mut().enumerate() {
-                let auto = match (px_per_rad, head, w.mirror.is_some()) {
-                    (Some(ppr), Some(h), true) => {
-                        let p = win_world(w, hmd.as_ref(), &controllers);
-                        let dist = (p.translation - h.translation).length();
-                        Some(auto_render_k(w.panel.width_m, dist, ppr, w.panel.base_tex.0, k))
-                    }
-                    _ => None,
-                };
-                match auto {
-                    Some(want) => {
+                match w.mirror.as_ref().map(|m| m.handle().width) {
+                    Some(src) => {
+                        let drawn = w.content_frac * w.panel.tex.0 as f32;
+                        let want = native_render_k(w.panel.render_k, src, drawn);
                         if let Some(nk) = w.res.step(w.panel.render_k, want, time, held == Some(i + WIN0)) {
-                            info!("window {}: resolution {:.0} texels wide", w.seq, w.panel.base_tex.0 as f32 * nk);
+                            info!("window {}: {} px capture → {:.0} texel panel", w.seq, src, w.panel.base_tex.0 as f32 * nk);
                             w.panel.set_render_scale(&gpu, nk);
                         }
                     }
@@ -1898,7 +1892,7 @@ mod imp {
                 if let Some((tabs, active)) = w.widgets.clone() {
                     // Widget group: tabs + live card + dock bar.
                     let (attach, cursor, linked) = (w.attach, lf.cursor, w.group.is_some());
-                    let pinned = follow.then_some(w.pinned);
+                    let pinned = Some(w.pinned);
                     let inj = injector.as_ref();
                     let mut wa = rsoverlay_ui::widgets::WidgetAction::default();
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
@@ -1927,7 +1921,7 @@ mod imp {
                         (mirror.source.label(), mirror.handle(), w.attach, lf.cursor, w.input_blocked);
                     let touch_mode = dev_view.pointer.touch_input;
                     let icon = w.icon.as_ref().map(|t| t.id());
-                    let (linked, opacity, pinned, smooth) = (w.group.is_some(), w.opacity, follow.then_some(w.pinned), w.smooth);
+                    let (linked, opacity, pinned, smooth) = (w.group.is_some(), w.opacity, Some(w.pinned), w.smooth);
                     // Auto-hide: the toolbar shows while the laser is on the
                     // window or it's held, and lingers a moment after.
                     if lf.cursor.is_some() || grab.as_ref().is_some_and(|g| g.panel == k + WIN0) {
