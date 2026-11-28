@@ -26,6 +26,12 @@ pub const CURRENT: &str = match option_env!("RSO_VERSION") {
     None => concat!(env!("CARGO_PKG_VERSION"), "-dev"),
 };
 
+/// A build compiled locally (not by the release workflow): it never
+/// checks for or installs updates, so it can't be "updated" over.
+pub fn is_dev_build() -> bool {
+    CURRENT.ends_with("-dev")
+}
+
 /// Short commit the build came from (release builds), if known.
 pub const COMMIT: Option<&str> = option_env!("RSO_COMMIT");
 

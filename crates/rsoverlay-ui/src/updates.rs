@@ -182,7 +182,7 @@ impl Updates {
         if let Some(w) = &self.worker {
             self.install = w.install_state();
         }
-        if !self.supported || self.offline || (!self.prefs.check && !self.check_now) {
+        if !self.supported || self.offline || update::is_dev_build() || (!self.prefs.check && !self.check_now) {
             return None;
         }
         let pre = self.prefs.prereleases;
@@ -226,6 +226,14 @@ impl Updates {
                     .id_source("whats-new-current")
                     .default_open(self.whats_new_open)
                     .show(ui, |ui| notes_ui(ui, notes, "notes-current"));
+            }
+            if update::is_dev_build() && !self.offline {
+                ui.label(theme::body_muted("Local build: update checks are off (only release builds update)."));
+                ui.add_space(6.0);
+                if ui.button("Open logs").clicked() {
+                    update::open_logs_folder();
+                }
+                return;
             }
             if !self.supported {
                 ui.label(theme::body_muted("Updates are handled by Steam."));
