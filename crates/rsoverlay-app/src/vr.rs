@@ -116,8 +116,14 @@ mod imp {
     // overlays are the ones you look at).
 
     /// Laser beam strip: 256 × 16 texels, 3.5 mm thick at any length.
-    const BEAM_TEX: (u32, u32) = (256, 16);
-    const BEAM_THICKNESS_M: f32 = 0.0035;
+    const BEAM_TEX: (u32, u32) = (256, 32);
+    /// Beam overlay thickness incl. its soft glow (the bright core is
+    /// about a third of it).
+    const BEAM_THICKNESS_M: f32 = 0.007;
+    /// Laser cursor: its own overlay on the beam tip (the beam is what
+    /// SteamVR moves with the controller, so the cursor rides it).
+    const CURSOR_TEX: (u32, u32) = (128, 128);
+    const CURSOR_M: f32 = 0.018;
     /// Grab / release haptic: a firmer tick than a click.
     const GRAB_HAPTIC_S: f32 = 0.025;
 
@@ -314,6 +320,27 @@ mod imp {
                 *n += 1;
                 if *n > 8 {
                     self.retired = None;
+                }
+            }
+        }
+
+        /// Draw a panel that's drawn once and kept (beams), settled (see
+        /// `EguiPanel::render_settled`), and hand it to SteamVR.
+        fn render_static(&mut self, gpu: &GpuCtx, overlay: &rsoverlay_openvr::Overlay<'_>, build: impl Fn(&egui::Context)) {
+            let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.points)), ..Default::default() };
+            self.egui.render_settled(&gpu.device, &gpu.queue, &self.view, raw, build);
+            gpu.device.poll(wgpu::Maintain::Wait);
+            self.resubmit(overlay);
+        }
+
+        /// Hand the current texture to SteamVR again (static panels like
+        /// the beams are drawn once; a copy taken before the GPU finished
+        /// drawing would stay blank for the whole session).
+        fn resubmit(&self, overlay: &rsoverlay_openvr::Overlay<'_>) {
+            // SAFETY: same resource / queue as `render` (owned by self).
+            unsafe {
+                if let Err(e) = overlay.set_texture_d3d12(self.handle, self.raw_resource, self.raw_queue) {
+                    warn!("SetOverlayTexture (D3D12): {e:#}");
                 }
             }
         }
@@ -872,11 +899,26 @@ mod imp {
         let mut beams = Vec::with_capacity(2);
         for side in ["left", "right"] {
             let mut b = VrPanel::new(&overlay, &gpu, &format!("rsoverlay.beam.{side}"), "RSOverlay Laser", BEAM_TEX, 1.0, 1.0, 0.0)?;
-            b.render(&gpu, &overlay, 0.0, 0.016, Vec::new(), rsoverlay_ui::shell::paint_beam);
+            // Tester: the beam never showed (SteamVR found it where it
+            // belongs): its one-time texture was egui's unsettled first
+            // frame, nearly transparent.
+            b.render_static(&gpu, &overlay, rsoverlay_ui::shell::paint_beam);
             let _ = overlay.set_sort_order(b.handle, 100);
             beams.push(b);
         }
         let mut beam_tint = [[f32::NAN; 4]; 2];
+        let mut cursors = Vec::with_capacity(2);
+        for side in ["left", "right"] {
+            let mut c = VrPanel::new(&overlay, &gpu, &format!("rsoverlay.cursor.{side}"), "RSOverlay Cursor", CURSOR_TEX, 1.0, CURSOR_M, 0.0)?;
+            c.render_static(&gpu, &overlay, rsoverlay_ui::shell::paint_cursor_dot);
+            let _ = overlay.set_sort_order(c.handle, 101);
+            cursors.push(c);
+        }
+        let mut cursor_tint = [[f32::NAN; 4]; 2];
+        // Fade / pop / click flash, and the last placement (so a laser
+        // fades out where it was instead of vanishing). Per hand.
+        let mut laser_anim = [LaserAnim::default(); 2];
+        let mut laser_last: [Option<(u32, Affine3A, f32, Affine3A)>; 2] = [None, None];
         let mut wrist_own_hit_logged = false;
         // What each hand's laser was on last frame (diagnostics).
         let mut laser_on: [Option<usize>; 2] = [None, None];
@@ -1645,48 +1687,61 @@ mod imp {
                 capture_on = want_capture;
             }
 
-            // ── Laser beams: drawn while a hand points at any panel; bright
-            // while the trigger is held. Billboarded around their own axis
-            // so they never go edge-on.
-            for c in &controllers {
-                let s = hand_slot(c.hand);
-                let b = &mut beams[s];
-                // On the keyboard SteamVR draws its own laser.
-                // SteamVR draws its own laser while engaged.
-                let hit = hand_hit[s].filter(|_| dev_view.vr_show_lasers && !sf.engaged);
-                b.set_visible(&overlay, hit.is_some());
-                let (Some((_, len)), Some(e)) = (hit, eye) else { continue };
-                let o = Vec3A::from(c.origin);
-                let d = Vec3A::from(c.dir);
-                let len = len.max(0.05);
-                let mid = o + d * (len * 0.5);
-                let to_eye = e - mid;
-                let z = (to_eye - d * to_eye.dot(d)).try_normalize().unwrap_or(Vec3A::Y);
-                let pose = Affine3A::from_cols(d, z.cross(d), z, mid);
-                let _ = overlay.set_width(b.handle, len);
-                let _ = overlay.set_texel_aspect(b.handle, len * BEAM_TEX.1 as f32 / (BEAM_TEX.0 as f32 * BEAM_THICKNESS_M * dev_view.vr_pointer_size));
-                // Parent to the controller: the compositor re-poses it
-                // every frame with the freshest tracking, so the beam
-                // never trails the hand (absolute poses lagged a frame).
-                let rel = to_affine(&c.pose).inverse() * pose;
-                let _ = overlay.set_transform_device_relative(b.handle, c.index, &from_affine(&rel));
+            // ── Laser: beam + cursor, both parented to the controller so
+            // SteamVR moves them with it every frame (the beam is the
+            // accurate part, tester); the cursor sits on the beam's tip.
+            // Fade in / out, pop, click flash: see vr_logic::LaserAnim.
+            for s in 0..2 {
+                let c = controllers.iter().find(|c| hand_slot(c.hand) == s);
+                let hit = c.and(hand_hit[s]).filter(|_| dev_view.vr_show_lasers && !sf.engaged);
+                let pressed = c.is_some_and(|c| c.trigger > 0.5);
+                let look = laser_anim[s].step(hit.is_some(), pressed, dt);
+                if let (Some(c), Some((_, len)), Some(e)) = (c, hit, eye) {
+                    let o = Vec3A::from(c.origin);
+                    let d = Vec3A::from(c.dir);
+                    let len = len.max(0.05);
+                    let mid = o + d * (len * 0.5);
+                    let to_eye = e - mid;
+                    let z = (to_eye - d * to_eye.dot(d)).try_normalize().unwrap_or(Vec3A::Y);
+                    let beam_pose = Affine3A::from_cols(d, z.cross(d), z, mid);
+                    let inv = to_affine(&c.pose).inverse();
+                    laser_last[s] = Some((c.index, inv * beam_pose, len, inv * cursor_pose(o, d, len, e)));
+                }
+                let (beam, cur) = (&mut beams[s], &mut cursors[s]);
+                let Some((dev, beam_rel, len, cur_rel)) = laser_last[s].filter(|_| look.beam_alpha > 0.0 || look.cursor_alpha > 0.0) else {
+                    beam.set_visible(&overlay, false);
+                    cur.set_visible(&overlay, false);
+                    continue;
+                };
+                // Static textures: hand them over again as they appear.
+                if !beam.visible {
+                    beam.resubmit(&overlay);
+                }
+                if !cur.visible {
+                    cur.resubmit(&overlay);
+                }
+                let size = dev_view.vr_pointer_size;
+                let _ = overlay.set_width(beam.handle, len);
+                let _ = overlay.set_texel_aspect(beam.handle, len * BEAM_TEX.1 as f32 / (BEAM_TEX.0 as f32 * BEAM_THICKNESS_M * size * look.beam_thick));
+                let _ = overlay.set_transform_device_relative(beam.handle, dev, &from_affine(&beam_rel));
+                let _ = overlay.set_width(cur.handle, CURSOR_M * size * look.cursor_scale);
+                let _ = overlay.set_transform_device_relative(cur.handle, dev, &from_affine(&cur_rel));
                 let a = dev_view.effective_accent();
-                let tint = [
-                    a.r() as f32 / 255.0,
-                    a.g() as f32 / 255.0,
-                    a.b() as f32 / 255.0,
-                    if c.trigger > 0.5 { 0.95 } else { 0.55 },
-                ];
-                if tint != beam_tint[s] {
-                    let _ = overlay.set_color(b.handle, [tint[0], tint[1], tint[2]]);
-                    let _ = overlay.set_alpha(b.handle, tint[3]);
-                    beam_tint[s] = tint;
+                let rgb = [a.r() as f32 / 255.0, a.g() as f32 / 255.0, a.b() as f32 / 255.0];
+                let bt = [rgb[0], rgb[1], rgb[2], look.beam_alpha];
+                if bt.iter().zip(beam_tint[s]).any(|(x, y)| (x - y).abs() > 0.004 || y.is_nan()) {
+                    let _ = overlay.set_color(beam.handle, rgb);
+                    let _ = overlay.set_alpha(beam.handle, look.beam_alpha);
+                    beam_tint[s] = bt;
                 }
-            }
-            for (i, b) in beams.iter_mut().enumerate() {
-                if !controllers.iter().any(|c| hand_slot(c.hand) == i) {
-                    b.set_visible(&overlay, false);
+                let ct = [rgb[0], rgb[1], rgb[2], look.cursor_alpha];
+                if ct.iter().zip(cursor_tint[s]).any(|(x, y)| (x - y).abs() > 0.004 || y.is_nan()) {
+                    let _ = overlay.set_color(cur.handle, rgb);
+                    let _ = overlay.set_alpha(cur.handle, look.cursor_alpha);
+                    cursor_tint[s] = ct;
                 }
+                beam.set_visible(&overlay, look.beam_alpha > 0.0);
+                cur.set_visible(&overlay, look.cursor_alpha > 0.0);
             }
 
             // Grab / release: a firmer haptic tick than a click.
@@ -1745,13 +1800,11 @@ mod imp {
             let mut act = rsoverlay_ui::wrist::WristAction::default();
             if wrist.visible {
                 let accent = dev_view.effective_accent();
-                let cursor = wf.cursor.filter(|_| !sf.engaged);
                 wrist.render(&gpu, &overlay, time, dt, wf.events, |ctx| {
                     act = dev_view.wrist_ui(ctx);
                     if let Some((0, h)) = hud {
                         rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                     }
-                    laser::paint_cursor(ctx, cursor, accent);
                 });
             }
             // Gamepad shortcuts drive the same actions as the wrist.
@@ -1892,13 +1945,11 @@ mod imp {
             if dash.visible {
                 let accent = dev_view.effective_accent();
                 let inj = injector.as_ref();
-                let cursor = df.cursor.filter(|_| !sf.engaged);
                 dash.render(&gpu, &overlay, time, dt, df.events, |ctx| {
                     dev_view.ui_with(ctx, inj);
                     if let Some((1, h)) = hud {
                         rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                     }
-                    laser::paint_cursor(ctx, cursor, accent);
                 });
             }
 
@@ -1968,11 +2019,6 @@ mod imp {
                 let mut kf = rsoverlay_ui::vrkeyboard::KbFrame::default();
                 kb.render(&gpu, &overlay, time, dt, Vec::new(), |ctx| {
                     kf = keyboard.frame(ctx, &hands, time, accent, internal);
-                    if !sf.engaged {
-                        for &(_, pos, trigger) in &hands {
-                            laser::paint_cursor(ctx, pos.map(|p| (p, trigger > 0.5)), accent);
-                        }
-                    }
                     if let Some((2, h)) = hud {
                         rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                     }
@@ -2145,13 +2191,11 @@ mod imp {
                     let pinned = Some(w.pinned);
                     let inj = injector.as_ref();
                     let mut wa = rsoverlay_ui::widgets::WidgetAction::default();
-                    let cursor = lf.cursor.filter(|_| !sf.engaged);
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
                         wa = dev_view.widget_ui(ctx, &tabs, active, attach, linked, pinned, inj);
                         if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
                             rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                         }
-                        laser::paint_cursor(ctx, cursor, accent);
                     });
                     if let Some(i) = wa.select {
                         w.widgets = Some((tabs.clone(), i));
@@ -2180,14 +2224,12 @@ mod imp {
                     }
                     let show_toolbar = toolbar_visible(dev_view.pointer.autohide_toolbars, time, w.toolbar_seen);
                     let events = lf.events.clone();
-                    let cursor = lf.cursor.filter(|_| !sf.engaged);
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
                         mirror.refresh(&gpu);
                         act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, opacity, pinned, show_toolbar, smooth, accent);
                         if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
                             rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                         }
-                        laser::paint_cursor(ctx, cursor, accent);
                     });
                     if let Some(r) = act.image_rect {
                         w.content_frac = (r.width() / w.panel.points.x).clamp(0.05, 1.0);
@@ -2746,6 +2788,9 @@ mod imp {
         }
         keyboard.release_all();
         kb.destroy(&overlay);
+        for c in &cursors {
+            c.destroy(&overlay);
+        }
         for b in &beams {
             b.destroy(&overlay);
         }

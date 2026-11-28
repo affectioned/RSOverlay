@@ -593,6 +593,65 @@ pub(crate) fn trigger_value(pull: f32, click: bool, point: f32) -> f32 {
     (pull.clamp(0.0, 1.0) / point * rsoverlay_ui::laser::PRESS).min(1.0)
 }
 
+/// Laser look and feel: fade in / out, the cursor's pop on arrival, and
+/// the click flash (brighter, thicker beam; squeezed cursor). Only
+/// overlay properties change per frame (alpha, width), nothing redraws.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct LaserAnim {
+    /// 0..1 visibility.
+    fade: f32,
+    /// Seconds since it (re)appeared; drives the cursor's pop.
+    shown_for: f32,
+    /// 1 right after a click, decaying.
+    flash: f32,
+    was_pressed: bool,
+}
+
+/// One frame of the laser's look.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct LaserLook {
+    /// Overlay alpha for the beam / cursor (0 = hide).
+    pub beam_alpha: f32,
+    pub cursor_alpha: f32,
+    /// Multipliers on the beam thickness and cursor size.
+    pub beam_thick: f32,
+    pub cursor_scale: f32,
+}
+
+pub(crate) const LASER_FADE_S: f32 = 0.08;
+
+impl LaserAnim {
+    pub fn step(&mut self, on_panel: bool, pressed: bool, dt: f32) -> LaserLook {
+        let dt = dt.clamp(0.0, 0.1);
+        let k = 1.0 - (-dt / LASER_FADE_S).exp();
+        let was_hidden = self.fade < 0.01;
+        self.fade += ((if on_panel { 1.0 } else { 0.0 }) - self.fade) * k;
+        if self.fade < 0.02 && !on_panel {
+            self.fade = 0.0;
+        }
+        if on_panel && was_hidden {
+            self.shown_for = 0.0;
+        } else {
+            self.shown_for += dt;
+        }
+        if pressed && !self.was_pressed {
+            self.flash = 1.0;
+        }
+        self.was_pressed = pressed;
+        self.flash *= (-dt / 0.12).exp();
+        // Pop: 0.6 → 1.0 over ~120 ms with a little overshoot.
+        let t = (self.shown_for / 0.12).min(1.0);
+        let pop = 0.6 + 0.4 * (1.0 + 0.12 * (std::f32::consts::PI * t).sin()) * t;
+        let squeeze = if pressed { 0.78 } else { 1.0 };
+        LaserLook {
+            beam_alpha: self.fade * (if pressed { 0.95 } else { 0.6 } + 0.3 * self.flash).min(1.0),
+            cursor_alpha: self.fade,
+            beam_thick: 1.0 + 0.5 * self.flash,
+            cursor_scale: pop * squeeze * (1.0 - 0.1 * self.flash),
+        }
+    }
+}
+
 /// Laser cursor: how far it sits back from the surface along the beam
 /// (keeps it in front of the panel), metres.
 pub(crate) const CURSOR_LIFT_M: f32 = 0.002;
@@ -1235,5 +1294,33 @@ mod sim {
         assert!(hit_allowed(&card, (8.0, 200.0)), "a little slack at the edge");
         assert!(!hit_allowed(&card, (500.0, 2.0)), "top margin: passes through");
         assert!(hit_allowed(&[], (0.0, 0.0)), "nothing recorded: whole panel");
+    }
+
+    #[test]
+    fn laser_fades_pops_and_flashes() {
+        let mut a = LaserAnim::default();
+        let dt = 1.0 / 90.0;
+        let first = a.step(true, false, dt);
+        assert!(first.beam_alpha > 0.0 && first.beam_alpha < 0.3, "fades in, not a jump: {first:?}");
+        assert!(first.cursor_scale < 0.8, "cursor pops from small");
+        let mut l = first;
+        for _ in 0..30 {
+            l = a.step(true, false, dt);
+        }
+        assert!((l.beam_alpha - 0.6).abs() < 0.02 && (l.cursor_scale - 1.0).abs() < 0.02, "settled: {l:?}");
+        // Click: brighter, thicker beam; squeezed cursor; then settles.
+        let c = a.step(true, true, dt);
+        assert!(c.beam_alpha > 0.9 && c.beam_thick > 1.3 && c.cursor_scale < 0.8, "{c:?}");
+        for _ in 0..60 {
+            l = a.step(true, true, dt);
+        }
+        assert!((l.beam_thick - 1.0).abs() < 0.02, "flash decays");
+        // Leaving a panel fades out within ~0.3 s, then hides fully.
+        for _ in 0..30 {
+            l = a.step(false, false, dt);
+        }
+        assert_eq!(l.beam_alpha, 0.0);
+        // Coming back pops again.
+        assert!(a.step(true, false, dt).cursor_scale < 0.8);
     }
 }

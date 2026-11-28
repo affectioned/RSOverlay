@@ -77,6 +77,15 @@ impl EguiPanel {
         self.height = height;
     }
 
+    /// For panels drawn once and kept (the laser beams): egui applies
+    /// some settings (pixels per point) only from the next frame, so a
+    /// lone first frame comes out wrong — the beam's was nearly fully
+    /// transparent (max alpha 15 of 255), an invisible laser. Draws two.
+    pub fn render_settled(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, target: &wgpu::TextureView, raw: egui::RawInput, build_ui: impl Fn(&egui::Context)) {
+        self.render(device, queue, target, raw.clone(), &build_ui);
+        self.render(device, queue, target, raw, &build_ui);
+    }
+
     /// Run a frame of egui and encode its render into the given texture view.
     pub fn render<F: FnOnce(&egui::Context)>(
         &mut self,

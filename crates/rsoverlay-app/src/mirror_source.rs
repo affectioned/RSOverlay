@@ -401,4 +401,59 @@ mod native_gpu_tests {
         assert!(old < 0.5, "base size should be resampled ({:.1}% exact)", old * 100.0);
         println!("exact texels: native {:.1}%, old 1920 {:.1}%", native * 100.0, old * 100.0);
     }
+
+    /// Draw a once-drawn VR texture the way the VR loop does
+    /// (render_settled, transparent clear) and read it back.
+    fn draw_static(gpu: &GpuCtx, w: u32, h: u32, paint: fn(&egui::Context)) -> Vec<u8> {
+        let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Bgra8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = target.create_view(&Default::default());
+        let mut panel = EguiPanel::new(&gpu.device, wgpu::TextureFormat::Bgra8Unorm, w, h);
+        panel.set_pixels_per_point(1.0);
+        panel.set_clear(wgpu::Color::TRANSPARENT);
+        let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w as f32, h as f32))), ..Default::default() };
+        panel.render_settled(&gpu.device, &gpu.queue, &view, raw, paint);
+        readback(gpu, &target, w, h)
+    }
+
+    /// Tester: the laser beam never showed although SteamVR found it in
+    /// the right place: its once-drawn texture was egui's unsettled first
+    /// frame (max alpha 15). Beam: bright core, soft glow across, fading
+    /// in from the controller.
+    #[test]
+    fn beam_texture_has_a_bright_core_and_fades_in() {
+        let Ok(gpu) = pollster::block_on(GpuCtx::new(rsoverlay_core::RuntimeMode::Preview)) else {
+            eprintln!("SKIPPED: no GPU adapter");
+            return;
+        };
+        let (w, h) = (256u32, 32u32);
+        let px = draw_static(&gpu, w, h, rsoverlay_ui::shell::paint_beam);
+        let a = |x: usize, y: usize| px[(y * w as usize + x) * 4 + 3];
+        println!("core along x: start {} 20% {} middle {} tip {}; across at middle: edge {} glow {} core {}", a(2, 16), a(51, 16), a(128, 16), a(254, 16), a(128, 0), a(128, 8), a(128, 16));
+        assert!(a(128, 16) > 230, "bright core");
+        assert!(a(128, 8) < a(128, 16) && a(128, 8) > 20, "soft glow beside it");
+        assert!(a(128, 0) < a(128, 8), "fading to the edges");
+        assert!(a(2, 16) < 40, "fades in from the controller");
+        assert!(a(254, 16) < a(128, 16), "soft tip");
+    }
+
+    #[test]
+    fn cursor_texture_is_drawn() {
+        let Ok(gpu) = pollster::block_on(GpuCtx::new(rsoverlay_core::RuntimeMode::Preview)) else {
+            eprintln!("SKIPPED: no GPU adapter");
+            return;
+        };
+        let px = draw_static(&gpu, 128, 128, rsoverlay_ui::shell::paint_cursor_dot);
+        let a = |x: usize, y: usize| px[(y * 128 + x) * 4 + 3];
+        assert!(a(64, 64) > 200, "centre dot");
+        assert!(a(2, 2) < 10, "transparent corners");
+    }
 }

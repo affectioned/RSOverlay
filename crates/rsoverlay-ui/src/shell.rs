@@ -431,16 +431,30 @@ pub fn paint_cursor_dot(ctx: &egui::Context) {
     p.circle_filled(c, s * 0.2, egui::Color32::WHITE);
 }
 
+/// The laser beam's texture (VR), white, tinted to the accent by the
+/// overlay colour: across, a bright core with a soft glow; along, it
+/// fades in from the controller and softens at the tip.
 pub fn paint_beam(ctx: &egui::Context) {
     let p = ctx.layer_painter(egui::LayerId::background());
     let r = ctx.screen_rect();
-    let n = 48;
-    for i in 0..n {
-        let t0 = i as f32 / n as f32;
-        let t1 = (i + 1) as f32 / n as f32;
-        let a = ((t0 / 0.35).min(1.0) * 255.0) as u8;
-        let seg = egui::Rect::from_min_max(egui::pos2(r.left() + t0 * r.width(), r.top()), egui::pos2(r.left() + t1 * r.width(), r.bottom()));
-        p.rect_filled(seg, 0.0, crate::theme::veil(a));
+    let (cols, rows) = (64, 16);
+    let (cw, rh) = (r.width() / cols as f32, r.height() / rows as f32);
+    let smooth = |x: f32| {
+        let x = x.clamp(0.0, 1.0);
+        x * x * (3.0 - 2.0 * x)
+    };
+    for i in 0..cols {
+        let t = (i as f32 + 0.5) / cols as f32;
+        let along = smooth(t / 0.22) * (1.0 - 0.6 * smooth((t - 0.94) / 0.06));
+        for j in 0..rows {
+            let v = ((j as f32 + 0.5) / rows as f32) * 2.0 - 1.0;
+            let across = ((-(v / 0.22).powi(2)).exp() + 0.35 * (-(v / 0.65).powi(2)).exp()).min(1.0);
+            let a = (255.0 * along * across).round() as u8;
+            if a > 0 {
+                let cell = egui::Rect::from_min_size(egui::pos2(r.left() + i as f32 * cw, r.top() + j as f32 * rh), egui::vec2(cw + 0.5, rh + 0.5));
+                p.rect_filled(cell, 0.0, crate::theme::veil(a));
+            }
+        }
     }
 }
 
