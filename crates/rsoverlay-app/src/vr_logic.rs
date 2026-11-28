@@ -270,7 +270,7 @@ pub(crate) fn readable_width(src_px: u32, content_frac: f32, dist_m: f32, px_per
 
 /// A stand-in for a SteamVR overlay (tests): a flat quad `width` metres
 /// wide (`aspect` = height / width) at `pose`, its face along +Z.
-#[cfg(test)]
+/// Also used live as our own hit test for the wrist (see vr.rs).
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct SimOverlay {
     pub pose: Affine3A,
@@ -278,7 +278,6 @@ pub(crate) struct SimOverlay {
     pub aspect: f32,
 }
 
-#[cfg(test)]
 impl SimOverlay {
     /// Ray hit like `ComputeOverlayIntersection`: (uv with v up from the
     /// bottom, distance), or None if the ray misses the quad.

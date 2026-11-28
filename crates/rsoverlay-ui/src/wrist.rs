@@ -97,6 +97,8 @@ pub struct WristData<'a> {
     pub focus: bool,
     /// Windows are up without the dashboard (lights the Windows button).
     pub windows_up: bool,
+    /// The dashboard is open (lights the Dashboard button).
+    pub dashboard_open: bool,
     /// Background image behind the clock + media, and how much to darken it.
     pub background: Option<(&'a std::sync::Arc<egui::ColorImage>, f32)>,
     pub accent: egui::Color32,
@@ -162,7 +164,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             (icons::PLUS, "Add", "Add a window or monitor", false),
             (icons::RECENTER, "Recenter", "Recenter panels in front of you", false),
             (icons::KEYBOARD, "Keyboard", "Show or hide the keyboard", d.keyboard_open),
-            (icons::GRID, "Dashboard", "Open or close the dashboard", false),
+            (icons::GRID, "Dashboard", "Open or close the dashboard", d.dashboard_open),
             (icons::FOLDER, "Layouts", "Saved panel layouts", false),
             (icons::SETTINGS, "Settings", "Settings", false),
             (icons::TRASH, "Close all", "Close all floating panels", false),
@@ -605,6 +607,7 @@ mod tests {
             buttons: compact::ALL_ACTIONS,
             focus: false,
             windows_up: false,
+            dashboard_open: false,
             background: None,
             compact: rsoverlay_core::config::DEFAULT_WRIST_COMPACT,
             expanded: false,

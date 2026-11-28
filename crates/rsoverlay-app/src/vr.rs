@@ -879,6 +879,9 @@ mod imp {
             cursors.push(c);
         }
         let mut cursor_tint = [[f32::NAN; 4]; 2];
+        let mut wrist_own_hit_logged = false;
+        // What each hand's laser was on last frame (diagnostics).
+        let mut laser_on: [Option<usize>; 2] = [None, None];
         let mut keyboard = rsoverlay_ui::vrkeyboard::VrKeyboard::default();
         // Restore hands-on state from last session.
         {
@@ -1066,6 +1069,7 @@ mod imp {
             }
             // Windows button: independent of the dashboard; a newly
             // opened window brings them back up.
+            dev_view.dashboard_open = dash.visible;
             dev_view.windows_up = windows_up_after(dev_view.windows_up, prev_win_count, wins.len());
             prev_win_count = wins.len();
             if let Some(h) = hmd.as_ref().map(to_affine) {
@@ -1111,13 +1115,46 @@ mod imp {
                     if !visible {
                         continue;
                     }
-                    if let Some((uv, d)) = overlay.intersect(h, c.origin, c.dir) {
+                    let mut hit = overlay.intersect(h, c.origin, c.dir);
+                    // The wrist rides a controller: also test it with our
+                    // own ray-vs-quad math at the pose we mount it at, so
+                    // a missed SteamVR intersection can't make it dead.
+                    if hit.is_none() && i == 0 {
+                        if let Some(p) = wrist_parent.and_then(|d| device_pose(d, hmd.as_ref(), &controllers)) {
+                            let quad = SimOverlay { pose: p * wrist_rel, width: wrist.width_m, aspect: wrist.tex.1 as f32 / wrist.tex.0 as f32 };
+                            hit = quad.intersect(Vec3A::from(c.origin), Vec3A::from(c.dir).normalize_or_zero());
+                            if hit.is_some() && !wrist_own_hit_logged {
+                                wrist_own_hit_logged = true;
+                                warn!("wrist: SteamVR's intersection missed where the wrist is; using our own hit test");
+                            }
+                        }
+                    }
+                    if let Some((uv, d)) = hit {
                         if best.is_none_or(|b| hit_beats((i, d), (b.0, b.2))) {
                             best = Some((i, uv, d));
                         }
                     }
                 }
                 hand_hit[hand_slot(c.hand)] = best.map(|b| (b.0, b.2));
+                // Diagnostics: what each laser is on, logged on change,
+                // with the wrist / dashboard state (tester: no beam on
+                // either).
+                let now_on = best.map(|b| b.0);
+                if now_on != laser_on[hand_slot(c.hand)] {
+                    laser_on[hand_slot(c.hand)] = now_on;
+                    let name = match now_on {
+                        None => "nothing".to_string(),
+                        Some(0) => "wrist".into(),
+                        Some(1) => "dashboard".into(),
+                        Some(2) => "keyboard".into(),
+                        Some(k) => format!("window {}", k - WIN0 + 1),
+                    };
+                    let probe = |h| overlay.intersect(h, c.origin, c.dir).is_some();
+                    info!(
+                        "laser {:?} → {name} (wrist shown {} fade {:.2} ray {}; dashboard shown {} fade {:.2} ray {})",
+                        c.hand, wrist.visible, wrist.fade, probe(wrist.handle), dash.visible, dash.fade, probe(dash.handle)
+                    );
+                }
                 for (i, list) in samples.iter_mut().enumerate() {
                     let hit = best.filter(|b| b.0 == i).map(|b| LaserInput::uv_to_points(b.1, target(i).2));
                     hit_by[i][hand_slot(c.hand)] = hit.is_some();

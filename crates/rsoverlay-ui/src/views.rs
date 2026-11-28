@@ -289,6 +289,8 @@ pub struct DevView {
     /// Windows up without the dashboard (wrist Windows button; the VR
     /// shell resets it when the follow-dashboard setting changes).
     pub windows_up: bool,
+    /// The dashboard is up (VR; lights the wrist Dashboard button).
+    pub dashboard_open: bool,
     /// Update notifier (Settings > Updates). The app enables it on
     /// GitHub builds; Steam builds and tests leave it off.
     pub updates: crate::updates::Updates,
@@ -451,6 +453,7 @@ impl Default for DevView {
             updates: Default::default(),
             focus_mode: false,
             windows_up: false,
+            dashboard_open: false,
             gamepad: Default::default(),
             wrist_bg: Default::default(),
             gamepad_held: 0,
@@ -737,6 +740,7 @@ impl DevView {
             keyboard_open: self.show_keyboard,
             focus: self.focus_mode,
             windows_up: self.windows_up,
+            dashboard_open: self.dashboard_open,
             background: self.wrist_bg.image.as_ref().map(|i| (i, self.wrist_bg.dim)),
             accent: self.effective_accent(),
             buttons: self.wrist_buttons,
