@@ -509,7 +509,7 @@ pub fn source_grid(ui: &mut egui::Ui, sources: &mut SourcePicker, open: &[Captur
                         crate::icons::icon(crate::icons::MONITOR, 48.0, tint)
                             .paint_at(ui, egui::Rect::from_center_size(preview.center(), egui::vec2(48.0, 48.0)));
                         crate::icons::icon(crate::icons::MONITOR, 22.0, tint).paint_at(ui, icon_r.shrink(2.0));
-                        format!("Monitor {i}")
+                        crate::views::monitor_label(*i)
                     }
                     CaptureSource::Window { hwnd, title } => {
                         let icon = sources.icon_texture(ui.ctx(), *hwnd);

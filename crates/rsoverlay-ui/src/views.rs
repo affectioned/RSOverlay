@@ -55,9 +55,58 @@ pub enum CaptureSource {
 impl CaptureSource {
     pub fn label(&self) -> String {
         match self {
-            Self::Monitor(i) => format!("Monitor {i}"),
+            Self::Monitor(i) => monitor_label(*i),
             Self::Window { title, .. } => title.clone(),
         }
+    }
+}
+
+/// Monitor display names, by capture index (set by the app from Windows'
+/// own monitor names; tester: "Monitor 0" wasn't readable).
+static MONITOR_LABELS: std::sync::RwLock<Vec<String>> = std::sync::RwLock::new(Vec::new());
+
+/// Store the monitors' names (by capture index; empty = unknown).
+pub fn set_monitor_names(names: &[String]) {
+    if let Ok(mut l) = MONITOR_LABELS.write() {
+        *l = monitor_labels(names);
+    }
+}
+
+/// A monitor's label: its own name, or "Monitor N" when unknown.
+pub fn monitor_label(i: u32) -> String {
+    MONITOR_LABELS.read().ok().and_then(|l| l.get(i as usize).cloned()).unwrap_or_else(|| format!("Monitor {i}"))
+}
+
+/// Names -> labels: unknown names fall back to "Monitor N"; repeated
+/// names (two of the same model) get " (2)", " (3)" ... Pure.
+pub fn monitor_labels(names: &[String]) -> Vec<String> {
+    names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            let n = n.trim();
+            if n.is_empty() {
+                return format!("Monitor {i}");
+            }
+            let total = names.iter().filter(|m| m.trim() == n).count();
+            let nth = names[..i].iter().filter(|m| m.trim() == n).count() + 1;
+            if total > 1 {
+                format!("{n} ({nth})")
+            } else {
+                n.to_string()
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod monitor_label_tests {
+    use super::*;
+
+    #[test]
+    fn monitors_use_their_names_numbered_when_repeated() {
+        let names = ["DELL U2723QE", "", "LG ULTRAGEAR", "LG ULTRAGEAR"].map(String::from);
+        assert_eq!(monitor_labels(&names), ["DELL U2723QE", "Monitor 1", "LG ULTRAGEAR (1)", "LG ULTRAGEAR (2)"]);
     }
 }
 

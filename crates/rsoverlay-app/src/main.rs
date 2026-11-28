@@ -376,7 +376,7 @@ fn run_main() -> Result<()> {
 
     if args.list_monitors {
         for m in rsoverlay_capture::enumerate_monitors()? {
-            println!("[{}] {} {}x{}", m.index, m.device_name, m.width, m.height);
+            println!("[{}] {} {}x{} {:?}", m.index, m.device_name, m.width, m.height, m.name);
         }
         return Ok(());
     }

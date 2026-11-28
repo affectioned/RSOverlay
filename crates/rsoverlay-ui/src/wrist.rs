@@ -54,6 +54,9 @@ pub mod compact {
     pub const MEDIA: u32 = 1 << 9;
     pub const BATTERY: u32 = 1 << 10;
     pub const LAYOUTS: u32 = 1 << 11;
+    /// Retired: the Windows / Media / Stats views box (it doubled the
+    /// Windows button, the music row and the Stats pop-out; tester: it
+    /// didn't fit). Kept so old configs keep their other bits.
     pub const VIEWS: u32 = 1 << 12;
     /// Session timer line under the clock.
     pub const TIMER: u32 = 1 << 13;
@@ -73,7 +76,6 @@ pub mod compact {
         (BATTERY, "Batteries"),
         (MEDIA, "Media"),
         (LAYOUTS, "Layout slots"),
-        (VIEWS, "Views"),
     ];
     /// Status-chip modules, in row order.
     pub const CHIPS: &[(u32, &str)] = &[(VR_FPS, "VR FPS"), (FRAME, "Frame time"), (PERF, "CPU / GPU"), (VRAM, "VRAM"), (RAM, "RAM"), (ALERTS, "Alerts")];
@@ -283,7 +285,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
 
         // 3 · Clock + views (+ media inside the same slab).
         let show_clock = has(compact::CLOCK);
-        let show_views = has(compact::VIEWS);
+        let show_views = false;
         // Editing with nothing playing: a stand-in so Media can be toggled.
         let title = d.title.filter(|_| has(compact::MEDIA)).or(d.editing.then_some("Media · shows while something plays"));
         let top_h = if show_clock || show_views { 108.0 } else { 8.0 };
@@ -325,28 +327,6 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
                 edits.push((egui::Rect::from_min_size(at - egui::vec2(6.0, 0.0), galley.size() + egui::vec2(60.0, 4.0)), compact::TIMER));
             }
             p.galley(at, galley, theme::FG_MUTED);
-        }
-        }
-        if show_views {
-        let left = if show_clock { r3.center().x - 6.0 } else { r3.left() + 10.0 };
-        let views = egui::Rect::from_min_max(egui::pos2(left, r3.top() + 10.0), egui::pos2(r3.right() - 10.0, r3.top() + 98.0));
-        ui.painter().rect_filled(views, theme::RADIUS_CARD, theme::BG_CARD);
-        edits.push((views, compact::VIEWS));
-        let vw = views.width() / 3.0;
-        let view_defs: [(egui::ImageSource<'static>, &str, &str); 3] = [
-            (icons::LAYERS, "Windows", "Windows & monitors"),
-            (icons::MUSIC, "Media", "Media & volume"),
-            (icons::CHART, "Stats", "Pop out performance stats"),
-        ];
-        for (i, (src, label, tip)) in view_defs.into_iter().enumerate() {
-            let c = egui::Rect::from_min_size(egui::pos2(views.left() + i as f32 * vw, views.top()), egui::vec2(vw, views.height()));
-            if labelled_button(ui, c.shrink(6.0), src, 28.0, false, label, tip, accent) {
-                match i {
-                    0 => act.open_page = Some(Page::Desktop),
-                    1 => act.open_page = Some(Page::Audio),
-                    _ => act.popout_stats = true,
-                }
-            }
         }
         }
         if let Some(title) = title {

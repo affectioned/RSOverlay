@@ -746,6 +746,8 @@ pub fn run(
     app_config: rsoverlay_core::Config,
     config_path: std::path::PathBuf,
 ) -> Result<()> {
+    // Monitor labels from Windows' own names ("Q27G4", not "Monitor 0").
+    crate::mirror_source::refresh_monitor_names();
     let event_loop = EventLoop::new().context("creating winit event loop")?;
     let want = (f64::from(INITIAL_WIN_W), f64::from(INITIAL_WIN_H));
     let (size, pos) = if test.screenshot.is_some() { (winit::dpi::LogicalSize::new(want.0, want.1), None) } else { fit_to_monitor(&event_loop, want) };

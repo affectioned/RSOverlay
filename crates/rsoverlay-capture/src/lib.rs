@@ -17,6 +17,9 @@ pub struct MonitorInfo {
     pub width: u32,
     pub height: u32,
     pub device_name: String,
+    /// The monitor's own name as Windows shows it ("DELL U2723QE");
+    /// empty when Windows doesn't know one.
+    pub name: String,
     /// Top-left of the monitor in the Windows virtual-desktop coordinate
     /// space. Used by input injection to translate overlay-local coordinates
     /// back to real pixel positions.
@@ -89,6 +92,7 @@ mod dxgi {
     pub fn enumerate_monitors() -> Result<Vec<MonitorInfo>> {
         unsafe {
             let factory: IDXGIFactory1 = CreateDXGIFactory1().context("CreateDXGIFactory1")?;
+            let names = friendly_names();
             let mut monitors = Vec::new();
             let mut adapter_idx = 0u32;
             while let Ok(adapter) = factory.EnumAdapters1(adapter_idx) {
@@ -108,6 +112,7 @@ mod dxgi {
                         index: monitors.len() as u32,
                         width: (coords.right - coords.left) as u32,
                         height: (coords.bottom - coords.top) as u32,
+                        name: names.get(&name).cloned().unwrap_or_default(),
                         device_name: name,
                         origin_x: coords.left,
                         origin_y: coords.top,
@@ -119,6 +124,54 @@ mod dxgi {
             }
             Ok(monitors)
         }
+    }
+
+    /// GDI device name (`\\.\DISPLAY1`) -> the monitor's friendly name
+    /// (EDID model, what Display Settings shows), for active displays.
+    fn friendly_names() -> std::collections::HashMap<String, String> {
+        use windows::Win32::Devices::Display::{
+            DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QueryDisplayConfig, DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+            DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME,
+            DISPLAYCONFIG_TARGET_DEVICE_NAME, QDC_ONLY_ACTIVE_PATHS,
+        };
+        let utf16 = |b: &[u16]| String::from_utf16_lossy(&b[..b.iter().position(|&c| c == 0).unwrap_or(b.len())]);
+        let mut out = std::collections::HashMap::new();
+        // SAFETY: buffers sized by GetDisplayConfigBufferSizes; each info
+        // request carries its own size in the header.
+        unsafe {
+            let (mut np, mut nm) = (0u32, 0u32);
+            if GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut np, &mut nm).is_err() {
+                return out;
+            }
+            let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); np as usize];
+            let mut modes = vec![DISPLAYCONFIG_MODE_INFO::default(); nm as usize];
+            if QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &mut np, paths.as_mut_ptr(), &mut nm, modes.as_mut_ptr(), None).is_err() {
+                return out;
+            }
+            for p in &paths[..np as usize] {
+                let mut src = DISPLAYCONFIG_SOURCE_DEVICE_NAME::default();
+                src.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+                src.header.size = std::mem::size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32;
+                src.header.adapterId = p.sourceInfo.adapterId;
+                src.header.id = p.sourceInfo.id;
+                if DisplayConfigGetDeviceInfo(&mut src.header) != 0 {
+                    continue;
+                }
+                let mut tgt = DISPLAYCONFIG_TARGET_DEVICE_NAME::default();
+                tgt.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
+                tgt.header.size = std::mem::size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>() as u32;
+                tgt.header.adapterId = p.targetInfo.adapterId;
+                tgt.header.id = p.targetInfo.id;
+                if DisplayConfigGetDeviceInfo(&mut tgt.header) != 0 {
+                    continue;
+                }
+                let name = utf16(&tgt.monitorFriendlyDeviceName).trim().to_string();
+                if !name.is_empty() {
+                    out.insert(utf16(&src.viewGdiDeviceName), name);
+                }
+            }
+        }
+        out
     }
 
     pub struct DxgiDuplication {

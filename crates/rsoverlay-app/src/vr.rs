@@ -897,6 +897,8 @@ mod imp {
         // space). The compositor carries it; `dash_pose` follows each frame.
         let mut dash_rel: Option<(u32, Affine3A)> = None;
         let mut grab: Option<Grab> = None;
+        // Monitor labels ("Q27G4", not "Monitor 0") before any window opens.
+        crate::mirror_source::refresh_monitor_names();
         let mut wins: Vec<WinOverlay> = Vec::new();
         let layouts_path = rsoverlay_core::layouts::Layouts::path();
         dev_view.layouts = rsoverlay_core::layouts::Layouts::load(&layouts_path);

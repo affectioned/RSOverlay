@@ -260,10 +260,18 @@ impl ThumbWorker {
     }
 }
 
+/// Read the monitors' own names from Windows for their labels ("DELL
+/// U2723QE" instead of "Monitor 0").
+pub fn refresh_monitor_names() -> Vec<rsoverlay_capture::MonitorInfo> {
+    let mons = enumerate_monitors().unwrap_or_default();
+    let names: Vec<String> = mons.iter().map(|m| m.name.clone()).collect();
+    rsoverlay_ui::views::set_monitor_names(&names);
+    mons
+}
+
 /// Every monitor plus every capturable window, for the source picker.
 pub fn list_sources() -> Vec<CaptureSource> {
-    let mut out: Vec<CaptureSource> = enumerate_monitors()
-        .unwrap_or_default()
+    let mut out: Vec<CaptureSource> = refresh_monitor_names()
         .into_iter()
         .map(|m| CaptureSource::Monitor(m.index))
         .collect();

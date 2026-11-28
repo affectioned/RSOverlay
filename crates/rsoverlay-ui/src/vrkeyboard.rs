@@ -181,6 +181,10 @@ pub struct VrKeyboard {
     /// Per hand: backspace held since, and deletes done so far (iPhone
     /// style repeat, every mode).
     bs_hold: [Option<(f64, u32)>; 2],
+    /// Per hand: when it last pressed a key; and the hand that pressed
+    /// last. Only typing hands light keys up (see [`hand_highlights`]).
+    pressed_at: [Option<f64>; 2],
+    last_hand: Option<usize>,
     latched: [bool; 2],
     labels: HashMap<ScanKey, String>,
     label_key: Option<(isize, LabelMods)>,
@@ -231,6 +235,22 @@ fn key_sound(kind: Kind, scan: u16) -> rsoverlay_audio::typing::KeySound {
         (_, 0x1C) => S::Enter,
         (_, 0x0E) => S::Backspace,
         _ => S::Key,
+    }
+}
+
+/// Seconds a hand keeps lighting keys after its last press while the
+/// other hand is the one typing.
+const OTHER_HAND_S: f64 = 3.0;
+
+/// Does hand `s` light up the key under its laser? Before anything is
+/// typed, every hand does; after that the hand that typed last always
+/// does, and the other only within [`OTHER_HAND_S`] of its own last
+/// press (two-handed typing keeps both lit; a resting hand goes dark).
+/// Pure.
+pub(crate) fn hand_highlights(s: usize, last_hand: Option<usize>, pressed_at: Option<f64>, now: f64) -> bool {
+    match last_hand {
+        None => true,
+        Some(l) => l == s || pressed_at.is_some_and(|t| now - t < OTHER_HAND_S),
     }
 }
 
@@ -492,6 +512,8 @@ impl VrKeyboard {
                     continue;
                 }
                 if let Some(k) = key_at(p) {
+                    self.pressed_at[s] = Some(time);
+                    self.last_hand = Some(s);
                     out.haptic.push(hand);
                     out.sounds.push(key_sound(k.kind, k.k.scan));
                     if k.k == BACKSPACE {
@@ -585,7 +607,13 @@ impl VrKeyboard {
         }
 
         // Draw keys.
-        let hovered: Vec<egui::Pos2> = hands.iter().filter_map(|h| h.1).collect();
+        // A resting hand's laser doesn't light keys (tester): only the
+        // hand that typed last, or one that typed in the last few seconds.
+        let hovered: Vec<egui::Pos2> = hands
+            .iter()
+            .filter(|h| hand_highlights(slot(h.0), self.last_hand, self.pressed_at[slot(h.0)], time))
+            .filter_map(|h| h.1)
+            .collect();
         for (rect, k) in &keys {
             let held = self.held.iter().flatten().any(|(hk, _, _)| hk == &k.k);
             let (mod_on, mod_locked) = match k.kind {
@@ -701,6 +729,24 @@ pub fn draw_close(p: &egui::Painter, c: egui::Pos2, s: egui::Stroke) {
     let d = 6.0;
     p.line_segment([c + egui::vec2(-d, -d), c + egui::vec2(d, d)], s);
     p.line_segment([c + egui::vec2(-d, d), c + egui::vec2(d, -d)], s);
+}
+
+#[cfg(test)]
+mod highlight_tests {
+    use super::*;
+
+    #[test]
+    fn a_resting_hand_does_not_light_keys() {
+        // Nothing typed yet: both hands aim freely.
+        assert!(hand_highlights(0, None, None, 5.0));
+        // Right typed last: right lights keys, the never-used left doesn't.
+        assert!(hand_highlights(1, Some(1), Some(10.0), 20.0));
+        assert!(!hand_highlights(0, Some(1), None, 20.0));
+        // Two-handed typing: left typed a moment ago, still lit.
+        assert!(hand_highlights(0, Some(1), Some(18.5), 20.0));
+        // Left has rested for a while: dark.
+        assert!(!hand_highlights(0, Some(1), Some(12.0), 20.0));
+    }
 }
 
 #[cfg(test)]
