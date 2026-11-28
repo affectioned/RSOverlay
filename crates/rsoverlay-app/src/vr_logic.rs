@@ -593,6 +593,21 @@ pub(crate) fn trigger_value(pull: f32, click: bool, point: f32) -> f32 {
     (pull.clamp(0.0, 1.0) / point * rsoverlay_ui::laser::PRESS).min(1.0)
 }
 
+/// SteamVR's ComputeOverlayIntersection measures our panels as if they
+/// were square: it can't read the size of the D3D12 textures we submit
+/// (it draws them right). Its u is correct; its v is squashed toward the
+/// middle by width / height (log: keyboard 2048x800, v 0.447 where the
+/// true v is 0.363), and it reports hits above / below the panel where
+/// nothing is drawn. Rescale v by the real aspect (`points` w / h) and
+/// drop hits off the panel. Pure.
+pub(crate) fn fix_square_uv(uv: [f32; 2], points: (f32, f32)) -> Option<[f32; 2]> {
+    if points.1 <= 0.0 {
+        return Some(uv);
+    }
+    let v = 0.5 + (uv[1] - 0.5) * (points.0 / points.1);
+    (0.0..=1.0).contains(&v).then_some([uv[0], v])
+}
+
 /// The beam's overlay transform with its length and thickness baked in
 /// as a scale (the overlay itself is a fixed 1 m wide, square-texel
 /// quad whose natural height is `natural_h`). One transform call then
@@ -1430,5 +1445,19 @@ mod sim {
             // (2 mm short of it, toward you: CURSOR_LIFT_M / len of the beam.)
             assert!((child.translation.x - 0.5).abs() <= CURSOR_LIFT_M / len + 1e-4, "len {len}: {:?}", child.translation);
         }
+    }
+
+    #[test]
+    fn steamvr_square_uv_is_rescaled_to_the_panel() {
+        // Logged pairs (SteamVR v, our own quad v) on the 1024x400 pt keyboard.
+        let kb = (1024.0, 400.0);
+        let v = |sv: f32| fix_square_uv([0.5, sv], kb).map(|u| u[1]);
+        assert!((v(0.447).unwrap() - 0.363).abs() < 0.003);
+        assert!((v(0.508).unwrap() - 0.520).abs() < 0.003);
+        // Hits SteamVR reports off the drawn panel are dropped.
+        assert_eq!(v(0.942), None);
+        assert_eq!(v(0.020), None);
+        // u untouched; a square panel unchanged.
+        assert_eq!(fix_square_uv([0.3, 0.9], (500.0, 500.0)), Some([0.3, 0.9]));
     }
 }
