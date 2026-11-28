@@ -144,6 +144,8 @@ pub struct WristAction {
 
 const ROW_GAP: f32 = 8.0;
 const CHIPS_PER_ROW: usize = 3;
+/// Battery devices per wrist row.
+const DEVICES_PER_ROW: usize = 3;
 
 pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
     let mut act = WristAction::default();
@@ -365,14 +367,18 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
                 egui::FontId::proportional(theme::SIZE_BODY), theme::FG_MUTED);
             edits.push((r5, compact::BATTERY));
         } else if has(compact::BATTERY) && !d.batteries.is_empty() {
-            // Four or more devices: use (nearly) the full width.
-            let inset = if d.batteries.len() >= 4 { 0.03 } else { 0.16 };
+            // At most three devices per row, so "100% / 10h 40m" always
+            // fits (tester: with more devices the text ran over / got cut).
+            let per_row = DEVICES_PER_ROW.min(d.batteries.len());
+            for (row_i, line) in d.batteries.chunks(per_row).enumerate() {
+            let inset = if per_row >= 3 { 0.06 } else { 0.16 };
             let r5 = row(&mut y, 52.0, full.width() * inset);
             slab(ui, r5, accent);
             edits.push((r5, compact::BATTERY));
-            let tw = r5.width() / d.batteries.len() as f32;
-            for (i, b) in d.batteries.iter().enumerate() {
-                let c = egui::Rect::from_min_size(egui::pos2(r5.left() + i as f32 * tw, r5.top()), egui::vec2(tw, r5.height())).shrink(6.0);
+            let tw = r5.width() / per_row as f32;
+            for (j, b) in line.iter().enumerate() {
+                let i = row_i * per_row + j;
+                let c = egui::Rect::from_min_size(egui::pos2(r5.left() + j as f32 * tw, r5.top()), egui::vec2(tw, r5.height())).shrink(6.0);
                 let pct = (b.fraction * 100.0).round() as u32;
                 let col = if !b.charging && pct < 20 { theme::DANGER } else { accent };
                 crate::battery::paint_device_icon(ui, b, egui::Rect::from_center_size(egui::pos2(c.left() + 18.0, c.center().y - 4.0), egui::vec2(28.0, 22.0)), col);
@@ -399,6 +405,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
                             egui::FontId::monospace(theme::SIZE_CAPTION + 1.0), theme::FG_PRIMARY);
                     }
                 }
+            }
             }
         }
         // 5 · Status chips.
@@ -717,6 +724,16 @@ mod tests {
             .filter(|(t, _)| t.contains("82%") || t == "10h 40m")
             .collect();
         assert!(texts.len() >= 9, "battery texts drawn: {texts:?}");
+        // ...and never cut off: each text fully inside its clip.
+        for cs in &out.shapes {
+            if let egui::Shape::Text(t) = &cs.shape {
+                let txt = &t.galley.job.text;
+                if txt.contains("82%") || txt == "10h 40m" {
+                    let r = t.galley.rect.translate(t.pos.to_vec2());
+                    assert!(cs.clip_rect.contains_rect(r.shrink(0.5)), "{txt:?} cut off: {r:?} vs clip {:?}", cs.clip_rect);
+                }
+            }
+        }
         for (i, (ta, a)) in texts.iter().enumerate() {
             for (tb, b) in &texts[i + 1..] {
                 let overlap = a.intersect(*b);

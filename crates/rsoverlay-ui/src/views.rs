@@ -291,6 +291,9 @@ pub struct DevView {
     pub windows_up: bool,
     /// The keyboard was open when the Windows button hid everything.
     pub kb_hidden_with_windows: bool,
+    /// Screenshots / previews only: battery-life estimates to show (the
+    /// real ones need minutes of history).
+    pub demo_battery_estimates: Option<Vec<Option<String>>>,
     /// The dashboard is up (VR; lights the wrist Dashboard button).
     pub dashboard_open: bool,
     /// Update notifier (Settings > Updates). The app enables it on
@@ -456,6 +459,7 @@ impl Default for DevView {
             focus_mode: false,
             windows_up: false,
             kb_hidden_with_windows: false,
+            demo_battery_estimates: None,
             dashboard_open: false,
             gamepad: Default::default(),
             wrist_bg: Default::default(),
@@ -736,10 +740,13 @@ impl DevView {
         self.tick_state(ctx);
         // Estimates line up with the batteries actually shown.
         let shown_batteries = self.shown_batteries();
-        let est: Vec<Option<String>> = shown_batteries
-            .iter()
-            .map(|b| self.battery_est.estimate(b).filter(|e| !e.charging).map(|e| crate::battery::format_duration(e.secs)))
-            .collect();
+        let est: Vec<Option<String>> = match &self.demo_battery_estimates {
+            Some(demo) => demo.clone(),
+            None => shown_batteries
+                .iter()
+                .map(|b| self.battery_est.estimate(b).filter(|e| !e.charging).map(|e| crate::battery::format_duration(e.secs)))
+                .collect(),
+        };
         let media = self.media.as_ref().filter(|m| !m.title.is_empty());
         // System load only when a chip needs it: the sampler is a thread.
         use crate::wrist::compact as wc;

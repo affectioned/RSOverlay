@@ -241,7 +241,9 @@ pub fn seed_dev_view(
             r(1, "Left hand", 0.14, false),
             r(2, "Right hand", 0.47, true),
             r(3, "Tracker · VIVE Tracker 3.0", 0.63, false),
+            r(4, "Tracker · VIVE Tracker 3.0", 1.0, false),
         ]);
+        dev.demo_battery_estimates = Some(vec![Some("1h 40m".into()), Some("12m".into()), None, Some("10h 5m".into()), Some("11h 20m".into())]);
     }
 
     // Placement.
