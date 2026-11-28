@@ -777,6 +777,22 @@ pub(crate) const READ_RATIO: f32 = 1.3;
 pub(crate) const READ_MAX_ANGLE: f32 = std::f32::consts::FRAC_PI_2;
 
 /// Panel width that makes `src_px` source pixels across readable at
+/// Panel width after its capture changes shape from aspect `old` to
+/// `new` (w/h). `content`: the box the capture is fitted into, panel
+/// points. Auto keeps the frame (the new shape fits inside it); Height /
+/// Width rescale the panel so that side of the content keeps its size.
+pub(crate) fn kept_width(width_m: f32, content: (f32, f32), old: f32, new: f32, keep: rsoverlay_core::config::SizeKeep) -> f32 {
+    use rsoverlay_core::config::SizeKeep;
+    let fit = |a: f32| rsoverlay_ui::window_panel::fit(a.max(0.01), content.0, content.1);
+    let (o, n) = (fit(old), fit(new));
+    let k = match keep {
+        SizeKeep::Auto => 1.0,
+        SizeKeep::Height => o.1 / n.1.max(1e-3),
+        SizeKeep::Width => o.0 / n.0.max(1e-3),
+    };
+    width_m * k
+}
+
 /// `dist_m`: the content (`content_frac` of the panel's width) spans
 /// src_px / ([`READ_RATIO`] x headset px per radian), at most
 /// [`READ_MAX_ANGLE`]. Returns (width m, capped).
@@ -841,6 +857,32 @@ mod sim {
     //! controller ray, stepped frame by frame through the same decisions
     //! the VR loop makes.
     use super::*;
+
+    #[test]
+    fn size_preservation_keeps_the_chosen_side() {
+        use rsoverlay_core::config::SizeKeep;
+        let content = (960.0, 548.0);
+        let fit = |w: f32, a: f32| {
+            let (pw, ph) = rsoverlay_ui::window_panel::fit(a, content.0, content.1);
+            (w * pw / content.0, w * ph / content.0)
+        };
+        // 16:9 monitor → a tall 9:16 window, panel 0.9 m wide.
+        let (old, new) = (16.0 / 9.0, 9.0 / 16.0);
+        for keep in [SizeKeep::Auto, SizeKeep::Height, SizeKeep::Width] {
+            let w = kept_width(0.9, content, old, new, keep);
+            let (b, a) = (fit(0.9, old), fit(w, new));
+            match keep {
+                // Same frame: the tall window fits inside the old one.
+                SizeKeep::Auto => assert!((w - 0.9).abs() < 1e-6),
+                SizeKeep::Height => assert!((a.1 - b.1).abs() < 1e-4, "{a:?} vs {b:?}"),
+                SizeKeep::Width => assert!((a.0 - b.0).abs() < 1e-4, "{a:?} vs {b:?}"),
+            }
+        }
+        // Unchanged shape: never resizes.
+        for keep in [SizeKeep::Auto, SizeKeep::Height, SizeKeep::Width] {
+            assert!((kept_width(0.7, content, 1.6, 1.6, keep) - 0.7).abs() < 1e-6);
+        }
+    }
 
     const EYE: Vec3A = Vec3A::new(0.0, 1.6, 0.0);
     /// Panel indices, as in the VR loop.

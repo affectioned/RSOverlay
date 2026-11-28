@@ -62,6 +62,8 @@ pub struct WindowPanelAction {
     pub toggle_tilt: bool,
     /// Snap pill clicked (this window joins others edge to edge).
     pub toggle_snap: bool,
+    /// "Show another window here": pick a new source for this panel.
+    pub switch: bool,
 }
 
 /// Window sizes on the toolbar's Size menu (outer size, pixels).
@@ -139,12 +141,12 @@ pub fn show(
         let mut op = opacity;
         // Window menu: smooth refresh for any capture; sizes only for
         // real windows Windows lets us touch.
-        let menu = mirror.map(|m| WindowMenu { resizable: m.resizable && !input_blocked, smooth, tilt, snap });
+        let menu = mirror.map(|m| WindowMenu { resizable: m.resizable && !input_blocked, smooth, tilt, snap, switch: true });
         // Auto-hidden toolbars leave their strip empty (no layout jump).
         if show_toolbar {
             let t = toolbar(ui, bar, title, icon, attach, linked, pinned, menu, Some(&mut op), accent);
-            (out.attach, out.close, out.unlink, out.toggle_pin, out.resize, out.toggle_smooth, out.readable, out.toggle_tilt, out.toggle_snap) =
-                (t.attach, t.close, t.unlink, t.toggle_pin, t.resize, t.toggle_smooth, t.readable, t.toggle_tilt, t.toggle_snap);
+            (out.attach, out.close, out.unlink, out.toggle_pin, out.resize, out.toggle_smooth, out.readable, out.toggle_tilt, out.toggle_snap, out.switch) =
+                (t.attach, t.close, t.unlink, t.toggle_pin, t.resize, t.toggle_smooth, t.readable, t.toggle_tilt, t.toggle_snap, t.switch);
         }
         if (op - opacity).abs() > f32::EPSILON {
             out.opacity = Some(op);
@@ -186,6 +188,8 @@ pub struct WindowMenu {
     pub tilt: Option<bool>,
     /// Snap pill: this window edge-docks to others (Some = shown).
     pub snap: Option<bool>,
+    /// "Show another window here" item.
+    pub switch: bool,
 }
 
 /// What the toolbar's controls asked for this frame.
@@ -204,6 +208,8 @@ pub struct ToolbarOut {
     pub toggle_tilt: bool,
     /// Snap pill clicked.
     pub toggle_snap: bool,
+    /// "Show another window here" picked.
+    pub switch: bool,
 }
 
 /// A window panel's bottom toolbar: app icon + title, dock + close, and
@@ -278,7 +284,7 @@ pub fn toolbar(
         }
         if let Some(m) = menu {
             ui.add_space(12.0);
-            (out.resize, out.toggle_smooth, out.readable) = window_menu(ui, m);
+            (out.resize, out.toggle_smooth, out.readable, out.switch) = window_menu(ui, m);
         }
     });
     out
@@ -286,10 +292,20 @@ pub fn toolbar(
 
 /// "Window" menu: keep this panel at full frame rate when you look
 /// away, and (real windows) resize the window so its text reads well at
-/// the panel's size. Returns (size picked, smooth toggled, readable).
-fn window_menu(ui: &mut egui::Ui, m: WindowMenu) -> (Option<(u32, u32)>, bool, bool) {
-    let (mut pick, mut toggle, mut readable) = (None, false, false);
+/// the panel's size. Returns (size picked, smooth toggled, readable,
+/// switch).
+fn window_menu(ui: &mut egui::Ui, m: WindowMenu) -> (Option<(u32, u32)>, bool, bool, bool) {
+    let (mut pick, mut toggle, mut readable, mut switch) = (None, false, false, false);
     ui.menu_button("Window", |ui| {
+        if m.switch
+            && ui
+                .button("Show another window here")
+                .on_hover_text("Pick a different window or monitor for this panel: it stays where it is (Settings › VR panels › Size preservation decides its new size)")
+                .clicked()
+        {
+            switch = true;
+            ui.close_menu();
+        }
         if ui
             .button("Readable size")
             .on_hover_text("Make this panel big enough to read its text from where you are (up to 90° of your view)")
@@ -320,7 +336,7 @@ fn window_menu(ui: &mut egui::Ui, m: WindowMenu) -> (Option<(u32, u32)>, bool, b
     })
     .response
     .on_hover_text("Refresh and size options for this window");
-    (pick, toggle, readable)
+    (pick, toggle, readable, switch)
 }
 
 /// Shown over an elevated window's capture when RSOverlay isn't elevated:
@@ -409,7 +425,8 @@ pub fn pill(ui: &mut egui::Ui, text: &str, on: bool, accent: egui::Color32) -> e
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-fn fit(aspect: f32, max_w: f32, max_h: f32) -> (f32, f32) {
+/// The largest `aspect` (w/h) box inside `max_w` × `max_h`.
+pub fn fit(aspect: f32, max_w: f32, max_h: f32) -> (f32, f32) {
     if max_h * aspect <= max_w {
         (max_h * aspect, max_h)
     } else {
@@ -423,7 +440,16 @@ const TILE_H: f32 = 190.0;
 /// VR Desktop page: every capturable window + monitor as a big tile;
 /// clicking one requests it as a floating window overlay.
 pub fn source_grid(ui: &mut egui::Ui, sources: &mut SourcePicker, open: &[CaptureSource], accent: egui::Color32) {
-    ui.label(theme::body_muted("Pick a window or monitor — it opens floating in front of you. Grip to carry it, dock it from its toolbar."));
+    if let Some((_, title)) = sources.replace.clone() {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(format!("Pick what the “{title}” panel shows instead")).color(accent).size(theme::SIZE_BODY));
+            if pill(ui, "Cancel", false, accent).on_hover_text("Keep that panel as it is; picks open new panels again").clicked() {
+                sources.replace = None;
+            }
+        });
+    } else {
+        ui.label(theme::body_muted("Pick a window or monitor — it opens floating in front of you. Grip to carry it, dock it from its toolbar."));
+    }
     ui.add_space(theme::GUTTER);
     if sources.choices.is_empty() {
         ui.label(theme::body_muted("looking for windows…"));

@@ -123,6 +123,12 @@ pub struct SourcePicker {
     pub wants_refresh: bool,
     /// Set by the UI when the user picks a different source.
     pub request: Option<CaptureSource>,
+    /// "Show another window here": the next pick replaces what this
+    /// panel (seq, title) shows instead of opening a new one.
+    pub replace: Option<(u32, String)>,
+    /// Open the dashboard on the Desktop page (set by a panel's
+    /// "Show another window here").
+    pub open_picker: bool,
     /// "All monitors": open every monitor as a wall arced around you.
     pub wall_request: bool,
     /// "Big screen": the main monitor as one large curved screen.
@@ -403,6 +409,9 @@ pub struct DevView {
     /// VR: panels fade out beyond this off-axis view angle (degrees).
     pub vr_clip_angle: f32,
     pub vr_wrist_opacity: f32,
+    /// Wrist toolbar size, x the default width (Settings › VR); the VR
+    /// shell applies it and writes back grab-scales (stick while held).
+    pub vr_wrist_scale: f32,
     /// Accessibility: VR UI size multiplier.
     pub vr_ui_scale: f32,
     pub vr_show_lasers: bool,
@@ -426,6 +435,8 @@ pub struct DevView {
     pub vr_render_scale: f32,
     /// Refresh rate of panels you aren't looking at (fps).
     pub vr_background_fps: f32,
+    /// Settings › VR panels › Size preservation.
+    pub vr_size_keep: rsoverlay_core::config::SizeKeep,
     pub run_as_admin: bool,
     /// Set by the app: is this process elevated right now?
     pub elevated: bool,
@@ -551,6 +562,7 @@ impl Default for DevView {
             vr_left_handed: false,
             vr_clip_angle: 60.0,
             vr_wrist_opacity: 1.0,
+            vr_wrist_scale: 1.0,
             vr_ui_scale: 1.0,
             vr_show_lasers: true,
             vr_laser_angle: 0.0,
@@ -563,6 +575,7 @@ impl Default for DevView {
             vr_stick_axis_lock: true,
             vr_render_scale: 1.0,
             vr_background_fps: 5.0,
+            vr_size_keep: rsoverlay_core::config::SizeKeep::Auto,
             run_as_admin: false,
             elevated: false,
             restart_elevated_requested: false,
@@ -977,11 +990,11 @@ impl DevView {
                         Some("appearance")
                     }
                     1 => {
-                        vr_card(ui, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, &mut self.vr_hide_wrist, accent);
+                        vr_card(ui, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, &mut self.vr_wrist_scale, &mut self.vr_hide_wrist, accent);
                         Some("vr")
                     }
                     2 => {
-                        vr_panels_card(ui, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, &mut self.vr_background_fps, &mut self.pointer, accent);
+                        vr_panels_card(ui, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, &mut self.vr_background_fps, &mut self.vr_size_keep, &mut self.pointer, accent);
                         Some("vr-panels")
                     }
                     3 => {
@@ -1457,9 +1470,9 @@ impl DevView {
                         self.reset_requested = true;
                     }
                     l.add_space(theme::GUTTER);
-                    vr_card(l, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, &mut self.vr_hide_wrist, accent);
+                    vr_card(l, &mut self.vr_left_handed, &mut self.vr_clip_angle, &mut self.vr_wrist_opacity, &mut self.vr_wrist_scale, &mut self.vr_hide_wrist, accent);
                     l.add_space(theme::GUTTER);
-                    vr_panels_card(l, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, &mut self.vr_background_fps, &mut self.pointer, accent);
+                    vr_panels_card(l, &mut self.vr_hide_with_steamvr, &mut self.vr_grab_tilt, &mut self.vr_stick_axis_lock, &mut self.vr_render_scale, &mut self.vr_background_fps, &mut self.vr_size_keep, &mut self.pointer, accent);
                     l.add_space(theme::GUTTER);
                     pointer_card(l, &mut self.scroll_speed, &mut self.pointer, accent);
                     l.add_space(theme::GUTTER);
@@ -1644,7 +1657,7 @@ fn accessibility_card(ui: &mut egui::Ui, steady: &mut f32, scale: &mut f32, lase
     });
 }
 
-fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opacity: &mut f32, hide_wrist: &mut bool, accent: egui::Color32) {
+fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opacity: &mut f32, wrist_scale: &mut f32, hide_wrist: &mut bool, accent: egui::Color32) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         card_header(ui, icons::POINTER, "VR", accent);
@@ -1670,6 +1683,16 @@ fn vr_card(ui: &mut egui::Ui, left_handed: &mut bool, clip: &mut f32, wrist_opac
             crate::theme::fit_slider(ui);
             ui.add(egui::Slider::new(wrist_opacity, 0.2..=1.0).fixed_decimals(2));
         });
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Wrist size"));
+            crate::theme::fit_slider(ui);
+            let mut pct = (*wrist_scale * 100.0).round();
+            if ui.add(egui::Slider::new(&mut pct, 50.0..=150.0).suffix("%").fixed_decimals(0)).changed() {
+                *wrist_scale = pct / 100.0;
+            }
+        })
+        .response
+        .on_hover_text("How big the wrist toolbar is. In VR you can also grab it and push the stick left / right.");
         ui.checkbox(hide_wrist, "Hide wrist toolbar")
             .on_hover_text("No wrist overlay at all. Open the dashboard with a double-press of A / X (or the menu button) on the wrist hand.");
     });
@@ -1753,6 +1776,7 @@ fn vr_panels_card(
     axis_lock: &mut bool,
     render_scale: &mut f32,
     background_fps: &mut f32,
+    size_keep: &mut rsoverlay_core::config::SizeKeep,
     ptr: &mut PointerPrefs,
     accent: egui::Color32,
 ) {
@@ -1809,6 +1833,26 @@ fn vr_panels_card(
         })
         .response
         .on_hover_text("How often panels you aren't looking at refresh. Lower saves GPU for your game; raise it to watch a video out of the corner of your eye.");
+        ui.horizontal(|ui| {
+            use rsoverlay_core::config::SizeKeep;
+            ui.label(theme::body_muted("Size preservation"));
+            for (v, label, tip) in [
+                (SizeKeep::Auto, "Automatic", "The new window fits inside the panel's current frame"),
+                (SizeKeep::Height, "Height", "The content keeps its height: a wider window makes a wider panel"),
+                (SizeKeep::Width, "Width", "The content keeps its width: a taller window makes a taller panel"),
+            ] {
+                let sel = *size_keep == v;
+                if ui
+                    .selectable_label(sel, egui::RichText::new(label).color(if sel { theme::BG_ROOT } else { theme::FG_MUTED }))
+                    .on_hover_text(tip)
+                    .clicked()
+                {
+                    *size_keep = v;
+                }
+            }
+        })
+        .response
+        .on_hover_text("When a window panel changes shape (you showed another window in it, or the window was resized): what stays the same size");
     });
 }
 
@@ -1939,11 +1983,29 @@ pub struct KeyboardPrefs {
     pub pack: String,
     /// Packs found under the sounds folder (rescanned on Refresh).
     pub packs: Vec<String>,
+    /// Voice typing (keyboard mic button).
+    pub voice_model: rsoverlay_core::config::VoiceModel,
+    /// Microphone endpoint id; empty = Windows default.
+    pub mic: String,
+    /// Microphones found (listed when the card is first shown / Refresh).
+    pub mics: Option<Vec<rsoverlay_audio::mic::MicDevice>>,
+    /// Mute the VRChat mic (OSC) while dictating.
+    pub mute_vrchat: bool,
 }
 
 impl Default for KeyboardPrefs {
     fn default() -> Self {
-        Self { opacity: 1.0, sounds: true, volume: 0.4, pack: String::new(), packs: Vec::new() }
+        Self {
+            opacity: 1.0,
+            sounds: true,
+            volume: 0.4,
+            pack: String::new(),
+            packs: Vec::new(),
+            voice_model: rsoverlay_core::config::VoiceModel::Fast,
+            mic: String::new(),
+            mics: None,
+            mute_vrchat: true,
+        }
     }
 }
 
@@ -1995,7 +2057,50 @@ fn keyboard_card(ui: &mut egui::Ui, kb: &mut KeyboardPrefs, accent: egui::Color3
                 ui.label(theme::caption(rsoverlay_audio::typing::KEYCHRON_CREDIT));
             }
         });
+        ui.add_space(8.0);
+        voice_typing(ui, kb);
     });
+}
+
+/// Settings › Keyboard: voice typing (the mic button on the keyboard).
+fn voice_typing(ui: &mut egui::Ui, kb: &mut KeyboardPrefs) {
+    use rsoverlay_core::config::VoiceModel;
+    ui.label(theme::body_muted("Voice typing")).on_hover_text(
+        "The mic button on the VR keyboard: speak, press it again, and the text is typed (or added to your VRChat message). Speech is recognised on this PC (Whisper); nothing is sent anywhere.",
+    );
+    ui.horizontal(|ui| {
+        ui.label(theme::body_muted("Model"));
+        for (v, label, tip) in [
+            (VoiceModel::Fast, "Fast", "Whisper base, 60 MB download on first use. Quick and fine for short messages."),
+            (VoiceModel::Accurate, "Accurate", "Whisper small, 190 MB download on first use. Better with accents and other languages; a bit slower."),
+        ] {
+            let sel = kb.voice_model == v;
+            if ui
+                .selectable_label(sel, egui::RichText::new(label).color(if sel { theme::BG_ROOT } else { theme::FG_MUTED }))
+                .on_hover_text(tip)
+                .clicked()
+            {
+                kb.voice_model = v;
+            }
+        }
+    });
+    let mics = kb.mics.get_or_insert_with(rsoverlay_audio::mic::devices).clone();
+    ui.horizontal(|ui| {
+        ui.label(theme::body_muted("Microphone"));
+        let current = mics.iter().find(|m| m.id == kb.mic).map_or("Windows default".to_string(), |m| m.name.clone());
+        egui::ComboBox::from_id_source("voice-mic").width(260.0).selected_text(current).show_ui(ui, |ui| {
+            ui.selectable_value(&mut kb.mic, String::new(), "Windows default");
+            for m in &mics {
+                ui.selectable_value(&mut kb.mic, m.id.clone(), &m.name);
+            }
+        });
+        if ui.small_button("Refresh").clicked() {
+            kb.mics = None;
+        }
+    });
+    ui.checkbox(&mut kb.mute_vrchat, "Mute VRChat while dictating").on_hover_text(
+        "Mutes your VRChat mic while you dictate and unmutes it after, so the world doesn't hear you (VRChat OSC on, Toggle Voice). Listens on VRChat's OSC output port 9001: turn this off if another OSC app needs that port.",
+    );
 }
 
 /// Laser click helpers.

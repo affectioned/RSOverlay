@@ -58,6 +58,8 @@ fn static_entries() -> Vec<Entry> {
         card("Windows hide with the dashboard", "Settings › VR panels", "pin pinned layout mode hide show all windows xsoverlay", Settings, "VR panels"),
         card("Hide while the SteamVR menu is open", "Settings › VR panels", "steamvr dashboard system menu hide fade", Settings, "VR panels"),
         card("Tilt panels with the controller", "Settings › VR panels", "rotate rotation tilt roll grab world locked", Settings, "VR panels"),
+        card("Voice typing", "Settings › Keyboard", "speech to text dictation microphone mic whisper voice talk transcribe", Settings, "Keyboard"),
+        card("Size preservation", "Settings › VR panels", "switch window resize aspect keep height width automatic", Settings, "VR panels"),
         card("One stick action at a time", "Settings › VR panels", "push pull scale resize stick decouple axis grab", Settings, "VR panels"),
         card("Auto-hide window toolbars", "Settings › VR panels", "hide toolbar chrome frame clean minimal video", Settings, "VR panels"),
         card("Unwatched panels refresh rate", "Settings › VR panels", "fps capture rate background refresh gpu performance video", Settings, "VR panels"),
@@ -173,7 +175,7 @@ mod tests {
         for e in static_entries() {
             if let Target::Card(_, cap) = e.target {
                 assert!(
-                    ["Appearance", "Night light", "VR", "VR panels", "Gamepad", "Updates", "Pointer", "Window input", "Wrist look", "Wrist toolbar", "Accessibility", "Administrator", "Reset", "Placement", "RSOverlay performance",
+                    ["Appearance", "Night light", "VR", "VR panels", "Keyboard", "Gamepad", "Updates", "Pointer", "Window input", "Wrist look", "Wrist toolbar", "Accessibility", "Administrator", "Reset", "Placement", "RSOverlay performance",
                         "Volume", "Now playing", "VRChat chatbox", "Macros", "Notifications", "Battery", "PC performance"]
                         .contains(&cap),
                     "{cap}"

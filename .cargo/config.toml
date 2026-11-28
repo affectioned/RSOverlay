@@ -4,3 +4,8 @@ incremental = true
 
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-cpu=x86-64-v2"]
+
+[env]
+# whisper.cpp (voice typing): a portable AVX2 build, not one tuned to the
+# build machine's CPU (CI's could have AVX-512 that players' don't).
+GGML_NATIVE = "OFF"

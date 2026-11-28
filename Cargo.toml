@@ -12,6 +12,7 @@ members = [
     "crates/rsoverlay-render",
     "crates/rsoverlay-input",
     "crates/rsoverlay-ui",
+    "crates/rsoverlay-speech",
     "crates/rsoverlay-app",
 ]
 
@@ -82,6 +83,7 @@ rsoverlay-discord = { path = "crates/rsoverlay-discord" }
 rsoverlay-render = { path = "crates/rsoverlay-render" }
 rsoverlay-input   = { path = "crates/rsoverlay-input" }
 rsoverlay-ui     = { path = "crates/rsoverlay-ui" }
+rsoverlay-speech = { path = "crates/rsoverlay-speech" }
 rsoverlay-app    = { path = "crates/rsoverlay-app" }
 
 [profile.release]

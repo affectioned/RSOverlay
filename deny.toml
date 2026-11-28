@@ -40,6 +40,9 @@ exceptions = [
     # egui's bundled fonts: Ubuntu-Light (Ubuntu Font Licence) and
     # Noto / emoji fonts (OFL).
     { allow = ["OFL-1.1", "LicenseRef-UFL-1.0"], crate = "epaint" },
+    # Voice typing: whisper.cpp's Rust bindings (public-domain Unlicense).
+    { allow = ["Unlicense"], crate = "whisper-rs" },
+    { allow = ["Unlicense"], crate = "whisper-rs-sys" },
 ]
 
 [bans]

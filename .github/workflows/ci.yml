@@ -14,6 +14,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # bindgen (whisper.cpp bindings for voice typing) needs libclang;
+  # the Windows runner ships LLVM here.
+  LIBCLANG_PATH: 'C:\Program Files\LLVM\bin'
 
 jobs:
   check:

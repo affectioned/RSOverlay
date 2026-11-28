@@ -38,9 +38,11 @@ mod imp {
     /// Wrist watch: small texture, 2 texels/pt → 512 × 256 pt face.
     /// Wrist toolbar stack: 600 × 520 pt at 2 texels/pt (room for every
     /// module at once in edit mode, including two rows of status chips).
-    const WRIST_TEX: (u32, u32) = (1200, 1040);
+    const WRIST_TEX: (u32, u32) = (1200, 1180);
     const WRIST_PPP: f32 = 2.0;
-    const WRIST_WIDTH_M: f32 = 0.24;
+    /// Default wrist width (100% in Settings › VR › Wrist size); was 24 cm
+    /// (tester's friend: too big).
+    use rsoverlay_core::config::WRIST_WIDTH_M;
     /// Wrist mount, in the left controller's frame (−Z = pointing
     /// direction, +Y = top of the controller, +Z = back toward the
     /// wrist): just above the back of the hand, face pitched 60° up
@@ -457,6 +459,12 @@ mod imp {
         res: ResSettle,
         /// Share of the panel's width the capture filled last frame.
         content_frac: f32,
+        /// Capture aspect (w/h) the panel was last sized for (Size
+        /// preservation acts when it changes).
+        aspect: Option<f32>,
+        /// Until then, shape changes are adopted without resizing (a
+        /// layout just put the real window back at its saved size).
+        aspect_adopt_until: f64,
     }
 
     impl WinOverlay {
@@ -561,6 +569,8 @@ mod imp {
             no_snap: false,
             res: ResSettle::default(),
             content_frac: 1.0,
+            aspect: None,
+            aspect_adopt_until: f64::NEG_INFINITY,
         })
     }
 
@@ -614,6 +624,12 @@ mod imp {
                     curvature: (w.curvature > 0.0).then_some(w.curvature),
                     smooth: w.smooth,
                     no_snap: w.no_snap,
+                    desktop: w
+                        .mirror
+                        .as_ref()
+                        .and_then(|m| m.window_hwnd())
+                        .and_then(rsoverlay_capture::window::window_placement)
+                        .map(|(x, y, w, h, maximized)| rsoverlay_core::layouts::DesktopPlace { x, y, w, h, maximized }),
                 }
             })
             .collect();
@@ -661,6 +677,8 @@ mod imp {
             no_snap: false,
             res: ResSettle::default(),
             content_frac: 1.0,
+            aspect: None,
+            aspect_adopt_until: f64::NEG_INFINITY,
         })
     }
 
@@ -971,12 +989,11 @@ mod imp {
             if let Some(m) = st.wrist_pose {
                 wrist_rel = to_affine(&HmdMatrix34_t { m });
             }
-            if let Some(w) = st.wrist_width {
-                wrist.set_width(&overlay, w);
-            }
+            dev_view.vr_wrist_scale = st.wrist_scale();
+            wrist.set_width(&overlay, WRIST_WIDTH_M * dev_view.vr_wrist_scale.clamp(0.5, 1.5));
             keyboard.locked_pos = st.kb_pinned;
             keyboard.auto_repeat = st.kb_auto_repeat;
-            keyboard.full = st.kb_full;
+            keyboard.layout = rsoverlay_ui::vrkeyboard::KbLayout::from_flags(st.kb_full, st.kb_minimal);
             keyboard.vrchat = st.kb_vrchat;
             dev_view.dash_pinned = st.dash_pinned;
             if st.dash_pinned {
@@ -1001,6 +1018,11 @@ mod imp {
         let mut win_seq = 0u32;
         let mut next_group = 0u32;
         let mut typing_sounds = rsoverlay_audio::typing::TypingSounds::new();
+        // Voice typing (keyboard mic) and VRChat's mute state for it.
+        let mut dictation = crate::dictation::Dictation::new();
+        let mute_watch = osc
+            .as_ref()
+            .map(|_| rsoverlay_osc::watch_mute(&rt, rsoverlay_osc::VRCHAT_OUT_PORT, dev_view.kb_prefs.mute_vrchat));
         let mut thumbs = crate::mirror_source::ThumbWorker::spawn();
         // Device icons from the user's SteamVR install (decoded once each).
         let mut device_icons = crate::device_icons::DeviceIcons::default();
@@ -1647,6 +1669,8 @@ mod imp {
                                 }
                             }
                             wrist.set_width(&overlay, width);
+                            // Keep Settings › VR › Wrist size in step.
+                            dev_view.vr_wrist_scale = width / WRIST_WIDTH_M;
                         } else if let Err(e) = overlay.set_transform_absolute(
                             match g.panel {
                                 1 => dash.handle,
@@ -2002,6 +2026,32 @@ mod imp {
             for w in &mut wins {
                 w.panel.apply_scale(scale);
             }
+            // Size preservation: the capture changed shape (another window
+            // shown here, or the window resized) → keep the chosen side.
+            for (i, w) in wins.iter_mut().enumerate() {
+                let Some(h) = w.mirror.as_ref().map(|m| m.handle()) else { continue };
+                if h.width == 0 || h.height == 0 || held == Some(i + WIN0) {
+                    continue;
+                }
+                let new = h.width as f32 / h.height as f32;
+                if time < w.aspect_adopt_until {
+                    w.aspect = Some(new);
+                    continue;
+                }
+                match w.aspect {
+                    Some(old) if (new / old - 1.0).abs() > 0.005 => {
+                        let content = (w.panel.points.x, w.panel.points.y - window_panel::TOOLBAR_H - 6.0);
+                        let width = kept_width(w.panel.width_m, content, old, new, dev_view.vr_size_keep);
+                        if (width - w.panel.width_m).abs() > 1e-4 {
+                            info!("window {}: {:.2} → {:.2} aspect, {:?}: {:.2} → {:.2} m", w.seq, old, new, dev_view.vr_size_keep, w.panel.width_m, width);
+                            w.panel.set_width(&overlay, width);
+                        }
+                        w.aspect = Some(new);
+                    }
+                    None => w.aspect = Some(new),
+                    _ => {}
+                }
+            }
 
             // ── Wrist frame.
             let wf = wrist.laser.update(&wrist_samples, dt);
@@ -2031,6 +2081,12 @@ mod imp {
                 dev_view.show_keyboard = !dev_view.show_keyboard;
                 // Your own choice wins over "bring it back with the windows".
                 dev_view.kb_hidden_with_windows = false;
+            }
+            if std::mem::take(&mut dev_view.sources.open_picker) {
+                dev_view.page = rsoverlay_ui::shell::Page::Desktop;
+                if !dash.visible {
+                    toggle_dash = true;
+                }
             }
             if let Some(p) = act.open_page {
                 if dash.visible && dev_view.page == p {
@@ -2228,6 +2284,30 @@ mod imp {
             prev_text_target = text_target;
             let internal = text_target.is_some();
             let mut kb_haptics = Vec::new();
+            // Voice typing: progress / finished text, and the bar state.
+            if let Some(w) = &mute_watch {
+                w.set_enabled(dev_view.kb_prefs.mute_vrchat);
+            }
+            let osc_pair = osc.as_ref().zip(mute_watch.as_ref());
+            if let Some(text) = dictation.update(dev_view.kb_prefs.voice_model, osc_pair) {
+                if keyboard.vrchat {
+                    keyboard.append_vrc(&text);
+                } else if let Some(t) = text_target {
+                    typed.push(egui::Event::Text(format!("{} ", text.trim())));
+                    typed_target = Some(t);
+                } else if let Some(inj) = injector.as_ref() {
+                    // Into the focused desktop window, like the keys.
+                    for c in text.trim().chars().chain(std::iter::once(' ')) {
+                        let _ = inj.type_char(c);
+                    }
+                }
+            }
+            // Closing the keyboard ends a recording (it's transcribed).
+            if !dev_view.show_keyboard && dictation.recording() {
+                let prefs = crate::dictation::VoicePrefs { model: dev_view.kb_prefs.voice_model, mic: &dev_view.kb_prefs.mic, mute_vrchat: dev_view.kb_prefs.mute_vrchat };
+                dictation.toggle(&prefs, osc_pair);
+            }
+            keyboard.dictation = dictation.state();
             if kb.visible {
                 let hands: Vec<(laser::Hand, Option<egui::Pos2>, f32)> =
                     kb_samples.iter().map(|s| (s.hand, s.hit, s.trigger)).collect();
@@ -2260,6 +2340,10 @@ mod imp {
                 }
                 if let Some(msg) = kf.chat.take() {
                     dev_view.send_chat(msg);
+                }
+                if kf.mic {
+                    let prefs = crate::dictation::VoicePrefs { model: dev_view.kb_prefs.voice_model, mic: &dev_view.kb_prefs.mic, mute_vrchat: dev_view.kb_prefs.mute_vrchat };
+                    dictation.toggle(&prefs, osc_pair);
                 }
                 if !kf.text.is_empty() {
                     typed.extend(kf.text);
@@ -2370,6 +2454,50 @@ mod imp {
                             warn!("big screen: place: {e:#}");
                         }
                     }
+                }
+            }
+            // A pick after "Show another window here" goes into that panel
+            // (dropped once the dashboard is closed without picking).
+            if !dash.visible {
+                dev_view.sources.replace = None;
+            }
+            let replace = dev_view
+                .sources
+                .request
+                .is_some()
+                .then(|| dev_view.sources.replace.take())
+                .flatten()
+                .and_then(|(seq, _)| wins.iter().position(|w| w.seq == seq && w.mirror.is_some()));
+            if let (Some(k), Some(src)) = (replace, dev_view.sources.request.clone()) {
+                dev_view.sources.request = None;
+                let w = &mut wins[k];
+                if let rsoverlay_ui::views::CaptureSource::Window { hwnd, .. } = &src {
+                    rsoverlay_capture::window::restore_quietly(*hwnd);
+                }
+                match GpuMirror::start(&gpu, &mut w.panel.egui, src.clone()) {
+                    Ok(m) => {
+                        info!("window {}: now shows {}", w.seq, src.label());
+                        // Let go of anything held in the old window.
+                        let geom = w.mirror.as_ref().and_then(|m| m.geom());
+                        if let (Some(b), Some(inj), Some(g)) = (w.down.take(), injector.as_ref(), geom) {
+                            let (x, y) = w.last_hit.unwrap_or((0, 0));
+                            let _ = inj.button(&g, x, y, b, false);
+                        }
+                        if let Some(old) = w.mirror.replace(m) {
+                            old.shutdown(&mut w.panel.egui);
+                        }
+                        w.last_hit = None;
+                        w.icon = match &src {
+                            rsoverlay_ui::views::CaptureSource::Window { hwnd, .. } => dev_view
+                                .sources
+                                .icons
+                                .get(hwnd)
+                                .map(|img| w.panel.egui.ctx.load_texture("window-icon", img.clone(), egui::TextureOptions::LINEAR)),
+                            _ => None,
+                        };
+                        w.blocked_checked = None;
+                    }
+                    Err(e) => warn!("show another window: {e:#}"),
                 }
             }
             if let Some(src) = dev_view.sources.request.take() {
@@ -2580,6 +2708,11 @@ mod imp {
                     }
                 }
                 w.smooth ^= act.toggle_smooth;
+                if act.switch {
+                    let title = w.mirror.as_ref().map(|m| m.source.label()).unwrap_or_default();
+                    dev_view.sources.replace = Some((w.seq, title));
+                    dev_view.sources.open_picker = true;
+                }
                 // Readable size: widen (or shrink) the panel so the text
                 // is legible from where you are (see vr_logic).
                 if act.readable {
@@ -2761,6 +2894,14 @@ mod imp {
                             w.pinned = p.pinned;
                             w.smooth = p.smooth;
                             w.no_snap = p.no_snap;
+                            // The real window goes back to its saved spot;
+                            // the panel keeps the saved width meanwhile.
+                            if let (Some(d), Some(hwnd)) = (p.desktop, w.mirror.as_ref().and_then(|m| m.window_hwnd())) {
+                                match rsoverlay_capture::window::set_window_placement(hwnd, d.x, d.y, d.w, d.h, d.maximized) {
+                                    Ok(()) => w.aspect_adopt_until = time + 3.0,
+                                    Err(e) => warn!("layout: put {} back on the desktop: {e:#}", p.title),
+                                }
+                            }
                             if let Some(c) = p.curvature.filter(|c| *c > 0.0) {
                                 w.curvature = c.min(1.0);
                                 let _ = overlay.set_curvature(w.panel.handle, w.curvature);
@@ -2799,13 +2940,23 @@ mod imp {
                 }
             }
 
+            // Settings › VR › Wrist size (not while it's being held).
+            {
+                let want = WRIST_WIDTH_M * dev_view.vr_wrist_scale.clamp(0.5, 1.5);
+                let held = grab.as_ref().is_some_and(|g| g.panel == 0);
+                if !held && (want - wrist.width_m).abs() > 1e-4 {
+                    wrist.set_width(&overlay, want);
+                }
+            }
+
             // Mirror hands-on state into the config (autosaved, debounced).
             dev_view.vr_state = rsoverlay_core::config::VrState {
                 wrist_pose: Some(from_affine(&wrist_rel).m),
                 wrist_width: Some(wrist.width_m),
                 kb_pinned: keyboard.locked_pos,
                 kb_auto_repeat: keyboard.auto_repeat,
-                kb_full: keyboard.full,
+                kb_full: keyboard.layout == rsoverlay_ui::vrkeyboard::KbLayout::Full,
+                kb_minimal: keyboard.layout == rsoverlay_ui::vrkeyboard::KbLayout::Minimal,
                 kb_vrchat: keyboard.vrchat,
                 dash_pinned: dev_view.dash_pinned,
                 dash_pose: dash_pose.filter(|_| dev_view.dash_pinned && dash_rel.is_none()).map(|p| from_affine(&p).m),

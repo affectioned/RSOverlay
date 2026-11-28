@@ -7,6 +7,7 @@
 //! snap back while the worker catches up.
 
 pub mod alerts;
+pub mod mic;
 pub mod typing;
 
 use std::sync::mpsc;

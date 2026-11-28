@@ -154,6 +154,9 @@ pub fn seed_dev_view(
     dev.kb_prefs.sounds = cfg.vr.typing_sounds;
     dev.kb_prefs.volume = cfg.vr.typing_volume.clamp(0.0, 1.0);
     dev.kb_prefs.pack = cfg.vr.sound_pack.clone();
+    dev.kb_prefs.voice_model = cfg.vr.voice_model;
+    dev.kb_prefs.mic = cfg.vr.voice_mic.clone();
+    dev.kb_prefs.mute_vrchat = cfg.vr.voice_mute_vrchat;
     dev.pointer.long_press = cfg.vr.long_press;
     dev.pointer.long_press_s = cfg.vr.long_press_s.clamp(0.3, 1.5);
     dev.pointer.double_click_s = cfg.vr.double_click_s.clamp(0.0, 0.8);
@@ -175,6 +178,7 @@ pub fn seed_dev_view(
     dev.vr_pointer_size = cfg.vr.pointer_size.clamp(0.5, 2.5);
     dev.vr_render_scale = cfg.vr.render_scale.clamp(1.0, 2.0);
     dev.vr_background_fps = cfg.vr.background_fps.clamp(1.0, 90.0);
+    dev.vr_size_keep = cfg.vr.size_keep;
     let nc = &cfg.notifications;
     dev.notif.size_m = nc.size_m.clamp(0.15, 0.6);
     dev.notif.offset_y = nc.offset_y.clamp(-0.4, 0.2);
@@ -184,6 +188,7 @@ pub fn seed_dev_view(
     dev.notif.muted = nc.muted_apps.clone();
     dev.notif.files = rsoverlay_audio::alerts::list_sound_files(&rsoverlay_core::config::sounds_dir());
     dev.vr_state = cfg.vr_state.clone();
+    dev.vr_wrist_scale = cfg.vr_state.wrist_scale();
     dev.kb_prefs.packs = rsoverlay_audio::typing::list_packs(&rsoverlay_core::config::sounds_dir());
     dev.elevated = rsoverlay_input::elevation::current_process_elevated();
     dev.battery_osc.enabled = cfg.osc.battery_params;
@@ -360,6 +365,9 @@ pub fn config_from_dev_view(
         typing_sounds: dev.kb_prefs.sounds,
         typing_volume: dev.kb_prefs.volume,
         sound_pack: dev.kb_prefs.pack.clone(),
+        voice_model: dev.kb_prefs.voice_model,
+        voice_mic: dev.kb_prefs.mic.clone(),
+        voice_mute_vrchat: dev.kb_prefs.mute_vrchat,
         long_press: dev.pointer.long_press,
         long_press_s: dev.pointer.long_press_s,
         double_click_s: dev.pointer.double_click_s,
@@ -381,8 +389,14 @@ pub fn config_from_dev_view(
         pointer_size: dev.vr_pointer_size,
         render_scale: dev.vr_render_scale,
         background_fps: dev.vr_background_fps,
+        size_keep: dev.vr_size_keep,
     };
     out.vr_state = dev.vr_state.clone();
+    // Settings › VR › Wrist size, also when changed outside VR (only when
+    // moved, so a saved width round-trips untouched).
+    if (dev.vr_wrist_scale - dev.vr_state.wrist_scale()).abs() > 1e-3 {
+        out.vr_state.wrist_width = Some(rsoverlay_core::config::WRIST_WIDTH_M * dev.vr_wrist_scale.clamp(0.5, 1.5));
+    }
     out.discord = dev.discord.clone();
     out.updates = dev.updates.prefs.clone();
     out.gamepad = dev.gamepad.clone();
@@ -897,6 +911,12 @@ pub fn run(
     }
     let injector = InputInjector::new().context("initializing input injector")?;
     let mut vr_keyboard = rsoverlay_ui::vrkeyboard::VrKeyboard::default();
+    // RSO_KB_LAYOUT=full|minimal: screenshot the other keyboard sizes.
+    vr_keyboard.layout = match std::env::var("RSO_KB_LAYOUT").as_deref() {
+        Ok("full") => rsoverlay_ui::vrkeyboard::KbLayout::Full,
+        Ok("minimal") => rsoverlay_ui::vrkeyboard::KbLayout::Minimal,
+        _ => rsoverlay_ui::vrkeyboard::KbLayout::Compact,
+    };
     // Every VR surface, switchable live (dev bar), at real VR sizes.
     let mut harness = crate::preview_dev::DevHarness::new(&test);
 
@@ -1495,12 +1515,17 @@ mod config_roundtrip_tests {
         v.pointer_size = 1.5;
         v.render_scale = 2.0;
         v.background_fps = 15.0;
+        v.size_keep = rsoverlay_core::config::SizeKeep::Height;
+        v.voice_model = rsoverlay_core::config::VoiceModel::Accurate;
+        v.voice_mic = "{0.0.1.00000000}.{test}".into();
+        v.voice_mute_vrchat = false;
         c.vr_state = VrState {
             wrist_pose: Some([[1.0, 0.0, 0.0, 0.1], [0.0, 1.0, 0.0, 0.2], [0.0, 0.0, 1.0, 0.3]]),
             wrist_width: Some(0.3),
             kb_pinned: true,
             kb_auto_repeat: true,
             kb_full: true,
+            kb_minimal: true,
             kb_vrchat: true,
             dash_pinned: true,
             dash_pose: Some([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 1.5], [0.0, 0.0, 1.0, -0.8]]),

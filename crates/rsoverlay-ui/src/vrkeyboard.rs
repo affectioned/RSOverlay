@@ -70,12 +70,80 @@ fn f_row() -> Vec<Key> {
     r
 }
 
-fn rows_for(iso: bool, full: bool) -> Vec<Vec<Key>> {
-    let mut v: Vec<Vec<Key>> = rows(iso).into_iter().collect();
-    if full {
-        v.insert(0, f_row());
+/// Keyboard size (bar toggle cycles Compact → Full → Minimal).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum KbLayout {
+    #[default]
+    Compact,
+    /// Compact plus an F-key row.
+    Full,
+    /// 12 units wide: numbers, letters, Shift, space, Enter, ⌫, ← →.
+    Minimal,
+}
+
+impl KbLayout {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Compact => Self::Full,
+            Self::Full => Self::Minimal,
+            Self::Minimal => Self::Compact,
+        }
     }
-    v
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Compact => "Compact",
+            Self::Full => "Full",
+            Self::Minimal => "Minimal",
+        }
+    }
+    /// Width in key units.
+    pub fn units(self) -> f32 {
+        if self == Self::Minimal {
+            MINIMAL_UNITS
+        } else {
+            15.0
+        }
+    }
+    /// From the saved toggles (`kb_full`, `kb_minimal`).
+    pub fn from_flags(full: bool, minimal: bool) -> Self {
+        if minimal {
+            Self::Minimal
+        } else if full {
+            Self::Full
+        } else {
+            Self::Compact
+        }
+    }
+}
+
+const MINIMAL_UNITS: f32 = 12.0;
+
+fn rows_for(iso: bool, layout: KbLayout) -> Vec<Vec<Key>> {
+    match layout {
+        KbLayout::Minimal => minimal_rows().into_iter().collect(),
+        KbLayout::Full => std::iter::once(f_row()).chain(rows(iso)).collect(),
+        KbLayout::Compact => rows(iso).into_iter().collect(),
+    }
+}
+
+/// The minimal keyboard: the compact one without Esc / Tab / Caps / Win,
+/// the backslash and = keys, and ↑ ↓. Labels still come from the live
+/// layout, so ü ö ä (DE) or é è (FR) stay on their keys.
+fn minimal_rows() -> [Vec<Key>; 5] {
+    [
+        (0x02..=0x0C).map(ch).chain(std::iter::once(named(ScanKey::new(0x0E), 1.0, "⌫"))).collect(),
+        (0x10..=0x1B).map(ch).collect(),
+        (0x1E..=0x28).map(ch).chain(std::iter::once(named(ScanKey::new(0x1C), 1.0, "⏎"))).collect(),
+        std::iter::once(modk(ScanKey::new(0x2A), 2.0, Mod::Shift, "Shift")).chain((0x2C..=0x35).map(ch)).collect(),
+        vec![
+            modk(ScanKey::new(0x1D), 1.5, Mod::Ctrl, "Ctrl"),
+            modk(ScanKey::new(0x38), 1.25, Mod::Alt, "Alt"),
+            named(ScanKey::new(0x39), 6.0, ""),
+            modk(ScanKey::ext(0x38), 1.25, Mod::AltGr, "AltGr"),
+            named(ScanKey::ext(0x4B), 1.0, "←"),
+            named(ScanKey::ext(0x4D), 1.0, "→"),
+        ],
+    ]
 }
 
 fn rows(iso: bool) -> [Vec<Key>; 5] {
@@ -173,6 +241,20 @@ struct ModState {
     last_tap: f64,
 }
 
+/// Voice typing as the keyboard shows it (the app runs the recording
+/// and the transcription and sets this every frame).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum Dictation {
+    #[default]
+    Idle,
+    /// Listening: mic level 0..1 and seconds so far.
+    Recording { level: f32, secs: f32 },
+    /// Downloading the model / transcribing: a status line.
+    Working(String),
+    /// Last attempt failed: why (shown until the next press).
+    Failed(String),
+}
+
 #[derive(Default)]
 pub struct VrKeyboard {
     mods: HashMap<ScanKey, (Mod, ModState)>,
@@ -194,8 +276,8 @@ pub struct VrKeyboard {
     pub locked_pos: bool,
     /// Opt-in typematic repeat for typing. Off = real hold (games).
     pub auto_repeat: bool,
-    /// Full layout (F-key row) vs compact.
-    pub full: bool,
+    /// Compact / Full (F-key row) / Minimal.
+    pub layout: KbLayout,
     /// Labels under the *opposite* Shift state — drawn small in the
     /// key's corner as the secondary legend.
     alt_labels: HashMap<ScanKey, String>,
@@ -210,6 +292,8 @@ pub struct VrKeyboard {
     /// Focused window is elevated and we aren't (cached, 0.5 s).
     blocked: bool,
     blocked_at: f64,
+    /// Voice typing state (set by the app).
+    pub dictation: Dictation,
 }
 
 #[derive(Debug, Default)]
@@ -224,6 +308,8 @@ pub struct KbFrame {
     pub sounds: Vec<rsoverlay_audio::typing::KeySound>,
     /// Diagnostics: per hand on the keyboard, (hand, key under it, point).
     pub hovered: Vec<(Hand, String, egui::Pos2)>,
+    /// Mic button pressed: start / stop voice typing.
+    pub mic: bool,
 }
 
 /// Which typing click a key makes.
@@ -262,6 +348,19 @@ fn slot(h: Hand) -> usize {
 }
 
 impl VrKeyboard {
+    /// Add dictated text to the VRChat message being composed (Enter
+    /// still sends it, so it can be checked first).
+    pub fn append_vrc(&mut self, text: &str) {
+        let t = text.trim();
+        if t.is_empty() {
+            return;
+        }
+        if !self.vrc_buf.is_empty() && !self.vrc_buf.ends_with(' ') {
+            self.vrc_buf.push(' ');
+        }
+        self.vrc_buf.push_str(t);
+    }
+
     fn mod_active(&self, m: Mod) -> bool {
         self.mods.values().any(|(mm, s)| *mm == m && (s.down || s.locked))
     }
@@ -403,37 +502,64 @@ impl VrKeyboard {
         let screen = ctx.available_rect();
         let painter = ctx.layer_painter(egui::LayerId::background());
 
-        // Card + top bar.
-        let card = screen.shrink(4.0);
+        // Card + top bar. Keys keep the compact size in every layout: the
+        // minimal card is just narrower (the rest of the panel is
+        // transparent and lets the laser through).
+        let full_card = screen.shrink(4.0);
+        let unit = (full_card.width() - 24.0) / 15.0;
+        let card = egui::Rect::from_center_size(full_card.center(), egui::vec2(unit * self.layout.units() + 24.0, full_card.height()));
         theme::surface(&painter, card.shrink(6.0), 22.0);
         let bar = egui::Rect::from_min_size(card.min + egui::vec2(16.0, 6.0), egui::vec2(card.width() - 32.0, TOP_BAR));
-        if self.vrchat {
+        // Bar buttons, right to left; the minimal bar drops Copy / Paste /
+        // repeat. `Rect::NOTHING` = not shown (never hit).
+        let minimal = self.layout == KbLayout::Minimal;
+        let mut right = bar.right();
+        let mut place = |w: f32, shown: bool| {
+            if !shown {
+                return egui::Rect::NOTHING;
+            }
+            let r = egui::Rect::from_min_max(egui::pos2(right - w, bar.center().y - 16.0), egui::pos2(right, bar.center().y + 16.0));
+            right -= w + 8.0;
+            r
+        };
+        let close_r = place(36.0, true);
+        let lock_r = place(36.0, true);
+        let mic_r = place(44.0, true);
+        let repeat_r = place(100.0, !minimal);
+        let vrc_r = place(84.0, true);
+        let paste_r = place(62.0, !minimal);
+        let copy_r = place(62.0, !minimal);
+        let size_r = place(84.0, true);
+        let lang_r = place(72.0, self.multi_layout);
+        // Bar text never runs under the buttons.
+        let painter_bar = painter.with_clip_rect(egui::Rect::from_min_max(bar.min, egui::pos2(right, bar.max.y)));
+        let caption = |t: &str, c: egui::Color32| {
+            painter_bar.text(bar.left_center(), egui::Align2::LEFT_CENTER, t, egui::FontId::proportional(theme::SIZE_CAPTION + 1.0), c);
+        };
+        if let Dictation::Recording { secs, .. } = self.dictation {
+            caption(&format!("LISTENING {secs:.0}s · press the mic again when you're done"), theme::DANGER);
+        } else if let Dictation::Working(t) = &self.dictation {
+            caption(&t.to_uppercase(), accent);
+        } else if let Dictation::Failed(t) = &self.dictation {
+            caption(&format!("Voice typing failed: {t}"), theme::DANGER);
+        } else if self.vrchat {
             let shown = if self.vrc_buf.is_empty() { "VRChat message… (Enter sends)".to_string() } else { format!("{}|", self.vrc_buf) };
-            painter.text(bar.left_center(), egui::Align2::LEFT_CENTER, shown,
+            painter_bar.text(bar.left_center(), egui::Align2::LEFT_CENTER, shown,
                 egui::FontId::proportional(theme::SIZE_BODY), if self.vrc_buf.is_empty() { theme::FG_MUTED } else { theme::FG_PRIMARY });
         } else if internal {
-            painter.text(bar.left_center(), egui::Align2::LEFT_CENTER, "TYPING INTO RSOVERLAY",
+            painter_bar.text(bar.left_center(), egui::Align2::LEFT_CENTER, "TYPING INTO RSOVERLAY",
                 egui::FontId::proportional(theme::SIZE_CAPTION + 1.0), accent);
         } else if self.blocked {
-            painter.text(bar.left_center(), egui::Align2::LEFT_CENTER,
+            painter_bar.text(bar.left_center(), egui::Align2::LEFT_CENTER,
                 "Focused window runs as administrator — Windows (UAC) blocks VR typing; use your PC keyboard",
                 egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), theme::DANGER);
         } else {
-            painter.text(bar.left_center(), egui::Align2::LEFT_CENTER, "KEYBOARD",
+            painter_bar.text(bar.left_center(), egui::Align2::LEFT_CENTER, "KEYBOARD",
                 egui::FontId::proportional(theme::SIZE_CAPTION + 1.0), theme::FG_MUTED);
         }
-        let close_r = egui::Rect::from_center_size(bar.right_center() - egui::vec2(18.0, 0.0), egui::vec2(36.0, 32.0));
-        let lock_r = close_r.translate(egui::vec2(-46.0, 0.0));
-        let repeat_r = egui::Rect::from_center_size(lock_r.center() - egui::vec2(86.0, 0.0), egui::vec2(116.0, 32.0));
-        let vrc_r = egui::Rect::from_center_size(repeat_r.center() - egui::vec2(112.0, 0.0), egui::vec2(96.0, 32.0));
-        let paste_r = egui::Rect::from_center_size(vrc_r.center() - egui::vec2(88.0, 0.0), egui::vec2(72.0, 32.0));
-        let copy_r = egui::Rect::from_center_size(paste_r.center() - egui::vec2(80.0, 0.0), egui::vec2(72.0, 32.0));
-        let size_r = egui::Rect::from_center_size(copy_r.center() - egui::vec2(88.0, 0.0), egui::vec2(88.0, 32.0));
-        let lang_r = egui::Rect::from_center_size(size_r.center() - egui::vec2(96.0, 0.0), egui::vec2(88.0, 32.0));
 
         let area = egui::Rect::from_min_max(egui::pos2(card.left() + 12.0, bar.bottom() + 4.0), card.max - egui::vec2(12.0, 12.0));
-        let all_rows = rows_for(self.iso, self.full);
-        let unit = area.width() / 15.0;
+        let all_rows = rows_for(self.iso, self.layout);
         let row_h = area.height() / all_rows.len() as f32;
         let gap = (unit * 0.08).max(3.0);
 
@@ -470,6 +596,11 @@ impl VrKeyboard {
                     out.haptic.push(hand);
                     continue;
                 }
+                if mic_r.contains(p) {
+                    out.mic = true;
+                    out.haptic.push(hand);
+                    continue;
+                }
                 if repeat_r.contains(p) {
                     self.auto_repeat = !self.auto_repeat;
                     out.haptic.push(hand);
@@ -483,7 +614,7 @@ impl VrKeyboard {
                     continue;
                 }
                 if size_r.contains(p) {
-                    self.full = !self.full;
+                    self.layout = self.layout.next();
                     out.haptic.push(hand);
                     continue;
                 }
@@ -665,15 +796,37 @@ impl VrKeyboard {
         }
 
         // Bar buttons — vector-drawn so they never depend on font coverage.
-        for (r, on) in [(lock_r, self.locked_pos), (close_r, false), (repeat_r, self.auto_repeat), (vrc_r, self.vrchat), (copy_r, false), (paste_r, false), (size_r, self.full)] {
+        for (r, on) in [(lock_r, self.locked_pos), (close_r, false), (repeat_r, self.auto_repeat), (vrc_r, self.vrchat), (copy_r, false), (paste_r, false), (size_r, self.layout != KbLayout::Compact)] {
+            if !r.is_positive() {
+                continue;
+            }
             let hover = hovered.iter().any(|p| r.contains(*p));
             let fill = if on { accent.gamma_multiply(0.3) } else if hover { crate::theme::BG_HOVER } else { crate::theme::BG_RAISED };
             painter.rect_filled(r, 10.0, fill);
         }
+        // Mic: red while listening, with the level as a ring.
+        {
+            let hover = hovered.iter().any(|p| mic_r.contains(*p));
+            let (fill, ink) = match &self.dictation {
+                Dictation::Recording { .. } => (theme::DANGER.gamma_multiply(0.85), egui::Color32::WHITE),
+                Dictation::Working(_) => (accent.gamma_multiply(0.3), accent),
+                _ if hover => (crate::theme::BG_HOVER, theme::FG_PRIMARY),
+                _ => (crate::theme::BG_RAISED, theme::FG_PRIMARY),
+            };
+            painter.rect_filled(mic_r, 10.0, fill);
+            if let Dictation::Recording { level, .. } = self.dictation {
+                let r = 8.0 + 8.0 * level.clamp(0.0, 1.0).sqrt();
+                painter.circle_stroke(mic_r.center(), r, egui::Stroke::new(1.5_f32, egui::Color32::WHITE.gamma_multiply(0.6)));
+            }
+            draw_mic(&painter, mic_r.center(), egui::Stroke::new(2.0_f32, ink));
+        }
         let stroke = egui::Stroke::new(2.0_f32, theme::FG_PRIMARY);
         draw_lock(&painter, lock_r.center(), self.locked_pos, if self.locked_pos { egui::Stroke::new(2.0_f32, accent) } else { stroke });
         draw_close(&painter, close_r.center(), stroke);
-        for (r, t, on) in [(vrc_r, "VRChat", self.vrchat), (copy_r, "Copy", false), (paste_r, "Paste", false), (size_r, if self.full { "Full" } else { "Compact" }, self.full)] {
+        for (r, t, on) in [(vrc_r, "VRChat", self.vrchat), (copy_r, "Copy", false), (paste_r, "Paste", false), (size_r, self.layout.label(), self.layout != KbLayout::Compact)] {
+            if !r.is_positive() {
+                continue;
+            }
             painter.text(r.center(), egui::Align2::CENTER_CENTER, t,
                 egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), if on { accent } else { theme::FG_PRIMARY });
         }
@@ -683,9 +836,11 @@ impl VrKeyboard {
             painter.text(lang_r.center(), egui::Align2::CENTER_CENTER, &self.lang,
                 egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), theme::FG_PRIMARY);
         }
-        painter.text(repeat_r.center(), egui::Align2::CENTER_CENTER,
-            if self.auto_repeat { "repeat: on" } else { "hold: real" },
-            egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), if self.auto_repeat { accent } else { theme::FG_PRIMARY });
+        if repeat_r.is_positive() {
+            painter.text(repeat_r.center(), egui::Align2::CENTER_CENTER,
+                if self.auto_repeat { "repeat: on" } else { "hold: real" },
+                egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), if self.auto_repeat { accent } else { theme::FG_PRIMARY });
+        }
 
         // No cursor of its own: in VR the laser's ring is the cursor
         // (tester: two cursors on the keyboard).
@@ -723,6 +878,20 @@ pub fn draw_lock(p: &egui::Painter, c: egui::Pos2, closed: bool, s: egui::Stroke
     p.add(egui::Shape::line(pts, s));
     p.line_segment([egui::pos2(l, top + 4.5), egui::pos2(l, body.top() - if closed { 0.0 } else { lift })], s);
     p.line_segment([egui::pos2(r, top + 4.5), egui::pos2(r, body.top())], s);
+}
+
+/// Microphone: capsule, cradle and stand.
+pub fn draw_mic(p: &egui::Painter, c: egui::Pos2, s: egui::Stroke) {
+    let body = egui::Rect::from_center_size(c + egui::vec2(0.0, -3.0), egui::vec2(8.0, 13.0));
+    p.rect_stroke(body, 4.0, s);
+    let pts: Vec<egui::Pos2> = (0..=12)
+        .map(|i| {
+            let a = std::f32::consts::PI * (i as f32 / 12.0);
+            c + egui::vec2(-7.0 * a.cos(), -1.0 + 7.0 * a.sin())
+        })
+        .collect();
+    p.add(egui::Shape::line(pts, s));
+    p.line_segment([c + egui::vec2(0.0, 6.0), c + egui::vec2(0.0, 10.0)], s);
 }
 
 pub fn draw_close(p: &egui::Painter, c: egui::Pos2, s: egui::Stroke) {
@@ -807,10 +976,38 @@ mod tests {
 
     #[test]
     fn full_layout_adds_a_fifteen_unit_f_row() {
-        let r = rows_for(false, true);
+        let r = rows_for(false, KbLayout::Full);
         assert_eq!(r.len(), 6);
         assert!((r[0].iter().map(|k| k.w).sum::<f32>() - 15.0).abs() < 1e-4);
-        assert_eq!(rows_for(false, false).len(), 5);
+        assert_eq!(rows_for(false, KbLayout::Compact).len(), 5);
+    }
+
+    #[test]
+    fn minimal_rows_fill_its_width_with_unique_keys() {
+        for (i, r) in minimal_rows().iter().enumerate() {
+            let w: f32 = r.iter().map(|k| k.w).sum();
+            assert!((w - KbLayout::Minimal.units()).abs() < 1e-4, "minimal row {i} is {w} units");
+        }
+        let all: Vec<ScanKey> = minimal_rows().iter().flatten().map(|k| k.k).collect();
+        let mut dedup = all.clone();
+        dedup.sort_by_key(|k| (k.scan, k.ext));
+        dedup.dedup();
+        assert_eq!(all.len(), dedup.len());
+        // Labels are looked up from the compact table: every minimal key
+        // must be in it.
+        let compact: Vec<ScanKey> = rows(true).iter().flatten().map(|k| k.k).collect();
+        assert!(all.iter().all(|k| compact.contains(k)));
+    }
+
+    #[test]
+    fn size_toggle_cycles_and_round_trips_the_saved_flags() {
+        let mut l = KbLayout::Compact;
+        for _ in 0..3 {
+            let (full, minimal) = (l == KbLayout::Full, l == KbLayout::Minimal);
+            assert_eq!(KbLayout::from_flags(full, minimal), l);
+            l = l.next();
+        }
+        assert_eq!(l, KbLayout::Compact);
     }
 
     #[test]

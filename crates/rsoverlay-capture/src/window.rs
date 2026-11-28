@@ -179,6 +179,39 @@ pub fn resize_window(hwnd: isize, w: u32, h: u32) -> Result<()> {
     Ok(())
 }
 
+/// A window's restored rect (workspace coordinates) and maximised
+/// state, as `GetWindowPlacement` reports it: (x, y, w, h, maximised).
+pub fn window_placement(hwnd: isize) -> Option<(i32, i32, i32, i32, bool)> {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowPlacement, SW_SHOWMAXIMIZED, WINDOWPLACEMENT};
+    let mut wp = WINDOWPLACEMENT { length: std::mem::size_of::<WINDOWPLACEMENT>() as u32, ..Default::default() };
+    // SAFETY: plain user32 call; a stale handle just fails.
+    unsafe { GetWindowPlacement(HWND(hwnd), &mut wp) }.ok()?;
+    let r = wp.rcNormalPosition;
+    let (w, h) = (r.right - r.left, r.bottom - r.top);
+    (w > 0 && h > 0).then_some((r.left, r.top, w, h, wp.showCmd == SW_SHOWMAXIMIZED.0 as u32))
+}
+
+/// Put a window back where [`window_placement`] found it, without
+/// activating it (a maximised one is maximised on that rect's monitor).
+pub fn set_window_placement(hwnd: isize, x: i32, y: i32, w: i32, h: i32, maximized: bool) -> Result<()> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowPlacement, SetWindowPlacement, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, WINDOWPLACEMENT,
+    };
+    let hwnd = HWND(hwnd);
+    let mut wp = WINDOWPLACEMENT { length: std::mem::size_of::<WINDOWPLACEMENT>() as u32, ..Default::default() };
+    // SAFETY: plain user32 calls on a window handle; stale handles just fail.
+    unsafe {
+        if !IsWindow(hwnd).as_bool() {
+            bail!("window is gone");
+        }
+        GetWindowPlacement(hwnd, &mut wp).context("GetWindowPlacement")?;
+        wp.rcNormalPosition = RECT { left: x, top: y, right: x + w.max(1), bottom: y + h.max(1) };
+        wp.showCmd = if maximized { SW_SHOWMAXIMIZED.0 as u32 } else { SW_SHOWNOACTIVATE.0 as u32 };
+        SetWindowPlacement(hwnd, &wp).context("SetWindowPlacement")?;
+    }
+    Ok(())
+}
+
 /// Live content size, packed `w << 32 | h` so a single atomic load is
 /// tear-free between the capture thread and the UI thread.
 #[derive(Clone, Default)]

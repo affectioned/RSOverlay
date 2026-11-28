@@ -55,6 +55,8 @@ frame time live, so you can check the claim yourself.
   stick scroll
 - Per-window opacity, so you can keep an eye on your game world through a
   window
+- Show another window in a panel without moving it; Size preservation
+  decides whether it keeps its height, its width or its frame
 - UAC aware: elevated windows show a clear "use your PC" notice, with an
   optional run-as-administrator mode
 
@@ -70,7 +72,8 @@ frame time live, so you can check the claim yourself.
 - Recenter gathers everything in front of you; panels fade when viewed
   edge-on
 - 8 layout slots, with one auto-loaded at startup, and your last session
-  restored
+  restored. A layout also puts the real windows back where they were on
+  your desktop, at the same size
 - Resolution setting for sharp text on high-resolution headsets
 
 **Wrist toolbar**
@@ -93,7 +96,10 @@ frame time live, so you can check the claim yourself.
 **Keyboard**
 - Physical layout with labels from your system keyboard layout
 - Real key hold (no fake auto-repeat, which matters in games), sticky and
-  lockable modifiers, VRChat chatbox mode, compact or full
+  lockable modifiers, VRChat chatbox mode; minimal, compact or full
+- Voice typing: press the mic, speak, press it again. Speech is recognised
+  on your PC (Whisper, many languages); in VRChat mode it fills your
+  chatbox message and mutes your VRChat mic while you talk
 
 **Everything else**
 - Notifications: WebSocket API on `127.0.0.1:42069`, toasts + history.
@@ -185,15 +191,18 @@ cargo clippy --workspace --all-targets
 cargo deny check
 ```
 
-Windows x64, Rust stable (edition 2021). Settings live in
+Windows x64, Rust stable (edition 2021), CMake and libclang (voice typing
+builds whisper.cpp; install LLVM, or point `LIBCLANG_PATH` at a folder
+with `libclang.dll`). Settings live in
 `%APPDATA%\RSOverlay\` (`config.toml` hot-reloads; `layouts.toml`).
 
 ## Privacy and security
 
 - No telemetry. The only things that go online: the update check and,
   when you click Install, the download (anonymous requests to GitHub;
-  switch checking off in Settings › Updates), and Discord Rich Presence
-  if you turn it on
+  switch checking off in Settings › Updates), the one-time voice typing
+  model download from Hugging Face (checked against its SHA-256; your voice
+  never leaves your PC), and Discord Rich Presence if you turn it on
 - Updates are verified against the release's SHA-256 checksum before
   they're installed
 - The notification API binds `127.0.0.1` only
@@ -226,7 +235,8 @@ crates/
 ├── rsoverlay-notify/    notification WebSocket (VRCX-compatible)
 ├── rsoverlay-osc/       VRChat OSC
 ├── rsoverlay-discord/   opt-in Discord Rich Presence
-├── rsoverlay-audio/     per-app volume (WASAPI)
+├── rsoverlay-audio/     per-app volume, sounds, microphone (WASAPI)
+├── rsoverlay-speech/    voice typing (Whisper via whisper.cpp)
 ├── rsoverlay-sysinfo/   CPU / GPU / RAM / VRAM sampling
 └── rsoverlay-core/      config, layouts, shared types
 docs/

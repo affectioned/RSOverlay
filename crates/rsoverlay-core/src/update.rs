@@ -322,6 +322,23 @@ fn get_url(url: &str, max: usize, progress: &mut dyn FnMut(u64, Option<u64>)) ->
     http_get("github.com", path, max, progress)
 }
 
+/// Where voice-typing models come from: whisper.cpp's model repository.
+pub const MODEL_HOST: &str = "huggingface.co";
+pub const MODEL_PATH: &str = "/ggerganov/whisper.cpp/resolve/main/";
+
+/// Download a speech model file (`ggml-*.bin`) and check its SHA-256
+/// (hex) before handing it back.
+pub fn download_model(file: &str, sha256_hex: &str, max: usize, progress: &mut dyn FnMut(u64, Option<u64>)) -> anyhow::Result<Vec<u8>> {
+    anyhow::ensure!(
+        file.starts_with("ggml-") && file.ends_with(".bin") && file.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)),
+        "not a model file: {file}"
+    );
+    let body = http_get(MODEL_HOST, &format!("{MODEL_PATH}{file}"), max, progress)?;
+    let got: String = sha256(&body)?.iter().map(|b| format!("{b:02x}")).collect();
+    anyhow::ensure!(got.eq_ignore_ascii_case(sha256_hex), "{file}: checksum mismatch (got {got})");
+    Ok(body)
+}
+
 #[cfg(windows)]
 fn sha256(data: &[u8]) -> anyhow::Result<[u8; 32]> {
     use windows::Win32::Security::Cryptography::{BCryptHash, BCRYPT_SHA256_ALG_HANDLE};
@@ -404,7 +421,7 @@ fn http_get(host: &str, path: &str, max: usize, progress: &mut dyn FnMut(u64, Op
     // closed in reverse order; buffers outlive the calls using them.
     unsafe {
         let session = nonnull(
-            WinHttpOpen(w!("RSOverlay-update-check"), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, PCWSTR::null(), PCWSTR::null(), 0),
+            WinHttpOpen(w!("RSOverlay"), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, PCWSTR::null(), PCWSTR::null(), 0),
             "WinHttpOpen",
         )?;
         WinHttpSetTimeouts(session.0, 5_000, 5_000, 15_000, 15_000)?;
@@ -426,7 +443,7 @@ fn http_get(host: &str, path: &str, max: usize, progress: &mut dyn FnMut(u64, Op
             &mut len,
             std::ptr::null_mut(),
         )?;
-        anyhow::ensure!(status == 200, "GitHub answered HTTP {status}");
+        anyhow::ensure!(status == 200, "{host} answered HTTP {status}");
         // Content-Length, when the server sends it (for the progress bar).
         let mut total = 0u32;
         let mut len = std::mem::size_of::<u32>() as u32;
@@ -735,8 +752,10 @@ mod sandbox {
 
     #[test]
     fn restarted_copy_waits_for_the_old_one_to_exit() {
-        // A real process that lives ~1 s.
-        let mut child = std::process::Command::new("cmd").args(["/C", "ping -n 2 127.0.0.1 >NUL"]).spawn().unwrap();
+        // A real process that lives ~1 s. Full path: cargo test's PATH can
+        // grow past what cmd can search (native link dirs of every crate).
+        let ping = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into())).join("System32").join("PING.EXE");
+        let mut child = std::process::Command::new(ping).args(["-n", "2", "127.0.0.1"]).stdout(std::process::Stdio::null()).spawn().unwrap();
         let t = std::time::Instant::now();
         wait_for_previous(child.id());
         let waited = t.elapsed();

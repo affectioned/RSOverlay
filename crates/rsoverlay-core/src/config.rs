@@ -133,10 +133,61 @@ pub struct VrCfg {
     pub render_scale: f32,
     /// Refresh rate of panels you aren't looking at, fps (1-90).
     pub background_fps: f32,
+    /// When a window panel's capture changes shape (switched to another
+    /// window, or the window was resized): what the panel keeps.
+    pub size_keep: SizeKeep,
+    /// Voice typing (keyboard mic button): speech model.
+    pub voice_model: VoiceModel,
+    /// Voice typing microphone (endpoint id); empty = Windows default.
+    pub voice_mic: String,
+    /// Mute your VRChat mic (OSC) while dictating, unmute after.
+    pub voice_mute_vrchat: bool,
 }
 
 /// Where things were left in VR — not choices made in Settings, but
 /// hands-on adjustments restored so the next session starts the same.
+/// Default wrist toolbar width, metres (100% in Settings › VR › Wrist size).
+pub const WRIST_WIDTH_M: f32 = 0.18;
+/// The old default width: a saved width of exactly this was never chosen
+/// (every session saved its width), so it reads as the new default.
+pub const OLD_WRIST_WIDTH_M: f32 = 0.24;
+
+impl VrState {
+    /// Wrist size as a share of the default (Settings › VR › Wrist size).
+    pub fn wrist_scale(&self) -> f32 {
+        self.wrist_width.filter(|w| (w - OLD_WRIST_WIDTH_M).abs() > 1e-4).map_or(1.0, |w| w / WRIST_WIDTH_M)
+    }
+}
+
+/// Voice typing model (Whisper, multilingual; downloaded on first use).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VoiceModel {
+    /// Whisper base (60 MB): quick, good for short messages.
+    #[default]
+    Fast,
+    /// Whisper small (190 MB): better with accents and other languages.
+    Accurate,
+}
+
+/// Folder holding downloaded speech models, next to config.toml.
+pub fn models_dir() -> std::path::PathBuf {
+    Config::default_path().with_file_name("models")
+}
+
+/// Settings › VR panels › Size preservation.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SizeKeep {
+    /// Fit the new shape inside the panel's current frame.
+    #[default]
+    Auto,
+    /// The content keeps its height (a wider window makes a wider panel).
+    Height,
+    /// The content keeps its width.
+    Width,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VrState {
@@ -151,6 +202,8 @@ pub struct VrState {
     pub kb_pinned: bool,
     pub kb_auto_repeat: bool,
     pub kb_full: bool,
+    /// Minimal keyboard (wins over `kb_full`).
+    pub kb_minimal: bool,
     pub kb_vrchat: bool,
     /// Dashboard pinned: it reopens where it was left (this pose, world,
     /// row-major 3x4) instead of in front of you.
@@ -276,7 +329,7 @@ pub const DEFAULT_WRIST_COMPACT: u32 = 0x0F | (1 << 8) | (1 << 9) | (1 << 10) | 
 
 impl Default for VrCfg {
     fn default() -> Self {
-        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.0, scroll_speed: 1.0, wrist_buttons: 0x13F, wrist_actions_rev: 3, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new(), long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, mouse_follows_laser: true, window_touch: false, block_game_input: false, steamvr_laser: false, click_point: 0.7, autohide_toolbars: false, hidden_apps: Vec::new(), restore_session: true, hide_wrist: false, hide_with_steamvr_dashboard: true, windows_follow_dashboard: true, grab_tilt: false, stick_axis_lock: true, pointer_size: 1.0, render_scale: 1.0, background_fps: 5.0 }
+        Self { left_handed: false, clip_angle: 60.0, wrist_opacity: 1.0, run_as_admin: false, ui_scale: 1.0, show_lasers: true, laser_angle: 0.0, cursor_smoothing: 0.0, scroll_speed: 1.0, wrist_buttons: 0x13F, wrist_actions_rev: 3, media_theme: false, wrist_expanded: false, wrist_compact: DEFAULT_WRIST_COMPACT, keyboard_opacity: 1.0, typing_sounds: true, typing_volume: 0.4, sound_pack: String::new(), long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, mouse_follows_laser: true, window_touch: false, block_game_input: false, steamvr_laser: false, click_point: 0.7, autohide_toolbars: false, hidden_apps: Vec::new(), restore_session: true, hide_wrist: false, hide_with_steamvr_dashboard: true, windows_follow_dashboard: true, grab_tilt: false, stick_axis_lock: true, pointer_size: 1.0, render_scale: 1.0, background_fps: 5.0, size_keep: SizeKeep::Auto, voice_model: VoiceModel::Fast, voice_mic: String::new(), voice_mute_vrchat: true }
     }
 }
 

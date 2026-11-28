@@ -46,6 +46,22 @@ pub struct LayoutPanel {
     /// Overlay curvature (0 = flat), e.g. the Big screen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub curvature: Option<f32>,
+    /// Where the real window sat on the desktop (windows only): loading
+    /// the layout puts it back there at that size.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desktop: Option<DesktopPlace>,
+}
+
+/// A real window's spot on the desktop: its restored (not maximised)
+/// rect in Windows' workspace coordinates, and whether it was maximised.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DesktopPlace {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub maximized: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -148,6 +164,12 @@ mod tests {
                 group: Some(3),
                 pinned: true,
                 ..Default::default()
+            }, LayoutPanel {
+                kind: "window".into(),
+                title: "Notes".into(),
+                width: 0.6,
+                desktop: Some(DesktopPlace { x: -1900, y: 40, w: 1280, h: 720, maximized: true }),
+                ..Default::default()
             }],
             keyboard: Some(KeyboardPose { pose: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 1.0], [0.0, 0.0, 1.0, -0.5]], width: 0.75 }),
         }));
@@ -173,6 +195,7 @@ width = 0.9
         let p = &l.slot(0).unwrap().panels[0];
         assert_eq!(p.opacity, None);
         assert_eq!(p.group, None);
+        assert_eq!(p.desktop, None);
     }
 
     #[test]

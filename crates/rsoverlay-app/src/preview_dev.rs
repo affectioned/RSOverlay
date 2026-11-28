@@ -74,6 +74,8 @@ pub struct DevHarness {
     win_opacity: f32,
     /// What the VR keyboard typed (it types into RSOverlay, not Windows).
     typed: String,
+    /// The keyboard's mic button (voice typing, no VRChat here).
+    dictation: crate::dictation::Dictation,
     icons: crate::device_icons::DeviceIcons,
     /// Last applied "SteamVR device icons" setting (demo devices follow it live).
     icons_on: bool,
@@ -109,6 +111,7 @@ impl DevHarness {
             win_pinned: false,
             win_opacity: 1.0,
             typed: String::new(),
+            dictation: crate::dictation::Dictation::new(),
             icons: Default::default(),
             icons_on: true,
         }
@@ -152,7 +155,23 @@ impl DevHarness {
                 // The mouse plays the laser: hover = aim, left button = trigger.
                 let (pos, down, t) = ctx.input(|i| (i.pointer.hover_pos(), i.pointer.primary_down(), i.time));
                 let hands = [(Hand::Right, pos, if down { 1.0 } else { 0.0 })];
+                if let Some(text) = self.dictation.update(dev.kb_prefs.voice_model, None) {
+                    if keyboard.vrchat {
+                        keyboard.append_vrc(&text);
+                    } else {
+                        self.typed.push_str(text.trim());
+                        self.typed.push(' ');
+                    }
+                }
+                keyboard.dictation = self.dictation.state();
+                if keyboard.dictation != rsoverlay_ui::vrkeyboard::Dictation::Idle {
+                    ctx.request_repaint();
+                }
                 let kf = keyboard.frame(ctx, &hands, t, dev.accent, true);
+                if kf.mic {
+                    let prefs = crate::dictation::VoicePrefs { model: dev.kb_prefs.voice_model, mic: &dev.kb_prefs.mic, mute_vrchat: false };
+                    self.dictation.toggle(&prefs, None);
+                }
                 for e in kf.text {
                     match e {
                         egui::Event::Text(s) => self.typed.push_str(&s),

@@ -17,6 +17,7 @@
 
 mod mirror_source;
 mod device_icons;
+mod dictation;
 mod preview;
 mod preview_dev;
 mod preview_mock;

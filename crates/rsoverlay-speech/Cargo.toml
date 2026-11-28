@@ -1,0 +1,13 @@
+[package]
+name = "rsoverlay-speech"
+version.workspace = true
+publish.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+whisper-rs = { version = "0.16", default-features = false, features = ["tracing_backend"] }
+rsoverlay-core.workspace = true
