@@ -480,7 +480,11 @@ fn run_main() -> Result<()> {
             config_path.clone(),
         ),
         RuntimeMode::VrPreview => {
-            preview_vr::run(notify_rx, test_cfg, config.clone(), config_path.clone())
+            // Screenshots use the default config, like --settings-cards:
+            // docs / store images show RSOverlay as shipped, the same on
+            // every machine (not the user's own wrist layout or accent).
+            let cfg = if test_cfg.screenshot.is_some() { rsoverlay_core::Config::default() } else { config.clone() };
+            preview_vr::run(notify_rx, test_cfg, cfg, config_path.clone())
         }
         RuntimeMode::Vr => vr::run(notify_rx, rt_handle.clone(), config.clone(), config_path.clone(), osc),
     };
