@@ -921,6 +921,15 @@ mod imp {
             cursors.push(c);
         }
         let mut cursor_tint = [[f32::NAN; 4]; 2];
+        // Measurement, logged every 10 s while a laser is on a panel: how
+        // far the ring (attached to the controller, drawn by SteamVR with
+        // its own pose) sits from the hit we computed (what lights up),
+        // estimated with the pose SteamVR last drew; and our loop time.
+        let mut meas = (0.0f32, 0.0f32, 0u32, 0.0f32, 0.0f32, 0u32);
+        // (work ms sum, work ms max, sleep ms sum, frames that took > 1.5
+        // headset frames, measurement's own SteamVR calls ms sum).
+        let mut meas_work = (0.0f32, 0.0f32, 0.0f32, 0u32, 0.0f32);
+        let mut meas_at = 0.0f64;
         // Fade / pop / click flash, and the last placement (so a laser
         // fades out where it was instead of vanishing). Per hand.
         let mut laser_anim = [LaserAnim::default(); 2];
@@ -1756,9 +1765,15 @@ mod imp {
                 let look = laser_anim[s].step(hit.is_some(), pressed, dt);
                 if let (Some(c), Some((_, len)), Some(e)) = (c, hit, eye) {
                     let (o, d, len) = (Vec3A::from(c.origin), Vec3A::from(c.dir).normalize_or_zero(), len.max(0.05));
+                    // The beam stops at the ring's edge as seen from the
+                    // eye (it ran into the ring's middle; tester: ugly tip).
+                    let ring_r = 0.5 * CURSOR_M * dev_view.vr_pointer_size * look.cursor_scale * 0.62;
+                    let to_eye = (e - (o + d * len)).normalize_or_zero();
+                    let foreshorten = (1.0 - d.dot(to_eye).powi(2)).max(0.0).sqrt().max(0.25);
+                    let beam_len = (len - ring_r / foreshorten).max(len * 0.5);
                     // Orthonormal: SteamVR ignores scale in an overlay
                     // transform; length is the overlay width.
-                    let scaled = beam_transform(o, d, len, e, 1.0, 1.0);
+                    let scaled = beam_transform(o, d, beam_len, e, 1.0, 1.0);
                     let beam_pose = Affine3A::from_cols(
                         scaled.matrix3.x_axis.normalize_or_zero(),
                         scaled.matrix3.y_axis.normalize_or_zero(),
@@ -1770,7 +1785,20 @@ mod imp {
                     // without our loop's delay (tester: laggy when they were
                     // world-placed); we only update length and ring spot.
                     let inv = to_affine(&c.pose).inverse();
-                    laser_last[s] = Some((c.index, inv * beam_pose, len, inv * cursor_pose(o, d, len, e)));
+                    laser_last[s] = Some((c.index, inv * beam_pose, beam_len, inv * cursor_pose(o, d, len, e)));
+                    if let (Some(comp), Some(sys)) = (compositor.as_ref(), system.as_ref()) {
+                        let t0 = Instant::now();
+                        let drawn = comp.last_render_pose(c.index);
+                        meas_work.4 += t0.elapsed().as_secs_f32() * 1000.0;
+                        if let Some(drawn) = drawn {
+                            let drawn = to_affine(&sys.space_to_standing(comp.tracking_space())) * to_affine(&drawn);
+                            let hit_p = o + d * len;
+                            let mm = (drawn.transform_point3a(inv.transform_point3a(hit_p)) - hit_p).length() * 1000.0;
+                            meas.0 += mm;
+                            meas.1 = meas.1.max(mm);
+                            meas.2 += 1;
+                        }
+                    }
                 }
                 let (beam, cur) = (&mut beams[s], &mut cursors[s]);
                 let Some((dev, beam_pose, len, cur_pose)) = laser_last[s].filter(|_| look.beam_alpha > 0.0 || look.cursor_alpha > 0.0) else {
@@ -1809,6 +1837,23 @@ mod imp {
                 }
                 beam.set_visible(&overlay, look.beam_alpha > 0.0);
                 cur.set_visible(&overlay, look.cursor_alpha > 0.0);
+            }
+
+            meas.3 += dt * 1000.0;
+            meas.4 = meas.4.max(dt * 1000.0);
+            meas.5 += 1;
+            if time - meas_at >= 10.0 {
+                if meas.2 > 0 {
+                    info!(
+                        "laser measure: ring vs hit ~{:.1} mm avg, {:.1} mm max over {} samples; loop {:.2} ms avg, {:.1} ms max; work {:.2} ms avg, {:.1} max; sleep {:.2} ms avg; {} of {} frames missed a vsync; measuring cost {:.3} ms/frame",
+                        meas.0 / meas.2 as f32, meas.1, meas.2, meas.3 / meas.5.max(1) as f32, meas.4,
+                        meas_work.0 / meas.5.max(1) as f32, meas_work.1, meas_work.2 / meas.5.max(1) as f32, meas_work.3, meas.5,
+                        meas_work.4 / meas.5.max(1) as f32
+                    );
+                }
+                meas = (0.0, 0.0, 0, 0.0, 0.0, 0);
+                meas_work = (0.0, 0.0, 0.0, 0, 0.0);
+                meas_at = time;
             }
 
             // Grab / release: a firmer haptic tick than a click.
@@ -2842,6 +2887,14 @@ mod imp {
                 Some((since, hz)) => pace_sleep(f64::from(since), 1.0 / f64::from(hz), work_ema.max(work)),
                 None => 0.011,
             };
+            meas_work.0 += work as f32 * 1000.0;
+            meas_work.1 = meas_work.1.max(work as f32 * 1000.0);
+            meas_work.2 += wait as f32 * 1000.0;
+            if let Some((_, hz)) = paced {
+                if dt > 1.5 / hz {
+                    meas_work.3 += 1;
+                }
+            }
             std::thread::sleep(Duration::from_secs_f64(wait));
         }
 

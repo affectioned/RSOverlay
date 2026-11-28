@@ -426,11 +426,16 @@ pub fn paint_cursor_dot(ctx: &egui::Context) {
     let p = ctx.layer_painter(egui::LayerId::background());
     let r = ctx.screen_rect();
     let (c, s) = (r.center(), r.width().min(r.height()) / 2.0);
-    // Thin ring, dark halo for contrast, and a crisp centre dot that
-    // marks the exact hit (the beam ends there).
-    p.circle_filled(c, s * 0.92, egui::Color32::from_black_alpha(110));
-    p.circle_stroke(c, s * 0.7, egui::Stroke::new(s * 0.1, egui::Color32::WHITE));
-    p.circle_filled(c, s * 0.16, egui::Color32::WHITE);
+    // A clean ring (tinted to the accent by the overlay colour) with a
+    // soft glow, a faint dark rim for contrast on light panels, and a
+    // small centre dot on the exact hit.
+    let ring = s * 0.62;
+    p.circle_stroke(c, ring, egui::Stroke::new(s * 0.40, crate::theme::veil(22)));
+    p.circle_stroke(c, ring, egui::Stroke::new(s * 0.24, crate::theme::veil(55)));
+    p.circle_stroke(c, ring, egui::Stroke::new(s * 0.15, egui::Color32::from_black_alpha(90)));
+    p.circle_stroke(c, ring, egui::Stroke::new(s * 0.09, egui::Color32::WHITE));
+    p.circle_filled(c, s * 0.13, egui::Color32::from_black_alpha(70));
+    p.circle_filled(c, s * 0.09, egui::Color32::WHITE);
 }
 
 /// One laser's look for [`paint_laser`]: the beam and its cursor ring in
@@ -521,27 +526,37 @@ pub fn paint_laser(ctx: &egui::Context, l: &LaserLook) {
 pub fn paint_beam(ctx: &egui::Context) {
     let p = ctx.layer_painter(egui::LayerId::background());
     let r = ctx.screen_rect();
-    let (cols, rows) = (64, 16);
-    let (cw, rh) = (r.width() / cols as f32, r.height() / rows as f32);
     let smooth = |x: f32| {
         let x = x.clamp(0.0, 1.0);
         x * x * (3.0 - 2.0 * x)
     };
-    for i in 0..cols {
-        let t = (i as f32 + 0.5) / cols as f32;
-        // Solid right up to the tip: the cursor marks the end (a soft
-        // tip made the bright part stop short of it, tester).
-        let along = smooth(t / 0.22);
-        for j in 0..rows {
-            let v = ((j as f32 + 0.5) / rows as f32) * 2.0 - 1.0;
+    // One smooth gradient mesh (blocks of flat colour looked stepped):
+    // fades in from the controller, bright core with a soft glow across,
+    // and narrows to a point over the last few percent (it ends at the
+    // cursor ring's edge, which is placed in 3D).
+    let (cols, rows) = (256usize, 24usize);
+    let mut m = egui::Mesh::default();
+    for i in 0..=cols {
+        let t = i as f32 / cols as f32;
+        let along = smooth(t / 0.25);
+        let taper = (1.0 - smooth((t - 0.96) / 0.04)).max(0.02);
+        for j in 0..=rows {
+            let fy = j as f32 / rows as f32;
+            let v = (fy * 2.0 - 1.0) / taper;
             let across = ((-(v / 0.22).powi(2)).exp() + 0.35 * (-(v / 0.65).powi(2)).exp()).min(1.0);
-            let a = (255.0 * along * across).round() as u8;
-            if a > 0 {
-                let cell = egui::Rect::from_min_size(egui::pos2(r.left() + i as f32 * cw, r.top() + j as f32 * rh), egui::vec2(cw + 0.5, rh + 0.5));
-                p.rect_filled(cell, 0.0, crate::theme::veil(a));
-            }
+            let a = (255.0 * along * across * (0.35 + 0.65 * taper)).round() as u8;
+            m.colored_vertex(egui::pos2(r.left() + t * r.width(), r.top() + fy * r.height()), crate::theme::veil(a));
         }
     }
+    let stride = rows as u32 + 1;
+    for i in 0..cols as u32 {
+        for j in 0..rows as u32 {
+            let (a, b) = (i * stride + j, (i + 1) * stride + j);
+            m.add_triangle(a, b, a + 1);
+            m.add_triangle(b, b + 1, a + 1);
+        }
+    }
+    p.add(egui::Shape::mesh(m));
 }
 
 /// Page title row used at the top of every page body.

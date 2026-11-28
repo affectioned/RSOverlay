@@ -442,7 +442,11 @@ mod native_gpu_tests {
         assert!(a(128, 8) < a(128, 16) && a(128, 8) > 20, "soft glow beside it");
         assert!(a(128, 0) < a(128, 8), "fading to the edges");
         assert!(a(2, 16) < 40, "fades in from the controller");
-        assert!(a(254, 16) > 230, "solid up to the tip (the cursor marks the end)");
+        assert!(a(230, 16) > 230, "solid nearly to the tip");
+        assert!(a(255, 16) < 140 && a(255, 10) < 10, "narrows to a point");
+        if let Ok(d) = std::env::var("RSO_TEX_DUMP") {
+            std::fs::write(format!("{d}/beam_{w}x{h}.raw"), &px).unwrap();
+        }
     }
 
     #[test]
@@ -455,6 +459,9 @@ mod native_gpu_tests {
         let a = |x: usize, y: usize| px[(y * 128 + x) * 4 + 3];
         assert!(a(64, 64) > 200, "centre dot");
         assert!(a(2, 2) < 10, "transparent corners");
+        if let Ok(d) = std::env::var("RSO_TEX_DUMP") {
+            std::fs::write(format!("{d}/cursor_128x128.raw"), &px).unwrap();
+        }
     }
 
     /// The laser texture (beam + ring in one): the ring sits at the hit,
