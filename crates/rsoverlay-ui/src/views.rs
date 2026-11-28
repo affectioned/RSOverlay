@@ -516,7 +516,7 @@ impl Default for DevView {
             wrist_buttons: crate::wrist::compact::DEFAULT_ACTIONS,
             wrist_compact: rsoverlay_core::config::DEFAULT_WRIST_COMPACT,
             kb_prefs: KeyboardPrefs::default(),
-            cursor_smoothing: 0.5,
+            cursor_smoothing: 0.0,
             scroll_speed: 1.0,
             pointer: PointerPrefs::default(),
             restore_session: true,
@@ -1885,13 +1885,15 @@ pub struct PointerPrefs {
     /// Experimental: the game doesn't get controller input while the
     /// laser is on a panel.
     pub block_game_input: bool,
+    /// Experimental: SteamVR's own laser drives the panels.
+    pub steamvr_laser: bool,
     /// Window toolbars only while the laser is on the window.
     pub autohide_toolbars: bool,
 }
 
 impl Default for PointerPrefs {
     fn default() -> Self {
-        Self { long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, mouse_follows: true, touch_input: false, block_game_input: false, autohide_toolbars: false }
+        Self { long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, mouse_follows: true, touch_input: false, block_game_input: false, steamvr_laser: false, autohide_toolbars: false }
     }
 }
 
@@ -2013,6 +2015,8 @@ fn window_input_card(ui: &mut egui::Ui, ptr: &mut PointerPrefs, accent: egui::Co
             .on_hover_text("The trigger touches the window like a finger (tap, drag, swipe) instead of clicking a mouse. For touch-friendly apps; right / middle click and scrolling still use the mouse.");
         ui.checkbox(&mut ptr.block_game_input, "Block game input while pointing (experimental)")
             .on_hover_text("While your laser is on a panel, the game doesn't get your trigger / button presses (no accidental shots or menu clicks). Uses SteamVR's laser-mouse mode, which may show SteamVR's own pointer too. Please report how it behaves.");
+        ui.checkbox(&mut ptr.steamvr_laser, "Use SteamVR's laser (experimental)")
+            .on_hover_text("SteamVR draws the laser and decides clicks on RSOverlay's panels. The game doesn't get controller input while you point at a panel. Known to miss clicks on some setups; off uses RSOverlay's own laser.");
     });
 }
 

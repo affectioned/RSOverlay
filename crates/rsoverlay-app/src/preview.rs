@@ -161,6 +161,7 @@ pub fn seed_dev_view(
     dev.pointer.mouse_follows = cfg.vr.mouse_follows_laser;
     dev.pointer.touch_input = cfg.vr.window_touch;
     dev.pointer.block_game_input = cfg.vr.block_game_input;
+    dev.pointer.steamvr_laser = cfg.vr.steamvr_laser;
     dev.pointer.autohide_toolbars = cfg.vr.autohide_toolbars;
     dev.sources.hidden_apps = cfg.vr.hidden_apps.clone();
     dev.restore_session = cfg.vr.restore_session;
@@ -359,6 +360,7 @@ pub fn config_from_dev_view(
         mouse_follows_laser: dev.pointer.mouse_follows,
         window_touch: dev.pointer.touch_input,
         block_game_input: dev.pointer.block_game_input,
+        steamvr_laser: dev.pointer.steamvr_laser,
         autohide_toolbars: dev.pointer.autohide_toolbars,
         hidden_apps: dev.sources.hidden_apps.clone(),
         restore_session: dev.restore_session,
@@ -1469,6 +1471,7 @@ mod config_roundtrip_tests {
         v.mouse_follows_laser = false;
         v.window_touch = true;
         v.block_game_input = true;
+        v.steamvr_laser = true;
         v.autohide_toolbars = true;
         v.hidden_apps = vec!["Discord.exe".into()];
         v.restore_session = false;
