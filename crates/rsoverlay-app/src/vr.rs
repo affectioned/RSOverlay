@@ -510,6 +510,11 @@ mod imp {
     ) -> Result<WinOverlay> {
         let key = format!("rsoverlay.win.{seq}");
         let mut panel = VrPanel::new(overlay, gpu, &key, &src.label(), WIN_TEX, WIN_PPP, WIN_WIDTH_M, 0.0)?;
+        if let rsoverlay_ui::views::CaptureSource::Window { hwnd, .. } = &src {
+            if rsoverlay_capture::window::restore_quietly(*hwnd) {
+                info!("window was minimised (nothing to capture): restored behind the other windows, unfocused");
+            }
+        }
         let mirror = match GpuMirror::start(gpu, &mut panel.egui, src.clone()) {
             Ok(m) => m,
             Err(e) => {
@@ -1006,6 +1011,7 @@ mod imp {
         let mut drawn_pose_logged = false;
         let mut predict_ema = 0.0f32;
         let mut kb_hover_logged: Option<String> = None;
+        let mut battery_logged = String::new();
         let mut logged_space = -1i32;
         // SteamVR's own laser drives every panel (vr_logic::SteamLaser).
         let mut steam = SteamLaser::default();
@@ -1044,8 +1050,15 @@ mod imp {
                 if last_battery_poll.is_none_or(|t| t.elapsed() >= BATTERY_POLL) {
                     last_battery_poll = Some(Instant::now());
                     let use_icons = dev_view.steamvr_icons;
-                    let readings = sys
-                        .batteries()
+                    let devices = sys.batteries();
+                    // What SteamVR reports, logged on change (tester: the
+                    // charging mark only showed at 100 %).
+                    let summary: String = devices.iter().map(|d| format!("{} {:.0}%{} ", d.index, d.fraction * 100.0, if d.charging { " charging" } else { "" })).collect();
+                    if summary != battery_logged {
+                        info!("batteries (SteamVR): {summary}");
+                        battery_logged = summary;
+                    }
+                    let readings = devices
                         .iter()
                         .map(|d| BatteryReading {
                             icon: if use_icons { device_icons.for_device(d.icon.as_deref(), d.resource_root.as_deref()) } else { None },
@@ -1806,10 +1819,13 @@ mod imp {
                     cur.set_visible(&overlay, false);
                     continue;
                 };
-                // Static textures: hand them over again as they appear.
-                if !beam.visible {
-                    beam.resubmit(&overlay);
-                }
+                // The beam is redrawn every frame for its pulses (its shape
+                // holds no position, so a frame-late texture can't put
+                // anything in the wrong place); the ring is static: hand it
+                // over again as it appears.
+                // Reduce motion (Accessibility): a still beam.
+                let pulse_t = (!dev_view.reduce_motion).then_some(time as f32);
+                beam.render(&gpu, &overlay, time, dt, Vec::new(), |ctx| rsoverlay_ui::shell::paint_beam_anim(ctx, pulse_t));
                 if !cur.visible {
                     cur.resubmit(&overlay);
                 }

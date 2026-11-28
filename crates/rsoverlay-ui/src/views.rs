@@ -333,6 +333,7 @@ pub struct DevView {
     batteries: Vec<BatteryReading>,
     pub battery_osc: crate::battery::BatteryOsc,
     battery_est: crate::battery::BatteryEstimator,
+    charge_sense: crate::battery::ChargeSense,
     started: Instant,
     pending_osc: Vec<(String, rsoverlay_osc::OscValue)>,
     low_battery: LowBatteryWatch,
@@ -485,6 +486,7 @@ impl Default for DevView {
             batteries: Vec::new(),
             battery_osc: crate::battery::BatteryOsc::default(),
             battery_est: crate::battery::BatteryEstimator::default(),
+            charge_sense: crate::battery::ChargeSense::default(),
             started: Instant::now(),
             pending_osc: Vec::new(),
             low_battery: LowBatteryWatch::default(),
@@ -647,6 +649,8 @@ impl DevView {
             n.audio_path = "none".into();
             self.push_notification(n);
         }
+        let mut readings = readings;
+        self.charge_sense.apply(&mut readings);
         self.battery_est.update(self.started.elapsed().as_secs_f64(), &readings);
         let msgs = self.battery_osc.messages(&readings, Instant::now());
         self.pending_osc.extend(msgs);

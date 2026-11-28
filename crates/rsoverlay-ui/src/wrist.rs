@@ -409,16 +409,25 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
                 let c = egui::Rect::from_min_size(egui::pos2(r5.left() + j as f32 * tw, r5.top()), egui::vec2(tw, r5.height())).shrink(6.0);
                 let pct = (b.fraction * 100.0).round() as u32;
                 let col = if !b.charging && pct < 20 { theme::DANGER } else { accent };
-                crate::battery::paint_device_icon(ui, b, egui::Rect::from_center_size(egui::pos2(c.left() + 18.0, c.center().y - 4.0), egui::vec2(28.0, 22.0)), col);
+                let icon_r = egui::Rect::from_center_size(egui::pos2(c.left() + 18.0, c.center().y - 4.0), egui::vec2(28.0, 22.0));
+                crate::battery::paint_device_icon(ui, b, icon_r, col);
+                // Charging: a bolt badge on the icon, at any level.
+                if b.charging {
+                    let badge = egui::Rect::from_center_size(icon_r.right_bottom() + egui::vec2(0.0, -2.0), egui::vec2(20.0, 20.0));
+                    ui.painter().circle_filled(badge.center(), 11.0, theme::BG_CARD);
+                    ui.painter().circle_stroke(badge.center(), 10.0, egui::Stroke::new(1.5_f32, theme::CHARGING));
+                    crate::battery::paint_bolt(ui.painter(), badge.shrink2(egui::vec2(4.5, 3.5)), theme::CHARGING);
+                }
                 let bar = egui::Rect::from_min_size(egui::pos2(c.left() + 6.0, c.bottom() - 7.0), egui::vec2(24.0, 4.0));
+                let fill = if b.charging { theme::CHARGING } else { col };
                 ui.painter().rect_filled(bar, 2.0, theme::BG_HOVER);
-                ui.painter().rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(24.0 * b.fraction.clamp(0.0, 1.0), 4.0)), 2.0, col);
+                ui.painter().rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(24.0 * b.fraction.clamp(0.0, 1.0), 4.0)), 2.0, fill);
                 // Text stays inside its own device's slot (tester: the
                 // battery-life estimate ran into the next device). The
                 // estimate goes on its own line under the percentage.
                 let text_clip = egui::Rect::from_min_max(egui::pos2(c.left() + 34.0, c.top()), c.max);
                 let p = ui.painter().with_clip_rect(text_clip);
-                let pct_txt = if b.charging { format!("\u{26a1}{pct}%") } else { format!("{pct}%") };
+                let pct_txt = format!("{pct}%");
                 let est = d.estimates.get(i).cloned().flatten().filter(|_| !b.charging);
                 let x = c.left() + 38.0;
                 match est {

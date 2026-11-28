@@ -30,6 +30,8 @@ pub const FG_FAINT: Color32 = Color32::from_rgb(0x5A, 0x5A, 0x62);
 pub const ACCENT: Color32 = Color32::from_rgb(0xE8, 0x8F, 0xA2);
 /// Warning state (low battery). A true red, apart from every accent.
 pub const DANGER: Color32 = Color32::from_rgb(0xE5, 0x53, 0x4B);
+/// Charging mark (battery rows).
+pub const CHARGING: Color32 = Color32::from_rgb(0x5C, 0xD6, 0x7A);
 
 /// Accent choices offered in the Appearance picker: muted tones.
 pub const ACCENT_PRESETS: &[(&str, Color32)] = &[

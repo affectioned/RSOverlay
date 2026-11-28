@@ -524,6 +524,12 @@ pub fn paint_laser(ctx: &egui::Context, l: &LaserLook) {
 /// overlay colour: across, a bright core with a soft glow; along, it
 /// fades in from the controller and softens at the tip.
 pub fn paint_beam(ctx: &egui::Context) {
+    paint_beam_anim(ctx, None);
+}
+
+/// [`paint_beam`] with soft pulses of light running from the controller
+/// to the tip; `time` in seconds drives them (None: still).
+pub fn paint_beam_anim(ctx: &egui::Context, time: Option<f32>) {
     let p = ctx.layer_painter(egui::LayerId::background());
     let r = ctx.screen_rect();
     let smooth = |x: f32| {
@@ -540,10 +546,21 @@ pub fn paint_beam(ctx: &egui::Context) {
         let t = i as f32 / cols as f32;
         let along = smooth(t / 0.25);
         let taper = (1.0 - smooth((t - 0.96) / 0.04)).max(0.02);
+        // Three pulses along the beam, about 0.8 s from hand to tip.
+        let pulse = time.map_or(0.0, |s| {
+            (0..3)
+                .map(|k| {
+                    let at = (s * 1.25 + k as f32 / 3.0).fract();
+                    (-((t - at) / 0.035).powi(2)).exp()
+                })
+                .sum::<f32>()
+                .min(1.0)
+        });
+        let (core_lvl, glow_w) = if time.is_some() { (0.8 + 0.4 * pulse, 0.65 * (1.0 + 0.6 * pulse)) } else { (1.0, 0.65) };
         for j in 0..=rows {
             let fy = j as f32 / rows as f32;
             let v = (fy * 2.0 - 1.0) / taper;
-            let across = ((-(v / 0.22).powi(2)).exp() + 0.35 * (-(v / 0.65).powi(2)).exp()).min(1.0);
+            let across = ((-(v / 0.22).powi(2)).exp() * core_lvl + 0.35 * (1.0 + pulse) * (-(v / glow_w).powi(2)).exp()).min(1.0);
             let a = (255.0 * along * across * (0.35 + 0.65 * taper)).round() as u8;
             m.colored_vertex(egui::pos2(r.left() + t * r.width(), r.top() + fy * r.height()), crate::theme::veil(a));
         }

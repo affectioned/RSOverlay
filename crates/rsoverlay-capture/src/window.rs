@@ -419,6 +419,24 @@ unsafe fn create_shared_texture(device: &ID3D11Device, width: u32, height: u32) 
     Ok((tex, handle))
 }
 
+/// Bring a minimised window back so it can be captured (Windows doesn't
+/// draw minimised windows: tester's Discord panel was blank), without
+/// focusing it and kept behind the other windows so the desktop doesn't
+/// change under the user. Returns whether it was minimised.
+pub fn restore_quietly(hwnd: isize) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, ShowWindow, HWND_BOTTOM, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOWNOACTIVATE};
+    let hwnd = HWND(hwnd);
+    // SAFETY: plain user32 calls on a window handle; stale handles just fail.
+    unsafe {
+        if !IsWindow(hwnd).as_bool() || !IsIconic(hwnd).as_bool() {
+            return false;
+        }
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        let _ = SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+    true
+}
+
 /// Minimised windows produce no frames; callers can show a hint.
 pub fn is_minimized(hwnd: isize) -> bool {
     unsafe { IsIconic(HWND(hwnd)).as_bool() }

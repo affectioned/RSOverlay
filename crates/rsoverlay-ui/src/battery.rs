@@ -130,6 +130,50 @@ impl BatteryEstimator {
     }
 }
 
+/// A lightning bolt (charging mark) filling `rect`. Drawn, not a font
+/// glyph, so it shows at any size and in any font.
+pub fn paint_bolt(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
+    let p = |x: f32, y: f32| rect.min + egui::vec2(x * rect.width(), y * rect.height());
+    let stroke = egui::Stroke::NONE;
+    painter.add(egui::Shape::convex_polygon(vec![p(0.64, 0.0), p(0.16, 0.58), p(0.52, 0.58)], color, stroke));
+    painter.add(egui::Shape::convex_polygon(vec![p(0.48, 0.42), p(0.84, 0.42), p(0.36, 1.0)], color, stroke));
+    painter.add(egui::Shape::convex_polygon(vec![p(0.40, 0.42), p(0.60, 0.42), p(0.60, 0.58), p(0.40, 0.58)], color, stroke));
+}
+
+/// Some devices don't tell SteamVR they're charging until they're full
+/// (tester: the charging mark only ever showed at 100 %). A battery whose
+/// level climbs [`CHARGE_RISE`] above its low point counts as charging
+/// until it drops [`CHARGE_RISE`] below its high point.
+#[derive(Default)]
+pub struct ChargeSense {
+    /// Per device: (low point, high point, rising).
+    seen: std::collections::HashMap<u32, (f32, f32, bool)>,
+}
+
+pub const CHARGE_RISE: f32 = 0.01;
+
+impl ChargeSense {
+    pub fn apply(&mut self, readings: &mut [BatteryReading]) {
+        for r in readings.iter_mut() {
+            let f = r.fraction;
+            let e = self.seen.entry(r.id).or_insert((f, f, false));
+            if e.2 {
+                e.1 = e.1.max(f);
+                if f <= e.1 - CHARGE_RISE + 1e-4 {
+                    *e = (f, f, false);
+                }
+            } else {
+                e.0 = e.0.min(f);
+                if f >= e.0 + CHARGE_RISE - 1e-4 {
+                    *e = (f, f, true);
+                }
+            }
+            r.charging |= e.2;
+        }
+        self.seen.retain(|id, _| readings.iter().any(|r| r.id == *id));
+    }
+}
+
 /// "2h 05m" / "45m" / "<1m".
 pub fn format_duration(secs: f64) -> String {
     let m = (secs / 60.0).round() as u64;
@@ -354,6 +398,24 @@ pub fn osc_device_name(r: &BatteryReading) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rising_battery_counts_as_charging() {
+        let mut s = ChargeSense::default();
+        let mut at = |f: f32, reported: bool| {
+            let mut r = vec![BatteryReading { id: 1, label: "Left hand".into(), fraction: f, charging: reported, icon: None }];
+            s.apply(&mut r);
+            r[0].charging
+        };
+        assert!(!at(0.50, false));
+        assert!(!at(0.49, false), "discharging");
+        assert!(!at(0.495, false), "jitter isn't charging");
+        assert!(at(0.50, false), "climbed 1 % from its low: charging");
+        assert!(at(0.62, false));
+        assert!(at(0.615, false), "a wobble keeps it");
+        assert!(!at(0.61, false), "dropped 1 % from its high: unplugged");
+        assert!(at(0.40, true), "SteamVR's own flag always wins");
+    }
 
     fn r(id: u32, fraction: f32, charging: bool) -> BatteryReading {
         BatteryReading { id, label: format!("dev{id}"), fraction, charging, ..Default::default() }

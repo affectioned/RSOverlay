@@ -449,6 +449,31 @@ mod native_gpu_tests {
         }
     }
 
+    /// Animated beam: pulses of brighter, wider glow run along it.
+    #[test]
+    fn beam_pulses_travel_along_it() {
+        let Ok(gpu) = pollster::block_on(GpuCtx::new(rsoverlay_core::RuntimeMode::Preview)) else {
+            eprintln!("SKIPPED: no GPU adapter");
+            return;
+        };
+        let (w, h) = (256u32, 32u32);
+        let frames = [
+            draw_static(&gpu, w, h, |ctx| rsoverlay_ui::shell::paint_beam_anim(ctx, Some(0.0))),
+            draw_static(&gpu, w, h, |ctx| rsoverlay_ui::shell::paint_beam_anim(ctx, Some(0.1))),
+            draw_static(&gpu, w, h, |ctx| rsoverlay_ui::shell::paint_beam_anim(ctx, Some(0.2))),
+        ];
+        if let Ok(d) = std::env::var("RSO_TEX_DUMP") {
+            for (k, px) in frames.iter().enumerate() {
+                std::fs::write(format!("{d}/beam_anim{k}_{w}x{h}.raw"), px).unwrap();
+            }
+        }
+        // Glow row: where it's brightest moves toward the tip over time.
+        let peak = |px: &Vec<u8>| (60..230usize).max_by_key(|&x| px[(9 * w as usize + x) * 4 + 3]).unwrap();
+        let (a, b) = (peak(&frames[0]), peak(&frames[1]));
+        println!("glow peak x: {a} -> {b} -> {}", peak(&frames[2]));
+        assert_ne!(a, b, "pulses move");
+    }
+
     #[test]
     fn cursor_texture_is_drawn() {
         let Ok(gpu) = pollster::block_on(GpuCtx::new(rsoverlay_core::RuntimeMode::Preview)) else {
