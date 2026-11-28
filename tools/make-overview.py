@@ -14,7 +14,7 @@ SHOTS = [
     ('vr-dashboard', 'Dashboard', 'labelled sidebar · search · pop-out widgets', None),
     ('vr-social', 'Social VR', 'chatbox + keyboard · notifications · now playing', None),
     ('vr-gaming', 'In game', 'guide pinned aside · media and battery widgets · wrist', None),
-    ('vr-wrist-compact', 'Wrist toolbar', 'compact by default: the everyday four + More', WRIST_CROP),
+    ('vr-wrist-compact', 'Wrist toolbar', 'the everyday buttons + More · album cover while music plays', WRIST_CROP),
     ('vr-wrist-expanded', 'Wrist toolbar, More', 'every action, layout slots, views, batteries', WRIST_CROP),
 ]
 TW, TH = 1152, 648

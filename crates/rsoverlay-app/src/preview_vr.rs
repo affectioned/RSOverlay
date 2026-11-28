@@ -314,6 +314,8 @@ pub fn run(
     crate::preview::seed_dev_view(&mut dev_view, &app_config, &hooks);
     dev_view.dock_layout = true;
     dev_view.set_demo_media("Northern Lights", "Ambient Works");
+    // A made-up cover for the Media theme (shown on the wrist scenes).
+    dev_view.set_demo_art();
     // The volume mixer lists the PC's real audio apps; keep it out.
     dev_view.show_volume = false;
     let mut keyboard = VrKeyboard::default();
@@ -333,6 +335,10 @@ pub fn run(
     let beam = scene.quad(&gpu, &beam_tex.view);
 
     let mut preset = Preset::from_arg(test.scene.as_deref());
+    // Wrist close-ups show the Media theme's album cover; the wide scenes
+    // keep the default accent so the overview reads as one product.
+    let media_theme = |p: Preset| matches!(p, Preset::WristCompact | Preset::WristExpanded);
+    dev_view.media_theme = media_theme(preset);
     let mut panels = build(&gpu, &scene, preset);
     let mut camera = OrbitCamera::framing(preset);
     let mut input = InputState::default();
@@ -354,6 +360,7 @@ pub fn run(
                     let c = c.as_str();
                     if let Some(p) = c.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).and_then(|i| Preset::ALL.get(i)) {
                         preset = *p;
+                        dev_view.media_theme = media_theme(preset);
                         panels = build(&gpu, &scene, preset);
                         camera = OrbitCamera::framing(preset);
                         info!("VR preview: scene '{}'", preset.name());

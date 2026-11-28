@@ -15,8 +15,8 @@ UI frame time); "overlay fps 90" is representative of a 90 Hz headset.
 | `vr-gaming.png` | game guide, media/macros + battery widgets, wrist expanded |
 | `vr-social.png` | dashboard on Chat, keyboard, notifications + media |
 | `vr-dashboard.png` | dashboard Home, popped-out stats widget |
-| `vr-wrist-compact.png` | wrist close-up, compact set (More) |
-| `vr-wrist-expanded.png` | wrist close-up, everything shown (Less) |
+| `vr-wrist-compact.png` | wrist close-up, compact set (More), Media theme with a demo album cover |
+| `vr-wrist-expanded.png` | wrist close-up, everything shown (Less), demo album cover |
 
 Regenerate (after UI changes):
 
