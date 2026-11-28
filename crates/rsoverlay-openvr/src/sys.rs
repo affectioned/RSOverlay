@@ -91,7 +91,13 @@ pub struct IVROverlayFnTable {
     pub _pad_03b: [*const c_void; 7], // 33..=39
     pub ShowOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
     pub HideOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
-    pub _pad_04: [*const c_void; 7], // 42..=48
+    pub _pad_04: [*const c_void; 2], // 42 IsOverlayVisible, 43 GetTransformForOverlayCoordinates
+    pub PollNextOverlayEvent: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, pEvent: *mut VREvent_t, uncbVREvent: u32) -> bool, // 44
+    pub _pad_04a: [*const c_void; 1], // 45 GetOverlayInputMethod
+    /// `VROverlayInputMethod` is a C enum (int-sized).
+    pub SetOverlayInputMethod: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, eInputMethod: i32) -> EVROverlayError, // 46
+    pub _pad_04c: [*const c_void; 1], // 47 GetOverlayMouseScale
+    pub SetOverlayMouseScale: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, pvecMouseScale: *const HmdVector2_t) -> EVROverlayError, // 48
     pub ComputeOverlayIntersection: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, pParams: *const VROverlayIntersectionParams_t, pResults: *mut VROverlayIntersectionResults_t) -> bool, // 49
     pub _pad_04b: [*const c_void; 6], // 50..=55
     pub SetOverlayTexture: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, pTexture: *const Texture_t) -> EVROverlayError,
@@ -115,6 +121,9 @@ const _: () = {
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayCurvature) == 23 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayTransformTrackedDeviceRelative) == 32 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, ComputeOverlayIntersection) == 49 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, PollNextOverlayEvent) == 44 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayInputMethod) == 46 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayMouseScale) == 48 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayWidthInMeters) == 21 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayTransformAbsolute) == 30 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, ShowOverlay) == 40 * P);
@@ -217,6 +226,10 @@ pub struct VREvent_t {
 }
 
 pub const VREvent_Quit: u32 = 700;
+pub const VREvent_MouseMove: u32 = 300;
+pub const VREvent_MouseButtonDown: u32 = 301;
+pub const VREvent_MouseButtonUp: u32 = 302;
+pub const VROverlayInputMethod_Mouse: i32 = 1;
 
 const _: () = {
     const P: usize = std::mem::size_of::<*const c_void>();

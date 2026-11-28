@@ -225,6 +225,26 @@ impl OpenVr {
     }
 }
 
+/// SteamVR laser-mouse event on one of our overlays.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MouseEvent {
+    pub kind: MouseKind,
+    /// Mouse-scale units, y down from the top.
+    pub x: f32,
+    pub y: f32,
+    /// 1 left, 2 right, 4 middle.
+    pub button: u32,
+    /// The controller doing it.
+    pub device: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseKind {
+    Move,
+    Down,
+    Up,
+}
+
 /// One compositor frame, as far as performance stats need it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FrameSample {
@@ -314,6 +334,42 @@ impl<'a> Overlay<'a> {
         // SAFETY: IVROverlay_024 slot 10 (pinned in sys.rs).
         let r = unsafe { (self.table().SetOverlayFlag)(handle, sys::VROverlayFlags_MakeOverlaysInteractiveIfVisible, on) };
         check(r, "SetOverlayFlag")
+    }
+
+    /// Let SteamVR's own laser pointer drive this overlay: SteamVR draws
+    /// the beam and cursor in the compositor and sends mouse events in
+    /// `w` x `h` units (see [`Overlay::mouse_events`]). Active outside
+    /// the SteamVR menu only while [`Overlay::set_input_capture`] is on.
+    pub fn set_mouse_input(&self, handle: VROverlayHandle_t, w: f32, h: f32) -> Result<(), OpenVrError> {
+        // SAFETY: IVROverlay_024 slots 46 / 48 (pinned in sys.rs).
+        check(unsafe { (self.table().SetOverlayInputMethod)(handle, sys::VROverlayInputMethod_Mouse) }, "SetOverlayInputMethod")?;
+        let scale = sys::HmdVector2_t { v: [w, h] };
+        check(unsafe { (self.table().SetOverlayMouseScale)(handle, &scale) }, "SetOverlayMouseScale")
+    }
+
+    /// Drain SteamVR's laser-mouse events for this overlay. Positions are
+    /// in the mouse-scale units, y down from the top (SteamVR sends y up
+    /// from the bottom; flipped here with `h`).
+    pub fn mouse_events(&self, handle: VROverlayHandle_t, h: f32) -> Vec<MouseEvent> {
+        let mut out = Vec::new();
+        let mut ev = sys::VREvent_t::default();
+        // SAFETY: IVROverlay_024 slot 44 (pinned); `ev` is a full-size
+        // VREvent_t (size asserted in sys.rs).
+        while unsafe { (self.table().PollNextOverlayEvent)(handle, &mut ev, std::mem::size_of::<sys::VREvent_t>() as u32) } {
+            let kind = match ev.eventType {
+                sys::VREvent_MouseMove => MouseKind::Move,
+                sys::VREvent_MouseButtonDown => MouseKind::Down,
+                sys::VREvent_MouseButtonUp => MouseKind::Up,
+                _ => continue,
+            };
+            // VREvent_Mouse_t { float x, y; uint32 button } at the union start.
+            let d = ev.data[0].to_le_bytes();
+            let x = f32::from_le_bytes([d[0], d[1], d[2], d[3]]);
+            let y = f32::from_le_bytes([d[4], d[5], d[6], d[7]]);
+            let button = (ev.data[1] & 0xFFFF_FFFF) as u32;
+            out.push(MouseEvent { kind, x, y: h - y, button, device: ev.trackedDeviceIndex });
+        }
+        out
     }
 
     /// SteamVR's own dashboard (system menu) is open.
