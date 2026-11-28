@@ -299,96 +299,160 @@ pub(crate) fn beyond_deadband(last: Option<(i32, i32)>, now: (i32, i32)) -> bool
     last.is_none_or(|l| (l.0 - now.0).abs() >= MOUSE_DEADBAND_PX || (l.1 - now.1).abs() >= MOUSE_DEADBAND_PX)
 }
 
-/// Keyboard on SteamVR's own laser: how long it stays engaged after the
-/// laser leaves the keyboard (crossing a gap between keys etc.).
-pub(crate) const STEAM_KB_GRACE_S: f64 = 0.4;
+/// SteamVR's laser stays on this long after it reports leaving our
+/// panels (crossing the gap between two of them).
+pub(crate) const STEAM_GRACE_S: f64 = 0.5;
 /// If SteamVR sends nothing this long after engaging, use our laser.
-pub(crate) const STEAM_KB_FALLBACK_S: f64 = 1.0;
+pub(crate) const STEAM_FALLBACK_S: f64 = 1.0;
 
-/// SteamVR laser-mouse event, already mapped to a hand slot.
+/// SteamVR laser-mouse event on panel `.0` from hand slot `.1`.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum KbMouse {
+pub(crate) enum LaserEv {
+    Enter,
+    Leave,
     Move(f32, f32),
-    Down(f32, f32),
+    /// Position and button (1 left, 2 right, 4 middle).
+    Down(f32, f32, u32),
     Up,
+    Scroll(f32, f32),
 }
 
-/// The keyboard on SteamVR's laser (tester: our laser's keys felt
-/// offset; SteamVR's own keyboard is in sync because the compositor
-/// draws the laser and decides the hit). While our laser reaches the
-/// keyboard we turn SteamVR's laser on for it (MakeOverlaysInteractive-
-/// IfVisible); its mouse events then drive the keys, and our own beam,
-/// cursor and samples stay off the keyboard.
+/// RSOverlay on SteamVR's own laser (tester: far more accurate than
+/// ours; the compositor draws it and decides the hit with no lag).
+/// Our ray only *starts* it: when it first reaches a panel we set
+/// MakeOverlaysInteractiveIfVisible, SteamVR's laser appears and takes
+/// the controllers (our own input goes quiet), and from then on only
+/// SteamVR's focus events decide when you've left. The first build let
+/// our (by then input-less) ray decide that too, and the two fought.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct SteamKb {
-    since: Option<f64>,
-    last_on: f64,
+pub(crate) struct SteamLaser {
+    engaged: bool,
+    flag_panel: Option<usize>,
+    since: f64,
     last_event: f64,
+    last_hover: f64,
+    hover: Option<usize>,
     pos: Option<(f32, f32)>,
     hand: usize,
-    down: bool,
+    down: Option<u32>,
     release_next: bool,
-    fallback: bool,
+    /// Left on SteamVR's word while our ray still saw a panel: don't
+    /// re-engage until our ray has been off the panels once.
+    need_fresh: bool,
+    /// SteamVR has reported its laser on a panel this stint ("left"
+    /// only counts after that).
+    seen: bool,
 }
 
-impl Default for SteamKb {
+impl Default for SteamLaser {
     fn default() -> Self {
-        Self { since: None, last_on: f64::NEG_INFINITY, last_event: f64::NEG_INFINITY, pos: None, hand: 1, down: false, release_next: false, fallback: false }
+        Self {
+            engaged: false,
+            flag_panel: None,
+            since: 0.0,
+            last_event: f64::NEG_INFINITY,
+            last_hover: f64::NEG_INFINITY,
+            hover: None,
+            pos: None,
+            hand: 1,
+            down: None,
+            release_next: false,
+            need_fresh: false,
+            seen: false,
+        }
     }
 }
 
-/// This frame's keyboard input.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct SteamKbFrame {
-    /// Turn SteamVR's laser on for the keyboard.
-    pub capture: bool,
-    /// Keys come from SteamVR (not our laser); hide our beam / cursor there.
-    pub steam: bool,
-    pub hand: usize,
+/// This frame's pointing, when SteamVR's laser is engaged.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct SteamLaserFrame {
+    /// SteamVR's laser is on: our beams / cursors hide, panels take input
+    /// from the fields below.
+    pub engaged: bool,
+    /// Panel carrying the interactive flag.
+    pub flag_panel: Option<usize>,
+    /// Panel under SteamVR's laser, and where (panel points).
+    pub panel: Option<usize>,
     pub pos: Option<(f32, f32)>,
-    /// "Trigger" held (a SteamVR button down).
-    pub pressed: bool,
+    pub hand: usize,
+    /// Button held (1 left, 2 right, 4 middle).
+    pub down: Option<u32>,
+    pub scroll: (f32, f32),
 }
 
-impl SteamKb {
-    /// `ray_on_kb`: hand slot whose own laser is on the keyboard.
-    pub fn step(&mut self, ray_on_kb: Option<usize>, events: &[(usize, KbMouse)], now: f64) -> SteamKbFrame {
+impl SteamLaser {
+    /// `ray_panel`: a panel our own ray is on (starts SteamVR's laser).
+    pub fn step(&mut self, ray_panel: Option<usize>, events: &[(usize, usize, LaserEv)], now: f64) -> SteamLaserFrame {
         if std::mem::take(&mut self.release_next) {
-            self.down = false;
+            self.down = None;
         }
         let mut pressed_now = false;
-        for &(hand, e) in events {
+        let mut scroll = (0.0, 0.0);
+        for &(panel, hand, e) in events {
             self.last_event = now;
             self.hand = hand;
             match e {
-                KbMouse::Move(x, y) => self.pos = Some((x, y)),
-                KbMouse::Down(x, y) => {
+                LaserEv::Enter => self.hover = Some(panel),
+                LaserEv::Leave => {
+                    if self.hover == Some(panel) {
+                        self.hover = None;
+                        self.pos = None;
+                        // Grace counts from the moment it left.
+                        self.last_hover = now;
+                    }
+                }
+                LaserEv::Move(x, y) => {
+                    self.hover = Some(panel);
                     self.pos = Some((x, y));
-                    self.down = true;
+                }
+                LaserEv::Down(x, y, b) => {
+                    self.hover = Some(panel);
+                    self.pos = Some((x, y));
+                    self.down = Some(b);
                     pressed_now = true;
                 }
                 // A click inside one frame still shows as held for one.
-                KbMouse::Up if pressed_now => self.release_next = true,
-                KbMouse::Up => self.down = false,
+                LaserEv::Up if pressed_now => self.release_next = true,
+                LaserEv::Up => self.down = None,
+                LaserEv::Scroll(x, y) => {
+                    scroll.0 += x;
+                    scroll.1 += y;
+                }
             }
         }
-        if ray_on_kb.is_some() || !events.is_empty() {
-            self.last_on = now;
+        if self.hover.is_some() {
+            self.last_hover = now;
+            self.seen = true;
         }
-        let active = ray_on_kb.is_some() || self.down || now - self.last_on < STEAM_KB_GRACE_S;
-        if !active {
-            *self = Self { last_event: self.last_event, hand: self.hand, ..Self::default() };
-            return SteamKbFrame { capture: false, steam: false, hand: self.hand, pos: None, pressed: false };
+        if !self.engaged {
+            if ray_panel.is_none() {
+                self.need_fresh = false;
+            }
+            if let (Some(p), false) = (ray_panel, self.need_fresh) {
+                self.engaged = true;
+                self.flag_panel = Some(p);
+                self.since = now;
+                self.last_hover = now;
+            }
+        } else {
+            let left = self.seen && self.hover.is_none() && self.down.is_none() && now - self.last_hover >= STEAM_GRACE_S;
+            let silent = self.last_event < self.since && now - self.since >= STEAM_FALLBACK_S;
+            if left || silent {
+                *self = Self { need_fresh: ray_panel.is_some(), hand: self.hand, last_event: self.last_event, ..Self::default() };
+            }
         }
-        let since = *self.since.get_or_insert(now);
-        if self.last_event < since && now - since >= STEAM_KB_FALLBACK_S {
-            self.fallback = true;
+        if !self.engaged {
+            return SteamLaserFrame { hand: self.hand, ..Default::default() };
         }
-        if ray_on_kb.is_none() && events.is_empty() && !self.down {
-            self.pos = None;
+        SteamLaserFrame {
+            engaged: true,
+            flag_panel: self.flag_panel,
+            panel: self.hover,
+            pos: self.pos.filter(|_| self.hover.is_some()),
+            hand: self.hand,
+            down: self.down,
+            scroll,
         }
-        let steam = !self.fallback;
-        SteamKbFrame { capture: steam, steam, hand: self.hand, pos: self.pos.filter(|_| steam), pressed: steam && self.down }
     }
 }
 
@@ -866,55 +930,75 @@ mod sim {
         assert!(beyond_deadband(Some((10, 10)), (10, 10 + MOUSE_DEADBAND_PX)));
     }
 
-    /// Option 1: laser reaches the keyboard → SteamVR's laser takes over;
-    /// its clicks are the key presses; leaving hands back after a grace.
+    /// Full swap: our ray starts SteamVR's laser; SteamVR's events then
+    /// drive the panels until it reports leaving.
     #[test]
-    fn keyboard_switches_to_steamvrs_laser_and_back() {
-        let mut k = SteamKb::default();
-        let off = k.step(None, &[], 0.0);
-        assert!(!off.capture && !off.steam);
-        // Our right laser reaches the keyboard: engage.
-        let f = k.step(Some(1), &[], 1.0);
-        assert!(f.capture && f.steam, "SteamVR laser on");
-        assert_eq!(f.pos, None, "no position until SteamVR says");
-        // SteamVR reports the hover, then a click within one frame.
-        let f = k.step(Some(1), &[(1, KbMouse::Move(500.0, 200.0))], 1.02);
-        assert_eq!((f.pos, f.pressed), (Some((500.0, 200.0)), false));
-        let f = k.step(Some(1), &[(1, KbMouse::Down(510.0, 205.0)), (1, KbMouse::Up)], 1.04);
-        assert!(f.pressed, "a fast click still registers as a press");
-        assert_eq!(f.pos, Some((510.0, 205.0)));
-        let f = k.step(Some(1), &[], 1.06);
-        assert!(!f.pressed, "…and releases the next frame");
-        // Held key: stays pressed until Up.
-        k.step(Some(1), &[(1, KbMouse::Down(300.0, 100.0))], 1.1);
-        assert!(k.step(Some(1), &[], 1.2).pressed);
-        assert!(!k.step(Some(1), &[(1, KbMouse::Up)], 1.3).pressed);
-        // Our ray leaves (SteamVR's laser may still be on it a moment).
-        let f = k.step(None, &[], 1.4);
-        assert!(f.capture, "grace period");
-        assert_eq!(f.pos, None, "no hover without the laser");
-        let f = k.step(None, &[], 1.3 + STEAM_KB_GRACE_S + 0.01);
-        assert!(!f.capture && !f.steam, "handed back to our laser");
+    fn steamvr_laser_takes_over_and_hands_back() {
+        let mut l = SteamLaser::default();
+        assert!(!l.step(None, &[], 0.0).engaged);
+        // Our ray reaches the keyboard (2): engage, flag on it.
+        let f = l.step(Some(2), &[], 1.0);
+        assert!(f.engaged);
+        assert_eq!(f.flag_panel, Some(2));
+        // SteamVR: enter, move, a click inside one frame.
+        let f = l.step(Some(2), &[(2, 1, LaserEv::Enter), (2, 1, LaserEv::Move(500.0, 200.0))], 1.02);
+        assert_eq!((f.panel, f.pos, f.down), (Some(2), Some((500.0, 200.0)), None));
+        let f = l.step(None, &[(2, 1, LaserEv::Down(510.0, 205.0, 1)), (2, 1, LaserEv::Up)], 1.04);
+        assert_eq!(f.down, Some(1), "a fast click still presses");
+        assert_eq!(l.step(None, &[], 1.06).down, None, "...and releases next frame");
+        // Right click held, then released.
+        l.step(None, &[(2, 1, LaserEv::Down(10.0, 10.0, 2))], 1.1);
+        assert_eq!(l.step(None, &[], 1.2).down, Some(2));
+        assert_eq!(l.step(None, &[(2, 1, LaserEv::Up)], 1.3).down, None);
+        // Laser crosses to the dashboard (1): leave + enter, either order.
+        let f = l.step(None, &[(1, 1, LaserEv::Enter), (2, 1, LaserEv::Leave)], 1.4);
+        assert_eq!(f.panel, Some(1));
+        // Scroll deltas come through.
+        assert_eq!(l.step(None, &[(1, 1, LaserEv::Scroll(0.0, -0.5))], 1.5).scroll, (0.0, -0.5));
+        // Leaves every panel: grace, then handed back.
+        let f = l.step(None, &[(1, 1, LaserEv::Leave)], 2.0);
+        assert!(f.engaged && f.panel.is_none(), "grace");
+        assert!(!l.step(None, &[], 2.0 + STEAM_GRACE_S + 0.01).engaged);
     }
 
-    /// If SteamVR's laser never answers (some runtime / headset quirk),
-    /// the keyboard must not go dead: our laser takes it back.
+    /// Tester: "glitching between our cursor & SteamVR's". Engaged,
+    /// SteamVR takes the controllers, our ray goes blind (None) while
+    /// SteamVR's laser is still on the keyboard: that must not end it.
     #[test]
-    fn keyboard_falls_back_to_our_laser_if_steamvr_is_silent() {
-        let mut k = SteamKb::default();
-        assert!(k.step(Some(1), &[], 0.0).steam);
-        assert!(k.step(Some(1), &[], STEAM_KB_FALLBACK_S - 0.01).steam);
-        let f = k.step(Some(1), &[], STEAM_KB_FALLBACK_S + 0.01);
-        assert!(!f.steam && !f.capture, "fallback to our laser");
-        // Leaving and coming back tries SteamVR again.
-        k.step(None, &[], 5.0);
-        assert!(k.step(Some(1), &[], 6.0).steam);
-        // A hand that's SteamVR-answered never falls back.
-        let mut k = SteamKb::default();
-        k.step(Some(0), &[], 0.0);
-        k.step(Some(0), &[(0, KbMouse::Move(1.0, 1.0))], 0.1);
-        let f = k.step(Some(0), &[], 3.0);
-        assert!(f.steam);
-        assert_eq!(f.hand, 0);
+    fn our_ray_going_blind_does_not_end_steamvrs_laser() {
+        let mut l = SteamLaser::default();
+        l.step(Some(2), &[], 0.0);
+        l.step(None, &[(2, 1, LaserEv::Enter)], 0.05);
+        for i in 1..200 {
+            let f = l.step(None, &[], 0.05 + i as f64 * 0.016);
+            assert!(f.engaged && f.panel == Some(2), "dropped at frame {i}");
+        }
+    }
+
+    /// SteamVR said "left" while our ray still sees a panel (edges where
+    /// the two rays disagree): don't bounce straight back in.
+    #[test]
+    fn no_bouncing_at_panel_edges() {
+        let mut l = SteamLaser::default();
+        l.step(Some(3), &[], 0.0);
+        l.step(Some(3), &[(3, 1, LaserEv::Enter)], 0.1);
+        l.step(Some(3), &[(3, 1, LaserEv::Leave)], 0.2);
+        assert!(!l.step(Some(3), &[], 0.2 + STEAM_GRACE_S + 0.01).engaged);
+        for i in 0..20 {
+            assert!(!l.step(Some(3), &[], 1.0 + i as f64 * 0.1).engaged, "bounced back in");
+        }
+        // Our ray leaves, then comes back: a fresh start is fine.
+        l.step(None, &[], 4.0);
+        assert!(l.step(Some(3), &[], 4.1).engaged);
+    }
+
+    /// If SteamVR's laser never answers, our laser takes over.
+    #[test]
+    fn falls_back_to_our_laser_if_steamvr_is_silent() {
+        let mut l = SteamLaser::default();
+        assert!(l.step(Some(2), &[], 0.0).engaged);
+        assert!(l.step(Some(2), &[], STEAM_FALLBACK_S - 0.01).engaged);
+        assert!(!l.step(Some(2), &[], STEAM_FALLBACK_S + 0.01).engaged);
+        assert!(!l.step(Some(2), &[], 3.0).engaged, "stays on ours while still pointing");
     }
 }

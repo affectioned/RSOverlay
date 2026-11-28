@@ -238,11 +238,16 @@ pub struct MouseEvent {
     pub device: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MouseKind {
     Move,
     Down,
     Up,
+    /// SteamVR's laser entered / left this overlay.
+    Enter,
+    Leave,
+    /// Smooth scroll (x, y delta) from the stick / touchpad.
+    Scroll(f32, f32),
 }
 
 /// One compositor frame, as far as performance stats need it.
@@ -344,7 +349,9 @@ impl<'a> Overlay<'a> {
         // SAFETY: IVROverlay_024 slots 46 / 48 (pinned in sys.rs).
         check(unsafe { (self.table().SetOverlayInputMethod)(handle, sys::VROverlayInputMethod_Mouse) }, "SetOverlayInputMethod")?;
         let scale = sys::HmdVector2_t { v: [w, h] };
-        check(unsafe { (self.table().SetOverlayMouseScale)(handle, &scale) }, "SetOverlayMouseScale")
+        check(unsafe { (self.table().SetOverlayMouseScale)(handle, &scale) }, "SetOverlayMouseScale")?;
+        // SAFETY: IVROverlay_024 slot 10 (pinned in sys.rs).
+        check(unsafe { (self.table().SetOverlayFlag)(handle, sys::VROverlayFlags_SendVRSmoothScrollEvents, true) }, "SetOverlayFlag")
     }
 
     /// Drain SteamVR's laser-mouse events for this overlay. Positions are
@@ -356,18 +363,22 @@ impl<'a> Overlay<'a> {
         // SAFETY: IVROverlay_024 slot 44 (pinned); `ev` is a full-size
         // VREvent_t (size asserted in sys.rs).
         while unsafe { (self.table().PollNextOverlayEvent)(handle, &mut ev, std::mem::size_of::<sys::VREvent_t>() as u32) } {
+            // VREvent_Mouse_t { float x, y; uint32 button } or
+            // VREvent_Scroll_t { float xdelta, ydelta; .. } at the union start.
+            let d = ev.data[0].to_le_bytes();
+            let a = f32::from_le_bytes([d[0], d[1], d[2], d[3]]);
+            let b = f32::from_le_bytes([d[4], d[5], d[6], d[7]]);
+            let button = (ev.data[1] & 0xFFFF_FFFF) as u32;
             let kind = match ev.eventType {
                 sys::VREvent_MouseMove => MouseKind::Move,
                 sys::VREvent_MouseButtonDown => MouseKind::Down,
                 sys::VREvent_MouseButtonUp => MouseKind::Up,
+                sys::VREvent_FocusEnter => MouseKind::Enter,
+                sys::VREvent_FocusLeave => MouseKind::Leave,
+                sys::VREvent_ScrollSmooth => MouseKind::Scroll(a, b),
                 _ => continue,
             };
-            // VREvent_Mouse_t { float x, y; uint32 button } at the union start.
-            let d = ev.data[0].to_le_bytes();
-            let x = f32::from_le_bytes([d[0], d[1], d[2], d[3]]);
-            let y = f32::from_le_bytes([d[4], d[5], d[6], d[7]]);
-            let button = (ev.data[1] & 0xFFFF_FFFF) as u32;
-            out.push(MouseEvent { kind, x, y: h - y, button, device: ev.trackedDeviceIndex });
+            out.push(MouseEvent { kind, x: a, y: h - b, button, device: ev.trackedDeviceIndex });
         }
         out
     }

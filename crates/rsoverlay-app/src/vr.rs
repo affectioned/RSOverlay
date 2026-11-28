@@ -946,10 +946,10 @@ mod imp {
         let mut steady = [RayStabilizer::default(); 2];
         // The PC mouse: yields laser hover while you use it.
         let mut mouse_owner = MouseYield::default();
-        // Keyboard on SteamVR's own laser (vr_logic::SteamKb).
-        let mut steam_kb = SteamKb::default();
-        let mut kb_mouse_scale = egui::Vec2::ZERO;
-        let mut steam_kb_logged = (false, false);
+        // SteamVR's own laser drives every panel (vr_logic::SteamLaser).
+        let mut steam = SteamLaser::default();
+        let mut mouse_scales: std::collections::HashMap<rsoverlay_openvr::VROverlayHandle_t, egui::Vec2> = Default::default();
+        let mut steam_logged = (false, false);
         // Window count last frame (a new one shows the windows).
         let mut prev_win_count = 0usize;
         dev_view.windows_up = true;
@@ -1227,6 +1227,68 @@ mod imp {
                     list.push(HandSample { hand, hit, trigger, stick_x: c.stick[0], stick_y: c.stick[1], button });
                 }
             }
+            // ── SteamVR's laser: our ray only starts it (first reach of a
+            // panel); SteamVR then draws the beam + dot, decides the hit
+            // and sends mouse events, which replace our samples below.
+            let panel_handles: Vec<(usize, rsoverlay_openvr::VROverlayHandle_t, egui::Vec2)> =
+                [(0, wrist.handle, wrist.points), (1, dash.handle, dash.points), (2, kb.handle, kb.points)]
+                    .into_iter()
+                    .chain(wins.iter().enumerate().map(|(k, w)| (k + WIN0, w.panel.handle, w.panel.points)))
+                    .collect();
+            for &(_, h, pts) in &panel_handles {
+                if mouse_scales.get(&h) != Some(&pts) {
+                    mouse_scales.insert(h, pts);
+                    if let Err(e) = overlay.set_mouse_input(h, pts.x, pts.y) {
+                        warn!("SteamVR laser input: {e:#}");
+                    }
+                }
+            }
+            let mut steam_events: Vec<(usize, usize, LaserEv)> = Vec::new();
+            for &(i, h, pts) in &panel_handles {
+                for e in overlay.mouse_events(h, pts.y) {
+                    let hand = controllers.iter().find(|c| c.index == e.device).map_or(1, |c| hand_slot(c.hand));
+                    let ev = match e.kind {
+                        rsoverlay_openvr::MouseKind::Move => LaserEv::Move(e.x, e.y),
+                        rsoverlay_openvr::MouseKind::Down => LaserEv::Down(e.x, e.y, e.button.max(1)),
+                        rsoverlay_openvr::MouseKind::Up => LaserEv::Up,
+                        rsoverlay_openvr::MouseKind::Enter => LaserEv::Enter,
+                        rsoverlay_openvr::MouseKind::Leave => LaserEv::Leave,
+                        rsoverlay_openvr::MouseKind::Scroll(x, y) => LaserEv::Scroll(x, y),
+                    };
+                    steam_events.push((i, hand, ev));
+                }
+            }
+            let ray_panel = hand_hit[1].or(hand_hit[0]).map(|(i, _)| i);
+            let sf = steam.step(ray_panel, &steam_events, time);
+            if sf.engaged && !steam_events.is_empty() && !steam_logged.0 {
+                steam_logged.0 = true;
+                info!("pointing: on SteamVR's laser");
+            }
+            if ray_panel.is_some() && !sf.engaged && !steam_logged.1 && time > 5.0 {
+                steam_logged.1 = true;
+                warn!("pointing: SteamVR's laser didn't answer (or left at an edge); RSOverlay's laser for now");
+            }
+            if sf.engaged {
+                let hand = if sf.hand == 0 { laser::Hand::Left } else { laser::Hand::Right };
+                let button = match sf.down {
+                    Some(2) => egui::PointerButton::Secondary,
+                    Some(4) => egui::PointerButton::Middle,
+                    _ => egui::PointerButton::Primary,
+                };
+                // Smooth-scroll deltas → the stick the panels already
+                // scroll with.
+                let stick = |v: f32| (v * 4.0).clamp(-1.0, 1.0);
+                for (i, list) in samples.iter_mut().enumerate() {
+                    *list = vec![HandSample {
+                        hand,
+                        hit: sf.pos.filter(|_| sf.panel == Some(i)).map(|(x, y)| egui::pos2(x, y)),
+                        trigger: if sf.down.is_some() { 1.0 } else { 0.0 },
+                        stick_x: stick(sf.scroll.0),
+                        stick_y: stick(sf.scroll.1),
+                        button,
+                    }];
+                }
+            }
             let mut samples = samples.into_iter();
             let mut wrist_samples = samples.next().unwrap_or_default();
             let mut dash_samples = samples.next().unwrap_or_default();
@@ -1488,45 +1550,12 @@ mod imp {
                 }
             }
 
-            // ── Keyboard on SteamVR's laser: engaged while our laser
-            // reaches it; SteamVR's mouse events then drive the keys.
-            if kb.points != kb_mouse_scale {
-                kb_mouse_scale = kb.points;
-                if let Err(e) = overlay.set_mouse_input(kb.handle, kb.points.x, kb.points.y) {
-                    warn!("keyboard on SteamVR's laser: {e:#}");
-                }
-            }
-            let kb_events: Vec<(usize, KbMouse)> = overlay
-                .mouse_events(kb.handle, kb.points.y)
-                .into_iter()
-                .filter(|e| e.button <= 1)
-                .map(|e| {
-                    let hand = controllers.iter().find(|c| c.index == e.device).map_or(1, |c| hand_slot(c.hand));
-                    let m = match e.kind {
-                        rsoverlay_openvr::MouseKind::Move => KbMouse::Move(e.x, e.y),
-                        rsoverlay_openvr::MouseKind::Down => KbMouse::Down(e.x, e.y),
-                        rsoverlay_openvr::MouseKind::Up => KbMouse::Up,
-                    };
-                    (hand, m)
-                })
-                .collect();
-            let ray_on_kb = (0..2).find(|&s| hand_hit[s].is_some_and(|(i, _)| i == 2)).filter(|_| kb.visible);
-            let kb_steam = steam_kb.step(ray_on_kb, &kb_events, time);
-            if kb_steam.steam && !kb_events.is_empty() && !steam_kb_logged.0 {
-                steam_kb_logged.0 = true;
-                info!("keyboard: on SteamVR's laser");
-            }
-            if ray_on_kb.is_some() && !kb_steam.steam && !steam_kb_logged.1 {
-                steam_kb_logged.1 = true;
-                warn!("keyboard: SteamVR's laser didn't answer; using RSOverlay's");
-            }
-
             // ── Block game input while the laser is on a panel (opt-in):
             // the flag sits only on the panel being pointed at.
-            // The keyboard on SteamVR's laser always needs the flag.
-            let want_capture = kb_steam
-                .capture
-                .then_some(2)
+            // SteamVR's laser engaged always needs the flag (on the panel
+            // it started on).
+            let want_capture = sf
+                .flag_panel
                 .or_else(|| dev_view.pointer.block_game_input.then(|| hand_hit.iter().flatten().next().map(|(i, _)| *i)).flatten())
                 .map(|i| match i {
                     0 => wrist.handle,
@@ -1553,7 +1582,8 @@ mod imp {
                 let s = hand_slot(c.hand);
                 let b = &mut beams[s];
                 // On the keyboard SteamVR draws its own laser.
-                let hit = hand_hit[s].filter(|(i, _)| dev_view.vr_show_lasers && !(*i == 2 && kb_steam.steam));
+                // SteamVR draws its own laser while engaged.
+                let hit = hand_hit[s].filter(|_| dev_view.vr_show_lasers && !sf.engaged);
                 b.set_visible(&overlay, hit.is_some());
                 let (Some((_, len)), Some(e)) = (hit, eye) else { continue };
                 let o = Vec3A::from(c.origin);
@@ -1595,7 +1625,7 @@ mod imp {
                 // Wrist and dashboard draw their own cursor in-panel:
                 // SteamVR showed this overlay under them (tester; the log
                 // put it 1 mm in front of the wrist, still unseen).
-                let hit = hand_hit[s].filter(|(i, _)| *i >= WIN0 || (*i == 2 && !kb_steam.steam));
+                let hit = hand_hit[s].filter(|(i, _)| !sf.engaged && *i >= 2);
                 let place = c.zip(hit).zip(eye);
                 cur.set_visible(&overlay, place.is_some());
                 let Some(((c, (_, dist)), e)) = place else { continue };
@@ -1668,7 +1698,7 @@ mod imp {
             let mut act = rsoverlay_ui::wrist::WristAction::default();
             if wrist.visible {
                 let accent = dev_view.effective_accent();
-                let cursor = wf.cursor;
+                let cursor = wf.cursor.filter(|_| !sf.engaged);
                 wrist.render(&gpu, &overlay, time, dt, wf.events, |ctx| {
                     act = dev_view.wrist_ui(ctx);
                     if let Some((0, h)) = hud {
@@ -1813,7 +1843,7 @@ mod imp {
             if dash.visible {
                 let accent = dev_view.effective_accent();
                 let inj = injector.as_ref();
-                let cursor = df.cursor;
+                let cursor = df.cursor.filter(|_| !sf.engaged);
                 dash.render(&gpu, &overlay, time, dt, df.events, |ctx| {
                     dev_view.ui_with(ctx, inj);
                     if let Some((1, h)) = hud {
@@ -1883,12 +1913,8 @@ mod imp {
             let internal = text_target.is_some();
             let mut kb_haptics = Vec::new();
             if kb.visible {
-                let hands: Vec<(laser::Hand, Option<egui::Pos2>, f32)> = if kb_steam.steam {
-                    let hand = if kb_steam.hand == 0 { laser::Hand::Left } else { laser::Hand::Right };
-                    vec![(hand, kb_steam.pos.map(|(x, y)| egui::pos2(x, y)), if kb_steam.pressed { 1.0 } else { 0.0 })]
-                } else {
-                    kb_samples.iter().map(|s| (s.hand, s.hit, s.trigger)).collect()
-                };
+                let hands: Vec<(laser::Hand, Option<egui::Pos2>, f32)> =
+                    kb_samples.iter().map(|s| (s.hand, s.hit, s.trigger)).collect();
                 let accent = dev_view.effective_accent();
                 let mut kf = rsoverlay_ui::vrkeyboard::KbFrame::default();
                 kb.render(&gpu, &overlay, time, dt, Vec::new(), |ctx| {

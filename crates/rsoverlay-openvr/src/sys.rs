@@ -229,6 +229,10 @@ pub const VREvent_Quit: u32 = 700;
 pub const VREvent_MouseMove: u32 = 300;
 pub const VREvent_MouseButtonDown: u32 = 301;
 pub const VREvent_MouseButtonUp: u32 = 302;
+pub const VREvent_FocusEnter: u32 = 303;
+pub const VREvent_FocusLeave: u32 = 304;
+pub const VREvent_ScrollSmooth: u32 = 309;
+pub const VROverlayFlags_SendVRSmoothScrollEvents: i32 = 131072;
 pub const VROverlayInputMethod_Mouse: i32 = 1;
 
 const _: () = {
