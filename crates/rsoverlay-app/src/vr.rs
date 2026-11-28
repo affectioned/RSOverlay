@@ -451,6 +451,8 @@ mod imp {
         curvature: f32,
         /// Full frame rate even when not looked at (Window menu).
         smooth: bool,
+        /// Snap off (toolbar): never edge-docks to other windows.
+        no_snap: bool,
         /// Auto resolution: debounced texture-size changes.
         res: ResSettle,
         /// Share of the panel's width the capture filled last frame.
@@ -556,6 +558,7 @@ mod imp {
             pinned: false,
             curvature: 0.0,
             smooth: false,
+            no_snap: false,
             res: ResSettle::default(),
             content_frac: 1.0,
         })
@@ -610,6 +613,7 @@ mod imp {
                     pinned: w.pinned,
                     curvature: (w.curvature > 0.0).then_some(w.curvature),
                     smooth: w.smooth,
+                    no_snap: w.no_snap,
                 }
             })
             .collect();
@@ -654,6 +658,7 @@ mod imp {
             pinned: false,
             curvature: 0.0,
             smooth: false,
+            no_snap: false,
             res: ResSettle::default(),
             content_frac: 1.0,
         })
@@ -1711,12 +1716,12 @@ mod imp {
             // link them (they move together until Unlink). Skipped after a
             // merge: the dropped panel is gone and indices have shifted.
             if let Some(k) = released.filter(|&i| i >= WIN0 && !merged).map(|i| i - WIN0) {
-                if wins.get(k).is_some_and(|w| w.attach == Attach::World) {
+                if wins.get(k).is_some_and(|w| w.attach == Attach::World && !w.no_snap) {
                     let own = wins[k].group;
                     let others: Vec<_> = wins
                         .iter()
                         .enumerate()
-                        .filter(|&(j, w)| j != k && w.attach == Attach::World && (own.is_none() || w.group != own))
+                        .filter(|&(j, w)| j != k && w.attach == Attach::World && !w.no_snap && (own.is_none() || w.group != own))
                         .map(|(j, w)| (j, w.world, w.size_m()))
                         .collect();
                     if let Some((j, pose)) = snap_pose(&wins[k].world, wins[k].size_m(), &others) {
@@ -1750,12 +1755,12 @@ mod imp {
             {
                 let snap_now = grab.as_ref().filter(|g| g.panel >= WIN0).and_then(|g| {
                     let k = g.panel - WIN0;
-                    let w = wins.get(k).filter(|w| w.attach == Attach::World)?;
+                    let w = wins.get(k).filter(|w| w.attach == Attach::World && !w.no_snap)?;
                     let own = w.group;
                     let others: Vec<_> = wins
                         .iter()
                         .enumerate()
-                        .filter(|&(j, o)| j != k && o.attach == Attach::World && (own.is_none() || o.group != own))
+                        .filter(|&(j, o)| j != k && o.attach == Attach::World && !o.no_snap && (own.is_none() || o.group != own))
                         .map(|(j, o)| (j, o.world, o.size_m()))
                         .collect();
                     snap_pose(&w.world, w.size_m(), &others).map(|(_, p)| (p, w.size_m(), g.hand))
@@ -2436,6 +2441,7 @@ mod imp {
                     let icon = w.icon.as_ref().map(|t| t.id());
                     let (linked, opacity, pinned, smooth) = (w.group.is_some(), w.opacity, Some(w.pinned), w.smooth);
                     let tilt_on = dev_view.vr_grab_tilt;
+                    let snap_on = !w.no_snap;
                     // Auto-hide: the toolbar shows while the laser is on the
                     // window or it's held, and lingers a moment after.
                     if lf.cursor.is_some() || grab.as_ref().is_some_and(|g| g.panel == k + WIN0) {
@@ -2445,7 +2451,7 @@ mod imp {
                     let events = lf.events.clone();
                     w.panel.render(&gpu, &overlay, time, dt, lf.events, |ctx| {
                         mirror.refresh(&gpu);
-                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, opacity, pinned, show_toolbar, smooth, Some(tilt_on), accent);
+                        act = window_panel::show(ctx, &title, Some(handle_m), attach, blocked, icon, linked, opacity, pinned, show_toolbar, smooth, Some(tilt_on), Some(snap_on), accent);
                         if let Some((_, h)) = hud.filter(|(i, _)| *i == k + WIN0) {
                             rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                         }
@@ -2563,6 +2569,13 @@ mod imp {
                 // panels › Tilt panels with the controller).
                 if act.toggle_tilt {
                     dev_view.vr_grab_tilt = !dev_view.vr_grab_tilt;
+                }
+                // Snap off also leaves any group it's in (flash = undocked).
+                if act.toggle_snap {
+                    w.no_snap = !w.no_snap;
+                    if w.no_snap && w.group.take().is_some() {
+                        dock_flash = Some((w.world, w.size_m(), time));
+                    }
                 }
                 w.smooth ^= act.toggle_smooth;
                 // Readable size: widen (or shrink) the panel so the text
@@ -2745,6 +2758,7 @@ mod imp {
                             w.opacity = p.opacity.unwrap_or(1.0).clamp(window_panel::MIN_CONTENT_OPACITY, 1.0);
                             w.pinned = p.pinned;
                             w.smooth = p.smooth;
+                            w.no_snap = p.no_snap;
                             if let Some(c) = p.curvature.filter(|c| *c > 0.0) {
                                 w.curvature = c.min(1.0);
                                 let _ = overlay.set_curvature(w.panel.handle, w.curvature);

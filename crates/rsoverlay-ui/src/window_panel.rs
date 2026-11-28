@@ -60,6 +60,8 @@ pub struct WindowPanelAction {
     pub readable: bool,
     /// Tilt pill clicked (panels rotate with the controller while held).
     pub toggle_tilt: bool,
+    /// Snap pill clicked (this window joins others edge to edge).
+    pub toggle_snap: bool,
 }
 
 /// Window sizes on the toolbar's Size menu (outer size, pixels).
@@ -84,6 +86,7 @@ pub fn show(
     show_toolbar: bool,
     smooth: bool,
     tilt: Option<bool>,
+    snap: Option<bool>,
     accent: egui::Color32,
 ) -> WindowPanelAction {
     let mut out = WindowPanelAction::default();
@@ -136,12 +139,12 @@ pub fn show(
         let mut op = opacity;
         // Window menu: smooth refresh for any capture; sizes only for
         // real windows Windows lets us touch.
-        let menu = mirror.map(|m| WindowMenu { resizable: m.resizable && !input_blocked, smooth, tilt });
+        let menu = mirror.map(|m| WindowMenu { resizable: m.resizable && !input_blocked, smooth, tilt, snap });
         // Auto-hidden toolbars leave their strip empty (no layout jump).
         if show_toolbar {
             let t = toolbar(ui, bar, title, icon, attach, linked, pinned, menu, Some(&mut op), accent);
-            (out.attach, out.close, out.unlink, out.toggle_pin, out.resize, out.toggle_smooth, out.readable, out.toggle_tilt) =
-                (t.attach, t.close, t.unlink, t.toggle_pin, t.resize, t.toggle_smooth, t.readable, t.toggle_tilt);
+            (out.attach, out.close, out.unlink, out.toggle_pin, out.resize, out.toggle_smooth, out.readable, out.toggle_tilt, out.toggle_snap) =
+                (t.attach, t.close, t.unlink, t.toggle_pin, t.resize, t.toggle_smooth, t.readable, t.toggle_tilt, t.toggle_snap);
         }
         if (op - opacity).abs() > f32::EPSILON {
             out.opacity = Some(op);
@@ -181,6 +184,8 @@ pub struct WindowMenu {
     /// Tilt pill: panels rotate with the controller while held (Some =
     /// shown, with its state).
     pub tilt: Option<bool>,
+    /// Snap pill: this window edge-docks to others (Some = shown).
+    pub snap: Option<bool>,
 }
 
 /// What the toolbar's controls asked for this frame.
@@ -197,6 +202,8 @@ pub struct ToolbarOut {
     pub readable: bool,
     /// Tilt pill clicked.
     pub toggle_tilt: bool,
+    /// Snap pill clicked.
+    pub toggle_snap: bool,
 }
 
 /// A window panel's bottom toolbar: app icon + title, dock + close, and
@@ -242,6 +249,17 @@ pub fn toolbar(
             };
             if pill(ui, "Tilt", on, accent).on_hover_text(tip).clicked() {
                 out.toggle_tilt = true;
+            }
+        }
+        if let Some(on) = menu.and_then(|m| m.snap) {
+            ui.add_space(8.0);
+            let tip = if on {
+                "Snap on: this window joins other windows edge to edge when you drop it beside them. Click to keep it apart."
+            } else {
+                "Snap off: this window never joins other windows. Click to let it snap edge to edge again."
+            };
+            if pill(ui, "Snap", on, accent).on_hover_text(tip).clicked() {
+                out.toggle_snap = true;
             }
         }
         if let Some(op) = opacity {

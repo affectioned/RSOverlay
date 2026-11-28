@@ -40,6 +40,9 @@ pub struct LayoutPanel {
     /// Full frame rate even when not looked at (Window menu).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub smooth: bool,
+    /// Snap off: never edge-docks to other windows (toolbar Snap pill).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub no_snap: bool,
     /// Overlay curvature (0 = flat), e.g. the Big screen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub curvature: Option<f32>,

@@ -510,7 +510,7 @@ impl Default for DevView {
             date_format: "system".into(),
             vr_hide_with_steamvr: true,
             vr_windows_follow_dash: true,
-            vr_grab_tilt: true,
+            vr_grab_tilt: false,
             vr_stick_axis_lock: true,
             vr_render_scale: 1.0,
             vr_background_fps: 5.0,
@@ -1918,13 +1918,16 @@ fn keyboard_card(ui: &mut egui::Ui, kb: &mut KeyboardPrefs, accent: egui::Color3
             ui.horizontal(|ui| {
                 ui.label(theme::body_muted("Sound pack"));
                 let classic = rsoverlay_audio::typing::CLASSIC_PACK;
+                let thock = rsoverlay_audio::typing::THOCK_PACK;
                 let current = match kb.pack.as_str() {
-                    "" => "Thock (built-in)".to_string(),
+                    "" => "Keychron (recorded)".to_string(),
+                    p if p == thock => "Thock (synthesised)".to_string(),
                     p if p == classic => "Classic clicks".to_string(),
                     p => p.to_string(),
                 };
                 egui::ComboBox::from_id_source("sound-pack").selected_text(current).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut kb.pack, String::new(), "Thock (built-in)");
+                    ui.selectable_value(&mut kb.pack, String::new(), "Keychron (recorded)");
+                    ui.selectable_value(&mut kb.pack, thock.to_string(), "Thock (synthesised)");
                     ui.selectable_value(&mut kb.pack, classic.to_string(), "Classic clicks");
                     for p in &kb.packs {
                         ui.selectable_value(&mut kb.pack, p.clone(), p);
@@ -1936,9 +1939,12 @@ fn keyboard_card(ui: &mut egui::Ui, kb: &mut KeyboardPrefs, accent: egui::Color3
             })
             .response
             .on_hover_text(format!(
-                "Add a pack: a folder in {} with key.wav, space.wav, enter.wav, backspace.wav and/or modifier.wav (16-bit PCM). Missing files use the built-in click.",
+                "Add a pack: a folder in {} with key.wav, space.wav, enter.wav, backspace.wav and/or modifier.wav (16-bit PCM). Add takes as key2.wav, key3.wav ... (up to 8 per key) and they play shuffled. Missing files use the built-in sound.",
                 rsoverlay_core::config::sounds_dir().display()
             ));
+            if kb.pack.is_empty() {
+                ui.label(theme::caption(rsoverlay_audio::typing::KEYCHRON_CREDIT));
+            }
         });
     });
 }

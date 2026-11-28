@@ -10,7 +10,7 @@
 //! thread of our own. Volume is baked into the buffers, since PlaySound
 //! has no gain control.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Which click to play.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -74,6 +74,10 @@ fn click_shape(kind: KeySound) -> Click {
 /// The `sound_pack` value that selects the classic built-in clicks
 /// (not a folder name: `:` is never valid in one).
 pub const CLASSIC_PACK: &str = "builtin:clicks";
+
+/// The `sound_pack` value that selects the synthesised thock (the empty
+/// default is the recorded Keychron pack).
+pub const THOCK_PACK: &str = "builtin:thock";
 
 /// Default built-in key sound: a "thock" in the style of a gasket-mounted
 /// mechanical board (tester asked for that sound). Synthesised here, not
@@ -283,18 +287,62 @@ pub fn list_packs(dir: &Path) -> Vec<String> {
     packs
 }
 
+/// Most takes of one key a pack may hold: `key.wav`, `key2.wav` ..
+/// `key8.wav` (played in a shuffled order).
+pub const MAX_VARIANTS: usize = 8;
+
+/// File name of take `n` (1-based) of a key: `key.wav`, `key2.wav`, ...
+pub fn variant_file(kind: KeySound, n: usize) -> String {
+    let base = kind.file_name();
+    if n <= 1 {
+        base.to_string()
+    } else {
+        format!("{}{n}.wav", base.trim_end_matches(".wav"))
+    }
+}
+
+/// The built-in recorded pack: a Keychron V1 Ultra (red linear switches)
+/// cut from "Typing on Keychron V1 Ultra (Red Linear Switch).wav" by
+/// C40115, Wikimedia Commons, CC BY 4.0
+/// (https://commons.wikimedia.org/wiki/File:Typing_on_Keychron_V1_Ultra_(Red_Linear_Switch).wav):
+/// single strokes cut out, levelled and faded. Per [`KeySound`], its takes.
+fn keychron_takes(kind: KeySound) -> &'static [&'static [u8]] {
+    match kind {
+        KeySound::Key => &[
+            include_bytes!("../assets/keychron/key.wav"),
+            include_bytes!("../assets/keychron/key2.wav"),
+            include_bytes!("../assets/keychron/key3.wav"),
+            include_bytes!("../assets/keychron/key4.wav"),
+            include_bytes!("../assets/keychron/key5.wav"),
+            include_bytes!("../assets/keychron/key6.wav"),
+        ],
+        KeySound::Space => &[
+            include_bytes!("../assets/keychron/space.wav"),
+            include_bytes!("../assets/keychron/space2.wav"),
+            include_bytes!("../assets/keychron/space3.wav"),
+        ],
+        KeySound::Enter => &[include_bytes!("../assets/keychron/enter.wav")],
+        KeySound::Backspace => &[include_bytes!("../assets/keychron/backspace.wav")],
+        KeySound::Modifier => &[include_bytes!("../assets/keychron/modifier.wav")],
+    }
+}
+
+/// Credit line for the recorded pack (CC BY 4.0 asks for it).
+pub const KEYCHRON_CREDIT: &str = "Keychron V1 Ultra recording by C40115 (Wikimedia Commons), CC BY 4.0";
+
 /// The VR keyboard's sound bank + player. Single-threaded: lives on the
 /// VR loop. Buffers are only replaced after stopping playback, because
 /// `SND_MEMORY | SND_ASYNC` reads them while the click plays.
 pub struct TypingSounds {
-    /// Raw pack files (unscaled), per [`KeySound`]; `None` = built-in.
-    raw: [Option<Vec<u8>>; 5],
-    /// Ready-to-play WAVs at the current volume.
-    bank: [Vec<u8>; 5],
-    /// Built-in Thock: three variations of an ordinary key, rotated.
-    key_variants: Vec<Vec<u8>>,
-    next_variant: std::cell::Cell<usize>,
-    pack: Option<String>,
+    /// Raw takes (unscaled) per [`KeySound`]; empty = synthesised fallback.
+    raw: [Vec<Vec<u8>>; 5],
+    /// Ready-to-play WAVs at the current volume, at least one per key.
+    bank: [Vec<Vec<u8>>; 5],
+    /// Last take played per key, and a little PRNG to shuffle takes.
+    last: [std::cell::Cell<usize>; 5],
+    seed: std::cell::Cell<u32>,
+    /// None until the first `configure`.
+    pack: Option<Option<String>>,
     volume: f32,
 }
 
@@ -306,51 +354,82 @@ impl Default for TypingSounds {
 
 impl TypingSounds {
     pub fn new() -> Self {
-        let volume = 0.4;
-        Self {
+        let mut t = Self {
             raw: Default::default(),
-            bank: KeySound::ALL.map(|k| builtin(k, volume)),
-            key_variants: (0..3).map(|v| thock(KeySound::Key, volume, v)).collect(),
-            next_variant: std::cell::Cell::new(0),
+            bank: Default::default(),
+            last: Default::default(),
+            seed: std::cell::Cell::new(0x9E37_79B9),
             pack: None,
-            volume,
-        }
+            volume: 0.4,
+        };
+        t.configure(Path::new(""), None, 0.4);
+        t
     }
 
     /// Apply the current settings; cheap when nothing changed.
-    /// `pack = None` → built-in Thock; [`CLASSIC_PACK`] → classic clicks.
+    /// `pack = None` → the recorded Keychron pack; [`THOCK_PACK`] →
+    /// synthesised thock; [`CLASSIC_PACK`] → classic clicks; otherwise a
+    /// folder under `sounds_dir`.
     pub fn configure(&mut self, sounds_dir: &Path, pack: Option<&str>, volume: f32) {
-        let pack = pack.filter(|p| *p == CLASSIC_PACK || valid_pack_name(p)).map(str::to_owned);
+        let pack = pack.filter(|p| *p == CLASSIC_PACK || *p == THOCK_PACK || valid_pack_name(p)).map(str::to_owned);
         let volume = volume.clamp(0.0, 1.0);
-        let pack_changed = pack != self.pack;
+        let pack_changed = self.pack.as_ref() != Some(&pack);
         if !pack_changed && (volume - self.volume).abs() < 0.005 {
             return;
         }
         stop();
         if pack_changed {
-            let folder: Option<PathBuf> = pack.as_ref().filter(|p| p.as_str() != CLASSIC_PACK).map(|p| sounds_dir.join(p));
-            self.raw = KeySound::ALL.map(|k| folder.as_ref().and_then(|f| read_capped(&f.join(k.file_name()))));
-            self.pack = pack;
+            self.raw = KeySound::ALL.map(|k| match pack.as_deref() {
+                None => keychron_takes(k).iter().map(|b| b.to_vec()).collect(),
+                Some(CLASSIC_PACK) | Some(THOCK_PACK) => Vec::new(),
+                Some(folder) => {
+                    let f = sounds_dir.join(folder);
+                    (1..=MAX_VARIANTS).filter_map(|n| read_capped(&f.join(variant_file(k, n)))).collect()
+                }
+            });
+            self.pack = Some(pack);
         }
         self.volume = volume;
-        let classic_style = self.pack.as_deref() == Some(CLASSIC_PACK);
-        let fallback = |k| if classic_style { classic(k, volume) } else { builtin(k, volume) };
+        let style = self.pack.clone().flatten();
         for k in KeySound::ALL {
             let i = k.index();
-            self.bank[i] = self.raw[i].as_deref().and_then(|w| scale_pcm16(w, volume)).unwrap_or_else(|| fallback(k));
+            let takes: Vec<Vec<u8>> = self.raw[i].iter().filter_map(|w| scale_pcm16(w, volume)).collect();
+            self.bank[i] = if !takes.is_empty() {
+                takes
+            } else if style.as_deref() == Some(CLASSIC_PACK) {
+                vec![classic(k, volume)]
+            } else if k == KeySound::Key {
+                // Synthesised thock: three variations of an ordinary key.
+                (0..3).map(|v| thock(k, volume, v)).collect()
+            } else {
+                vec![builtin(k, volume)]
+            };
         }
-        // Variations only for the built-in Thock on ordinary keys.
-        self.key_variants = if self.pack.is_none() { (0..3).map(|v| thock(KeySound::Key, volume, v)).collect() } else { Vec::new() };
     }
 
     pub fn play(&self, kind: KeySound) {
-        if kind == KeySound::Key && !self.key_variants.is_empty() {
-            let i = self.next_variant.get();
-            self.next_variant.set((i + 1) % self.key_variants.len());
-            play_bytes(&self.key_variants[i]);
+        let i = kind.index();
+        let takes = &self.bank[i];
+        if takes.is_empty() {
             return;
         }
-        play_bytes(&self.bank[kind.index()]);
+        // A random take, never the same one twice in a row.
+        let mut x = self.seed.get();
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.seed.set(x);
+        let mut n = x as usize % takes.len();
+        if takes.len() > 1 && n == self.last[i].get() {
+            n = (n + 1) % takes.len();
+        }
+        self.last[i].set(n);
+        play_bytes(&takes[n]);
+    }
+
+    /// How many takes each key has (tests / diagnostics).
+    pub fn takes(&self, kind: KeySound) -> usize {
+        self.bank[kind.index()].len()
     }
 }
 
@@ -361,6 +440,7 @@ impl Drop for TypingSounds {
     }
 }
 
+/// A pack file, if present and small enough.
 fn read_capped(p: &Path) -> Option<Vec<u8>> {
     let len = std::fs::metadata(p).ok()?.len();
     if len > MAX_WAV_BYTES {
@@ -530,12 +610,46 @@ mod tests {
         let dir = std::env::temp_dir();
         let mut t = TypingSounds::new();
         t.configure(&dir, Some(CLASSIC_PACK), 0.4);
-        assert_eq!(t.bank[KeySound::Key.index()], classic(KeySound::Key, 0.4));
-        assert!(t.key_variants.is_empty());
-        t.configure(&dir, None, 0.4);
-        assert_eq!(t.bank[KeySound::Key.index()], builtin(KeySound::Key, 0.4));
-        assert_eq!(t.key_variants.len(), 3);
+        assert_eq!(t.bank[KeySound::Key.index()], vec![classic(KeySound::Key, 0.4)]);
+        t.configure(&dir, Some(THOCK_PACK), 0.4);
+        assert_eq!(t.bank[KeySound::Key.index()][0], builtin(KeySound::Key, 0.4));
+        assert_eq!(t.takes(KeySound::Key), 3);
+        assert!(!valid_pack_name(THOCK_PACK));
         // Never treated as a folder.
         assert!(!valid_pack_name(CLASSIC_PACK));
+    }
+
+    #[test]
+    fn recorded_keychron_pack_is_the_default_with_several_takes() {
+        let t = TypingSounds::new();
+        assert_eq!(t.takes(KeySound::Key), 6);
+        assert_eq!(t.takes(KeySound::Space), 3);
+        for k in KeySound::ALL {
+            for w in keychron_takes(k) {
+                // Valid 16-bit PCM the player accepts, short.
+                let scaled = scale_pcm16(w, 1.0).expect("16-bit PCM WAV");
+                assert!(scaled.len() < 48_000 * 2 / 8, "{k:?} take under 125 ms");
+            }
+        }
+    }
+
+    #[test]
+    fn pack_folders_can_hold_several_takes_per_key() {
+        let dir = std::env::temp_dir().join(format!("rso-pack-{}", std::process::id()));
+        let pack = dir.join("Mine");
+        std::fs::create_dir_all(&pack).unwrap();
+        for n in ["key.wav", "key2.wav", "key3.wav", "space.wav"] {
+            std::fs::write(pack.join(n), builtin(KeySound::Key, 1.0)).unwrap();
+        }
+        let mut t = TypingSounds::new();
+        t.configure(&dir, Some("Mine"), 0.5);
+        assert_eq!(t.takes(KeySound::Key), 3);
+        assert_eq!(t.takes(KeySound::Space), 1);
+        // Missing files fall back to the synthesised sound.
+        assert_eq!(t.takes(KeySound::Enter), 1);
+        t.configure(&dir, Some(THOCK_PACK), 0.5);
+        assert_eq!(t.takes(KeySound::Key), 3, "thock's own variations");
+        assert_eq!(variant_file(KeySound::Backspace, 4), "backspace4.wav");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
