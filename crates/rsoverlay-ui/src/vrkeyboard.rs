@@ -562,12 +562,8 @@ impl VrKeyboard {
             if self.auto_repeat { "repeat: on" } else { "hold: real" },
             egui::FontId::proportional(theme::SIZE_CAPTION + 2.0), if self.auto_repeat { accent } else { theme::FG_PRIMARY });
 
-        // One cursor per hand.
-        for &(_, pos, trigger) in hands {
-            if let Some(p) = pos {
-                crate::laser::paint_cursor(ctx, Some((p, trigger >= PRESS)), accent);
-            }
-        }
+        // No cursor of its own: in VR the laser's ring is the cursor
+        // (tester: two cursors on the keyboard).
         out
     }
 

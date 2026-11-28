@@ -1746,7 +1746,10 @@ mod imp {
                         ring_m: ring,
                         foreshorten,
                     };
-                    laser_last[s] = Some((c.index, to_affine(&c.pose).inverse() * world, tex));
+                    // World-placed along the very ray we hit-test with: beam,
+                    // ring and hit are one line (attached to the controller,
+                    // SteamVR re-posed it with a newer pose than our hit).
+                    laser_last[s] = Some((c.index, world, tex));
                 }
                 let beam = &mut beams[s];
                 let Some((dev, rel, tex)) = laser_last[s].filter(|_| look.cursor_alpha > 0.0) else {
@@ -1754,7 +1757,8 @@ mod imp {
                     continue;
                 };
                 beam.render(&gpu, &overlay, time, dt, Vec::new(), |ctx| rsoverlay_ui::shell::paint_laser(ctx, &tex));
-                let _ = overlay.set_transform_device_relative(beam.handle, dev, &from_affine(&rel));
+                let _ = dev;
+                let _ = overlay.set_transform_absolute(beam.handle, &from_affine(&rel));
                 let a = dev_view.effective_accent();
                 let rgb = [a.r() as f32 / 255.0, a.g() as f32 / 255.0, a.b() as f32 / 255.0];
                 let bt = [rgb[0], rgb[1], rgb[2], look.cursor_alpha];
