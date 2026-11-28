@@ -1871,9 +1871,15 @@ fn keyboard_card(ui: &mut egui::Ui, kb: &mut KeyboardPrefs, accent: egui::Color3
             });
             ui.horizontal(|ui| {
                 ui.label(theme::body_muted("Sound pack"));
-                let current = if kb.pack.is_empty() { "Built-in".to_string() } else { kb.pack.clone() };
+                let classic = rsoverlay_audio::typing::CLASSIC_PACK;
+                let current = match kb.pack.as_str() {
+                    "" => "Thock (built-in)".to_string(),
+                    p if p == classic => "Classic clicks".to_string(),
+                    p => p.to_string(),
+                };
                 egui::ComboBox::from_id_source("sound-pack").selected_text(current).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut kb.pack, String::new(), "Built-in");
+                    ui.selectable_value(&mut kb.pack, String::new(), "Thock (built-in)");
+                    ui.selectable_value(&mut kb.pack, classic.to_string(), "Classic clicks");
                     for p in &kb.packs {
                         ui.selectable_value(&mut kb.pack, p.clone(), p);
                     }

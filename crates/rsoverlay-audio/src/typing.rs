@@ -71,9 +71,76 @@ fn click_shape(kind: KeySound) -> Click {
     }
 }
 
-/// Built-in click as a 16-bit mono 44.1 kHz WAV, at `volume` (0..=1).
-/// O(n) in the click length (≤ ~2 000 samples).
+/// The `sound_pack` value that selects the classic built-in clicks
+/// (not a folder name: `:` is never valid in one).
+pub const CLASSIC_PACK: &str = "builtin:clicks";
+
+/// Default built-in key sound: a "thock" in the style of a gasket-mounted
+/// mechanical board (tester asked for that sound). Synthesised here, not
+/// recorded: a short muffled top click (low-passed noise, ~1.5 ms) over a
+/// damped low body (~250-320 Hz, falling slightly as the case rings
+/// down) with a quieter second mode. Space / Enter are deeper and longer
+/// (stabilised bars, with a faint stabiliser rattle); modifiers softer.
+/// `variant` (0..3) nudges pitch and timing so fast typing isn't one
+/// repeated sample. 16-bit mono 44.1 kHz WAV, < 100 ms.
 pub fn builtin(kind: KeySound, volume: f32) -> Vec<u8> {
+    thock(kind, volume, 0)
+}
+
+/// [`builtin`] with a per-press variation (0..3).
+pub fn thock(kind: KeySound, volume: f32, variant: u32) -> Vec<u8> {
+    // (length s, body Hz, body tau s, 2nd mode Hz, click level, gain)
+    let (len_s, body, tau, mode2, click_w, gain) = match kind {
+        KeySound::Key => (0.060, 300.0, 0.011, 780.0, 0.55, 1.0),
+        KeySound::Backspace => (0.060, 285.0, 0.012, 740.0, 0.55, 0.95),
+        KeySound::Modifier => (0.050, 320.0, 0.009, 820.0, 0.45, 0.75),
+        KeySound::Space => (0.085, 175.0, 0.020, 430.0, 0.40, 1.0),
+        KeySound::Enter => (0.075, 230.0, 0.016, 560.0, 0.45, 1.0),
+    };
+    let v = variant % 3;
+    let detune = [1.0, 1.035, 0.97][v as usize];
+    let n = (len_s * RATE as f32) as usize;
+    let mut seed: u32 = 0x7EA5_1D3B ^ (kind.index() as u32).wrapping_mul(0x9E37_79B9) ^ v.wrapping_mul(0x85EB_CA6B);
+    let mut lp = 0.0f32;
+    // One-pole low-pass for the click (~3.5 kHz): soft, not a tick.
+    let a = 1.0 - (-std::f32::consts::TAU * 3500.0 / RATE as f32).exp();
+    let rattle_at = if matches!(kind, KeySound::Space | KeySound::Enter) { 0.012 } else { f32::MAX };
+    let mut raw: Vec<f32> = (0..n)
+        .map(|i| {
+            let t = i as f32 / RATE as f32;
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let noise = (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
+            lp += a * (noise - lp);
+            let click = click_w * lp * (-t / 0.0015).exp();
+            // Body pitch falls ~8 % over the ring-down (case resonance).
+            let f = body * detune * (1.0 - 0.08 * (1.0 - (-t / 0.02).exp()));
+            let phase = std::f32::consts::TAU * f * t;
+            let body_s = phase.sin() * (-t / tau).exp();
+            let mode2_s = 0.25 * (std::f32::consts::TAU * mode2 * detune * t).sin() * (-t / (tau * 0.45)).exp();
+            // Stabiliser rattle: a faint second, smaller click.
+            let r = t - rattle_at;
+            let rattle = if r > 0.0 { 0.18 * lp * (-r / 0.002).exp() } else { 0.0 };
+            click + body_s + mode2_s + rattle
+        })
+        .collect();
+    for (i, s) in raw.iter_mut().take(12).enumerate() {
+        *s *= i as f32 / 12.0;
+    }
+    // Tail fade so it never ends on a step.
+    let tail = 64.min(raw.len());
+    let len = raw.len();
+    for (j, s) in raw[len - tail..].iter_mut().enumerate() {
+        *s *= 1.0 - j as f32 / tail as f32;
+    }
+    let peak = raw.iter().fold(0.0_f32, |m, s| m.max(s.abs())).max(1e-6);
+    let scale = 0.9 * gain * volume.clamp(0.0, 1.0) * i16::MAX as f32 / peak;
+    let samples: Vec<i16> = raw.iter().map(|s| (s * scale).round().clamp(i16::MIN as f32, i16::MAX as f32) as i16).collect();
+    wav_pcm16_mono(&samples, RATE)
+}
+
+/// The classic built-in click (bright tick), as before "Thock".
+/// O(n) in the click length (≤ ~2 000 samples).
+pub fn classic(kind: KeySound, volume: f32) -> Vec<u8> {
     let c = click_shape(kind);
     let n = (c.len_s * RATE as f32) as usize;
     // Deterministic LCG noise: same click every run, no rand dependency.
@@ -224,6 +291,9 @@ pub struct TypingSounds {
     raw: [Option<Vec<u8>>; 5],
     /// Ready-to-play WAVs at the current volume.
     bank: [Vec<u8>; 5],
+    /// Built-in Thock: three variations of an ordinary key, rotated.
+    key_variants: Vec<Vec<u8>>,
+    next_variant: std::cell::Cell<usize>,
     pack: Option<String>,
     volume: f32,
 }
@@ -237,13 +307,20 @@ impl Default for TypingSounds {
 impl TypingSounds {
     pub fn new() -> Self {
         let volume = 0.4;
-        Self { raw: Default::default(), bank: KeySound::ALL.map(|k| builtin(k, volume)), pack: None, volume }
+        Self {
+            raw: Default::default(),
+            bank: KeySound::ALL.map(|k| builtin(k, volume)),
+            key_variants: (0..3).map(|v| thock(KeySound::Key, volume, v)).collect(),
+            next_variant: std::cell::Cell::new(0),
+            pack: None,
+            volume,
+        }
     }
 
     /// Apply the current settings; cheap when nothing changed.
-    /// `pack = None` → built-in clicks.
+    /// `pack = None` → built-in Thock; [`CLASSIC_PACK`] → classic clicks.
     pub fn configure(&mut self, sounds_dir: &Path, pack: Option<&str>, volume: f32) {
-        let pack = pack.filter(|p| valid_pack_name(p)).map(str::to_owned);
+        let pack = pack.filter(|p| *p == CLASSIC_PACK || valid_pack_name(p)).map(str::to_owned);
         let volume = volume.clamp(0.0, 1.0);
         let pack_changed = pack != self.pack;
         if !pack_changed && (volume - self.volume).abs() < 0.005 {
@@ -251,18 +328,28 @@ impl TypingSounds {
         }
         stop();
         if pack_changed {
-            let folder: Option<PathBuf> = pack.as_ref().map(|p| sounds_dir.join(p));
+            let folder: Option<PathBuf> = pack.as_ref().filter(|p| p.as_str() != CLASSIC_PACK).map(|p| sounds_dir.join(p));
             self.raw = KeySound::ALL.map(|k| folder.as_ref().and_then(|f| read_capped(&f.join(k.file_name()))));
             self.pack = pack;
         }
         self.volume = volume;
+        let classic_style = self.pack.as_deref() == Some(CLASSIC_PACK);
+        let fallback = |k| if classic_style { classic(k, volume) } else { builtin(k, volume) };
         for k in KeySound::ALL {
             let i = k.index();
-            self.bank[i] = self.raw[i].as_deref().and_then(|w| scale_pcm16(w, volume)).unwrap_or_else(|| builtin(k, volume));
+            self.bank[i] = self.raw[i].as_deref().and_then(|w| scale_pcm16(w, volume)).unwrap_or_else(|| fallback(k));
         }
+        // Variations only for the built-in Thock on ordinary keys.
+        self.key_variants = if self.pack.is_none() { (0..3).map(|v| thock(KeySound::Key, volume, v)).collect() } else { Vec::new() };
     }
 
     pub fn play(&self, kind: KeySound) {
+        if kind == KeySound::Key && !self.key_variants.is_empty() {
+            let i = self.next_variant.get();
+            self.next_variant.set((i + 1) % self.key_variants.len());
+            play_bytes(&self.key_variants[i]);
+            return;
+        }
         play_bytes(&self.bank[kind.index()]);
     }
 }
@@ -403,5 +490,52 @@ mod tests {
         std::fs::write(dir.join("Clacky").join("key.wav"), builtin(KeySound::Key, 0.5)).unwrap();
         assert_eq!(list_packs(&dir), vec!["Clacky".to_string()]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn samples(w: &[u8]) -> Vec<f32> {
+        w[44..].as_chunks::<2>().0.iter().map(|c| i16::from_le_bytes(*c) as f32).collect()
+    }
+
+    /// Share of the signal's energy above `hz` (a crude spectral split:
+    /// energy of the first difference vs the signal, which grows with
+    /// frequency). Lower = darker / thockier.
+    fn brightness(x: &[f32]) -> f32 {
+        let e: f32 = x.iter().map(|v| v * v).sum::<f32>().max(1.0);
+        let d: f32 = x.windows(2).map(|w| (w[1] - w[0]).powi(2)).sum();
+        d / e
+    }
+
+    /// Tester asked for a Keychron-like (mechanical "thock") default:
+    /// the default must be clearly darker than the classic click, short,
+    /// clean at both ends, and fast keys must not repeat one sample.
+    #[test]
+    fn default_is_a_dark_thock_with_variations() {
+        for k in KeySound::ALL {
+            let w = builtin(k, 1.0);
+            assert_eq!(&w[0..4], b"RIFF");
+            assert!(w.len() < 44 + 2 * 44_100 / 10, "{k:?} under 100 ms");
+            let t = samples(&w);
+            assert!(t.first().unwrap().abs() < 2000.0 && t.last().unwrap().abs() < 500.0, "{k:?} starts / ends near zero");
+            let c = samples(&classic(k, 1.0));
+            assert!(brightness(&t) < brightness(&c) * 0.6, "{k:?}: thock {} vs click {}", brightness(&t), brightness(&c));
+        }
+        assert!(brightness(&samples(&builtin(KeySound::Space, 1.0))) < brightness(&samples(&builtin(KeySound::Key, 1.0))), "space is deeper");
+        let v: Vec<Vec<u8>> = (0..3).map(|i| thock(KeySound::Key, 0.5, i)).collect();
+        assert!(v[0] != v[1] && v[1] != v[2] && v[0] != v[2], "three different presses");
+        assert_eq!(thock(KeySound::Key, 0.5, 3), v[0], "variants wrap");
+    }
+
+    #[test]
+    fn classic_clicks_stay_selectable() {
+        let dir = std::env::temp_dir();
+        let mut t = TypingSounds::new();
+        t.configure(&dir, Some(CLASSIC_PACK), 0.4);
+        assert_eq!(t.bank[KeySound::Key.index()], classic(KeySound::Key, 0.4));
+        assert!(t.key_variants.is_empty());
+        t.configure(&dir, None, 0.4);
+        assert_eq!(t.bank[KeySound::Key.index()], builtin(KeySound::Key, 0.4));
+        assert_eq!(t.key_variants.len(), 3);
+        // Never treated as a folder.
+        assert!(!valid_pack_name(CLASSIC_PACK));
     }
 }
