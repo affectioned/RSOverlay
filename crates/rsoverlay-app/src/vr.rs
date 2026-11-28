@@ -956,6 +956,8 @@ mod imp {
         dev_view.windows_up = true;
         let mut prev_grip = [false; 2];
         let mut frame = 0u64;
+        // Average frame work, seconds (pacing).
+        let mut work_ema = 0.0f64;
         info!("VR shell up — wrist on the off hand; double-press left A/X (or the wrist Menu button) shows the dashboard");
 
         while running.load(Ordering::SeqCst) {
@@ -2669,7 +2671,16 @@ mod imp {
                 w.panel.apply_tint(&overlay, [tint[0], tint[1], tint[2], tint[3] * dim]);
             }
 
-            std::thread::sleep(Duration::from_millis(11));
+            // One update per headset frame, finishing just before SteamVR
+            // composes (vr_logic::pace_sleep); 11 ms without timing info.
+            let work = frame_start.elapsed().as_secs_f64();
+            work_ema = if work_ema == 0.0 { work } else { work_ema * 0.9 + work * 0.1 };
+            let paced = system.as_ref().and_then(|s| Some((s.since_vsync()?, s.display_hz()?)));
+            let wait = match paced {
+                Some((since, hz)) => pace_sleep(f64::from(since), 1.0 / f64::from(hz), work_ema.max(work)),
+                None => 0.011,
+            };
+            std::thread::sleep(Duration::from_secs_f64(wait));
         }
 
         // Persist everything before tearing down: the debounced config

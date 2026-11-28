@@ -546,6 +546,28 @@ pub(crate) fn calibrate_mask(
     MaskOrigin::Off
 }
 
+/// Frame pacing: finish this long before SteamVR's next vsync, on top
+/// of our measured work time (the compositor starts composing a few ms
+/// ahead of vsync).
+pub(crate) const PACE_MARGIN_S: f64 = 0.003;
+
+/// How long to sleep after a frame so the next one starts just in time
+/// to be drawn and submitted before SteamVR composes: one update per
+/// headset frame, at a steady phase. Tester: a flat 11 ms sleep gave
+/// ~60 updates/s, out of step with a 90 Hz+ headset, so in-panel cursors
+/// trailed the controller-parented beam.
+pub(crate) fn pace_sleep(since_vsync: f64, period: f64, work: f64) -> f64 {
+    let period = period.clamp(1.0 / 240.0, 1.0 / 30.0);
+    // Phase (since vsync) at which the next frame should start.
+    let start = (period - work - PACE_MARGIN_S).rem_euclid(period);
+    let mut wait = (start - since_vsync.rem_euclid(period)).rem_euclid(period);
+    // Just missed it: don't spin a frame right away twice.
+    if wait < 0.0005 {
+        wait += period;
+    }
+    wait
+}
+
 /// Laser cursor: how far it sits back from the surface along the beam
 /// (keeps it in front of the panel), metres.
 pub(crate) const CURSOR_LIFT_M: f32 = 0.002;
@@ -1139,5 +1161,27 @@ mod sim {
         assert_eq!(calibrate_mask(|_| {}, |_| true, probe), MaskOrigin::Off);
         // A symmetric layout gives no usable probe: wait for another panel.
         assert_eq!(mask_probe(&[[0.0, 100.0, 600.0, 320.0]], WRIST_PT), None);
+    }
+
+    #[test]
+    fn frames_are_paced_to_the_headset() {
+        let p = 1.0 / 90.0;
+        // 3 ms of work: start at period - 6 ms after vsync.
+        let start = p - 0.003 - PACE_MARGIN_S;
+        let w = pace_sleep(0.001, p, 0.003);
+        assert!((0.001 + w - start).abs() < 1e-9, "wake at the start phase");
+        // Already past the start phase: wait for the next one.
+        let w = pace_sleep(start + 0.001, p, 0.003);
+        assert!((w - (p - 0.001)).abs() < 1e-9);
+        // Over a run of frames the update rate matches the headset.
+        let (mut t, mut frames) = (0.0f64, 0);
+        while t < 1.0 {
+            t += 0.003; // work
+            t += pace_sleep(t % p, p, 0.003);
+            frames += 1;
+        }
+        assert!((88..=91).contains(&frames), "{frames} updates in 1 s at 90 Hz");
+        // Work longer than a frame: never a zero / negative sleep.
+        assert!(pace_sleep(0.0, p, 0.02) > 0.0);
     }
 }

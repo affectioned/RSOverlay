@@ -726,6 +726,13 @@ impl<'a> System<'a> {
         self.tracking(0.0).1
     }
 
+    /// Seconds since SteamVR's last vsync (frame pacing).
+    pub fn since_vsync(&self) -> Option<f32> {
+        let (mut since, mut frame) = (0f32, 0u64);
+        // SAFETY: IVRSystem slot 5 (pinned in sys.rs); valid out-pointers.
+        unsafe { (self.table().GetTimeSinceLastVsync)(&mut since, &mut frame) }.then_some(since)
+    }
+
     /// Seconds from now until this frame's photons reach the eyes (what
     /// the compositor predicts device-relative overlays to). Hit-testing
     /// with poses predicted this far means the laser clicks where its
