@@ -910,7 +910,9 @@ mod imp {
         // Fade / pop / click flash, and the last placement (so a laser
         // fades out where it was instead of vanishing). Per hand.
         let mut laser_anim = [LaserAnim::default(); 2];
-        let mut laser_last: [Option<(u32, Affine3A, rsoverlay_ui::shell::LaserLook)>; 2] = [None, None];
+        // (device, world pose, texture look, length m, thickness m).
+        type LaserPlace = (u32, Affine3A, rsoverlay_ui::shell::LaserLook, f32, f32);
+        let mut laser_last: [Option<LaserPlace>; 2] = [None, None];
         let mut wrist_own_hit_logged = false;
         // What each hand's laser was on last frame (diagnostics).
         let mut laser_on: [Option<usize>; 2] = [None, None];
@@ -979,6 +981,7 @@ mod imp {
         // The PC mouse: yields laser hover while you use it.
         let mut mouse_owner = MouseYield::default();
         let mut drawn_pose_logged = false;
+        let mut kb_hover_logged: Option<String> = None;
         let mut logged_space = -1i32;
         // SteamVR's own laser drives every panel (vr_logic::SteamLaser).
         let mut steam = SteamLaser::default();
@@ -1136,7 +1139,12 @@ mod imp {
             // the hit (cursor) off the drawn beam, worst moving up / down,
             // while our prediction jumped 13-41 ms frame to frame. The
             // pointing offset (tip vs body) is kept, carried onto it.
-            if let (Some(comp), Some(sys)) = (compositor.as_ref(), system.as_ref()) {
+            // Off: with the laser placed in the world along our own ray,
+            // aiming from where the controller will be at photon time
+            // (the prediction above) lines it up with the hand; the last
+            // drawn pose is a frame behind it (tester: drift up / down).
+            const AIM_FROM_DRAWN_POSE: bool = false;
+            if let (true, Some(comp), Some(sys)) = (AIM_FROM_DRAWN_POSE, compositor.as_ref(), system.as_ref()) {
                 // The game's tracking space may not be standing (tester:
                 // the further from the playspace centre, the further the
                 // hit drifted off the beam): bring its poses into ours.
@@ -1737,7 +1745,18 @@ mod imp {
                     let total = len + ring * 1.3 / foreshorten;
                     let height = 2.4 * ring;
                     let natural_h = BEAM_TEX.1 as f32 / BEAM_TEX.0 as f32;
-                    let world = beam_transform(o, d, total, e, height, natural_h);
+                    // Orientation / position only: SteamVR ignores a scale in
+                    // the overlay transform along its width (the beam was
+                    // always drawn 1 m long, its ring off the hit; tester:
+                    // keys mis-hit vertically). Length = overlay width,
+                    // thickness = texel aspect, both set below.
+                    let scaled = beam_transform(o, d, total, e, height, natural_h);
+                    let world = Affine3A::from_cols(
+                        scaled.matrix3.x_axis.normalize_or_zero(),
+                        scaled.matrix3.y_axis.normalize_or_zero(),
+                        scaled.matrix3.z_axis,
+                        scaled.translation,
+                    );
                     let tex = rsoverlay_ui::shell::LaserLook {
                         hit_u: len / total,
                         pt_per_m_x: BEAM_TEX.0 as f32 / total,
@@ -1749,15 +1768,17 @@ mod imp {
                     // World-placed along the very ray we hit-test with: beam,
                     // ring and hit are one line (attached to the controller,
                     // SteamVR re-posed it with a newer pose than our hit).
-                    laser_last[s] = Some((c.index, world, tex));
+                    laser_last[s] = Some((c.index, world, tex, total, height));
                 }
                 let beam = &mut beams[s];
-                let Some((dev, rel, tex)) = laser_last[s].filter(|_| look.cursor_alpha > 0.0) else {
+                let Some((dev, rel, tex, total, height)) = laser_last[s].filter(|_| look.cursor_alpha > 0.0) else {
                     beam.set_visible(&overlay, false);
                     continue;
                 };
                 beam.render(&gpu, &overlay, time, dt, Vec::new(), |ctx| rsoverlay_ui::shell::paint_laser(ctx, &tex));
                 let _ = dev;
+                let _ = overlay.set_width(beam.handle, total);
+                let _ = overlay.set_texel_aspect(beam.handle, total * BEAM_TEX.1 as f32 / (BEAM_TEX.0 as f32 * height));
                 let _ = overlay.set_transform_absolute(beam.handle, &from_affine(&rel));
                 let a = dev_view.effective_accent();
                 let rgb = [a.r() as f32 / 255.0, a.g() as f32 / 255.0, a.b() as f32 / 255.0];
@@ -2049,6 +2070,15 @@ mod imp {
                         rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                     }
                 });
+                // Diagnostics (tester: highlighted key off the beam's end
+                // vertically, even holding still): what the hit maps to.
+                let hov: Vec<String> = kf.hovered.iter().map(|(h, k, _)| format!("{h:?}={k}")).collect();
+                let hov = Some(hov.join(" "));
+                if hov != kb_hover_logged {
+                    let detail: Vec<String> = kf.hovered.iter().map(|(h, k, p)| format!("{h:?} on {k:?} at ({:.0},{:.0})", p.x, p.y)).collect();
+                    info!("keyboard hover: {}", if detail.is_empty() { "none".to_string() } else { detail.join("; ") });
+                    kb_hover_logged = hov;
+                }
                 kb_haptics = kf.haptic;
                 if dev_view.kb_prefs.sounds && !kf.sounds.is_empty() {
                     let pack = Some(dev_view.kb_prefs.pack.as_str()).filter(|p| !p.is_empty());

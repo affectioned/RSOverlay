@@ -172,6 +172,8 @@ pub struct KbFrame {
     pub chat: Option<String>,
     /// Key presses this frame, as typing-sound kinds.
     pub sounds: Vec<rsoverlay_audio::typing::KeySound>,
+    /// Diagnostics: per hand on the keyboard, (hand, key under it, point).
+    pub hovered: Vec<(Hand, String, egui::Pos2)>,
 }
 
 /// Which typing click a key makes.
@@ -502,6 +504,12 @@ impl VrKeyboard {
                 _ => (false, false),
             };
             let hover = hovered.iter().any(|p| rect.contains(*p));
+            for &(hand, pos, _) in hands {
+                if let Some(p) = pos.filter(|p| rect.contains(*p)) {
+                    let name = self.labels.get(&k.k).cloned().unwrap_or_else(|| format!("{:?}", k.kind));
+                    out.hovered.push((hand, name, p));
+                }
+            }
             let fill = if held || mod_on || mod_locked {
                 accent.gamma_multiply(if mod_locked { 0.55 } else { 0.32 })
             } else if hover {
