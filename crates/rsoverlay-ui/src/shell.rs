@@ -93,7 +93,7 @@ impl Page {
             Self::Chat => icons::CHAT,
             Self::Macros => icons::GRID,
             Self::Notifications => icons::BELL,
-            Self::Layouts => icons::BRAND,
+            Self::Layouts => icons::LAYOUTS,
             Self::Settings => icons::SETTINGS,
         }
     }
@@ -124,7 +124,7 @@ pub fn nav_rail(ui: &mut egui::Ui, page: &mut Page, badge: usize, keyboard_open:
     ui.horizontal(|ui| {
         ui.set_height(36.0);
         ui.add_space(8.0);
-        ui.add(icon(icons::BRAND, 22.0, accent));
+        ui.add(icon(icons::BRAND, 28.0, accent));
         ui.add_space(2.0);
         ui.label(egui::RichText::new("RSOverlay").font(theme::display(19.0)).color(theme::FG_PRIMARY));
     });

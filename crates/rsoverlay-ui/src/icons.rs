@@ -47,6 +47,7 @@ svg_icon!(STAR_OUTLINE, "star_outline.svg");
 svg_icon!(SAVE,        "save.svg");
 svg_icon!(LOAD,        "load.svg");
 svg_icon!(EDIT,        "edit.svg");
+svg_icon!(LAYOUTS,     "layouts.svg");
 
 /// Install the SVG loader on the egui context. Call once at startup.
 pub fn install_loaders(ctx: &egui::Context) {
