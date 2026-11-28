@@ -882,6 +882,7 @@ mod imp {
         let mut wrist_own_hit_logged = false;
         // What each hand's laser was on last frame (diagnostics).
         let mut laser_on: [Option<usize>; 2] = [None, None];
+        let mut prev_trig = [false; 2];
         let mut keyboard = rsoverlay_ui::vrkeyboard::VrKeyboard::default();
         // Restore hands-on state from last session.
         {
@@ -1155,6 +1156,16 @@ mod imp {
                     }
                 }
                 hand_hit[hand_slot(c.hand)] = best.map(|b| (b.0, b.2));
+                // Diagnostics: where a keyboard press lands (panel points).
+                let s = hand_slot(c.hand);
+                let pressed = c.trigger > 0.5;
+                if pressed && !prev_trig[s] {
+                    if let Some((2, uv, d)) = best {
+                        let p = LaserInput::uv_to_points(uv, kb.points);
+                        info!("keyboard press {:?}: uv ({:.3},{:.3}) d {d:.3} → ({:.0},{:.0}) pt of {:.0}x{:.0}", c.hand, uv[0], uv[1], p.x, p.y, kb.points.x, kb.points.y);
+                    }
+                }
+                prev_trig[s] = pressed;
                 // Diagnostics: what each laser is on, logged on change,
                 // with the wrist / dashboard state (tester: no beam on
                 // either).
@@ -1543,7 +1554,11 @@ mod imp {
             // controller like the beam (see vr_logic::cursor_pose).
             for (s, cur) in cursors.iter_mut().enumerate() {
                 let c = controllers.iter().find(|c| hand_slot(c.hand) == s);
-                let place = c.zip(hand_hit[s]).zip(eye);
+                // Wrist and dashboard draw their own cursor in-panel:
+                // SteamVR showed this overlay under them (tester; the log
+                // put it 1 mm in front of the wrist, still unseen).
+                let hit = hand_hit[s].filter(|(i, _)| *i >= 2);
+                let place = c.zip(hit).zip(eye);
                 cur.set_visible(&overlay, place.is_some());
                 let Some(((c, (_, dist)), e)) = place else { continue };
                 let pose = cursor_pose(Vec3A::from(c.origin), Vec3A::from(c.dir), dist, e);
@@ -1615,11 +1630,13 @@ mod imp {
             let mut act = rsoverlay_ui::wrist::WristAction::default();
             if wrist.visible {
                 let accent = dev_view.effective_accent();
+                let cursor = wf.cursor;
                 wrist.render(&gpu, &overlay, time, dt, wf.events, |ctx| {
                     act = dev_view.wrist_ui(ctx);
                     if let Some((0, h)) = hud {
                         rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                     }
+                    laser::paint_cursor(ctx, cursor, accent);
                 });
             }
             // Gamepad shortcuts drive the same actions as the wrist.
@@ -1758,11 +1775,13 @@ mod imp {
             if dash.visible {
                 let accent = dev_view.effective_accent();
                 let inj = injector.as_ref();
+                let cursor = df.cursor;
                 dash.render(&gpu, &overlay, time, dt, df.events, |ctx| {
                     dev_view.ui_with(ctx, inj);
                     if let Some((1, h)) = hud {
                         rsoverlay_ui::shell::paint_grab_hud(ctx, h, accent);
                     }
+                    laser::paint_cursor(ctx, cursor, accent);
                 });
             }
 
