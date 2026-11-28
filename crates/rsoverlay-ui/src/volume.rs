@@ -76,7 +76,7 @@ fn row(ui: &mut egui::Ui, name: &str, level: Level, strong: bool) -> Option<Leve
         let glyph = if l.muted { crate::icons::MUTE } else { crate::icons::SPEAKER };
         let color = if l.muted { theme::DANGER } else { theme::FG_MUTED };
         if ui
-            .add_sized([26.0, 22.0], egui::ImageButton::new(crate::icons::icon(glyph, 14.0, color)).rounding(theme::RADIUS_CONTROL))
+            .add(egui::Button::image(crate::icons::icon(glyph, 14.0, color)).min_size(egui::vec2(26.0, 22.0)))
             .on_hover_text(if l.muted { "Unmute" } else { "Mute" })
             .clicked()
         {

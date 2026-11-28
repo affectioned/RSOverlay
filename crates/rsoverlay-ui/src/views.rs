@@ -2330,19 +2330,19 @@ fn media_card(ui: &mut egui::Ui, info: Option<&MediaInfo>, accent: egui::Color32
 
 fn media_controls(ui: &mut egui::Ui, playing: bool, accent: egui::Color32) {
     ui.horizontal(|ui| {
-        let btn = |src, size: f32, tint| egui::ImageButton::new(icons::icon(src, size, tint)).rounding(theme::RADIUS_CONTROL);
-        if ui.add_sized([32.0, 28.0], btn(icons::PREV, 14.0, theme::FG_PRIMARY)).on_hover_text("Previous track").clicked() {
+        let btn = |src, size: f32, tint, w: f32| egui::Button::image(icons::icon(src, size, tint)).min_size(egui::vec2(w, 32.0));
+        if ui.add(btn(icons::PREV, 14.0, theme::FG_PRIMARY, 36.0)).on_hover_text("Previous track").clicked() {
             media::send(MediaCommand::Previous);
         }
         let play_pause = if playing { icons::PAUSE } else { icons::PLAY };
         if ui
-            .add_sized([40.0, 30.0], btn(play_pause, 16.0, accent))
+            .add(btn(play_pause, 16.0, accent, 44.0))
             .on_hover_text(if playing { "Pause" } else { "Play" })
             .clicked()
         {
             media::send(MediaCommand::PlayPause);
         }
-        if ui.add_sized([32.0, 28.0], btn(icons::NEXT, 14.0, theme::FG_PRIMARY)).on_hover_text("Next track").clicked() {
+        if ui.add(btn(icons::NEXT, 14.0, theme::FG_PRIMARY, 36.0)).on_hover_text("Next track").clicked() {
             media::send(MediaCommand::Next);
         }
     });
