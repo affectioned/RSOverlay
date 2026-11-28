@@ -395,9 +395,20 @@ mod native_gpu_tests {
         exact as f32 / n as f32
     }
 
+    /// One GPU device for all of these tests, used one test at a time.
+    /// Each test making and dropping its own D3D12 device in parallel
+    /// crashed the test binary now and then on CI's software GPU (WARP):
+    /// STATUS_ACCESS_VIOLATION.
+    fn shared_gpu() -> Option<std::sync::MutexGuard<'static, GpuCtx>> {
+        static GPU: std::sync::OnceLock<Option<std::sync::Mutex<GpuCtx>>> = std::sync::OnceLock::new();
+        GPU.get_or_init(|| pollster::block_on(GpuCtx::new(rsoverlay_core::RuntimeMode::Preview)).ok().map(std::sync::Mutex::new))
+            .as_ref()
+            .map(|m| m.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
     #[test]
     fn native_resolution_copies_the_capture_exactly() {
-        let Ok(gpu) = pollster::block_on(GpuCtx::new(rsoverlay_core::RuntimeMode::Preview)) else {
+        let Some(gpu) = shared_gpu() else {
             eprintln!("SKIPPED: no GPU adapter");
             return;
         };
@@ -438,7 +449,7 @@ mod native_gpu_tests {
     /// in from the controller.
     #[test]
     fn beam_texture_has_a_bright_core_and_fades_in() {
-        let Ok(gpu) = pollster::block_on(GpuCtx::new(rsoverlay_core::RuntimeMode::Preview)) else {
+        let Some(gpu) = shared_gpu() else {
             eprintln!("SKIPPED: no GPU adapter");
             return;
         };
@@ -460,7 +471,7 @@ mod native_gpu_tests {
     /// Animated beam: pulses of brighter, wider glow run along it.
     #[test]
     fn beam_pulses_travel_along_it() {
-        let Ok(gpu) = pollster::block_on(GpuCtx::new(rsoverlay_core::RuntimeMode::Preview)) else {
+        let Some(gpu) = shared_gpu() else {
             eprintln!("SKIPPED: no GPU adapter");
             return;
         };
@@ -484,7 +495,7 @@ mod native_gpu_tests {
 
     #[test]
     fn cursor_texture_is_drawn() {
-        let Ok(gpu) = pollster::block_on(GpuCtx::new(rsoverlay_core::RuntimeMode::Preview)) else {
+        let Some(gpu) = shared_gpu() else {
             eprintln!("SKIPPED: no GPU adapter");
             return;
         };
@@ -502,7 +513,7 @@ mod native_gpu_tests {
     /// to RSO_LASER_DUMP (raw BGRA) when set, to look at by eye.
     #[test]
     fn laser_texture_ends_in_the_ring() {
-        let Ok(gpu) = pollster::block_on(GpuCtx::new(rsoverlay_core::RuntimeMode::Preview)) else {
+        let Some(gpu) = shared_gpu() else {
             eprintln!("SKIPPED: no GPU adapter");
             return;
         };
