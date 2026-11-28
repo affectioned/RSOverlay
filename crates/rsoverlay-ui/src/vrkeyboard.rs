@@ -863,41 +863,19 @@ impl VrKeyboard {
     }
 }
 
-/// Padlock: body + shackle; an open shackle swings up and to the right.
+/// Padlock (Tabler lock / lock-open), tinted with the stroke colour.
 pub fn draw_lock(p: &egui::Painter, c: egui::Pos2, closed: bool, s: egui::Stroke) {
-    let body = egui::Rect::from_center_size(c + egui::vec2(0.0, 3.0), egui::vec2(14.0, 10.0));
-    p.rect_stroke(body, 2.0, s);
-    let lift = if closed { 0.0 } else { 4.0 };
-    let (l, r, top) = (c.x - 4.5, c.x + 4.5, body.top() - 6.0 - lift);
-    let pts: Vec<egui::Pos2> = (0..=12)
-        .map(|i| {
-            let a = std::f32::consts::PI * (1.0 + i as f32 / 12.0);
-            egui::pos2(c.x + 4.5 * a.cos(), top + 4.5 + 4.5 * a.sin())
-        })
-        .collect();
-    p.add(egui::Shape::line(pts, s));
-    p.line_segment([egui::pos2(l, top + 4.5), egui::pos2(l, body.top() - if closed { 0.0 } else { lift })], s);
-    p.line_segment([egui::pos2(r, top + 4.5), egui::pos2(r, body.top())], s);
+    let src = if closed { crate::icons::LOCK } else { crate::icons::LOCK_OPEN };
+    crate::icons::paint(p, src, egui::Rect::from_center_size(c, egui::vec2(22.0, 22.0)), s.color);
 }
 
-/// Microphone: capsule, cradle and stand.
+/// Microphone (Tabler).
 pub fn draw_mic(p: &egui::Painter, c: egui::Pos2, s: egui::Stroke) {
-    let body = egui::Rect::from_center_size(c + egui::vec2(0.0, -3.0), egui::vec2(8.0, 13.0));
-    p.rect_stroke(body, 4.0, s);
-    let pts: Vec<egui::Pos2> = (0..=12)
-        .map(|i| {
-            let a = std::f32::consts::PI * (i as f32 / 12.0);
-            c + egui::vec2(-7.0 * a.cos(), -1.0 + 7.0 * a.sin())
-        })
-        .collect();
-    p.add(egui::Shape::line(pts, s));
-    p.line_segment([c + egui::vec2(0.0, 6.0), c + egui::vec2(0.0, 10.0)], s);
+    crate::icons::paint(p, crate::icons::MIC, egui::Rect::from_center_size(c, egui::vec2(22.0, 22.0)), s.color);
 }
 
 pub fn draw_close(p: &egui::Painter, c: egui::Pos2, s: egui::Stroke) {
-    let d = 6.0;
-    p.line_segment([c + egui::vec2(-d, -d), c + egui::vec2(d, d)], s);
-    p.line_segment([c + egui::vec2(-d, d), c + egui::vec2(d, -d)], s);
+    crate::icons::paint(p, crate::icons::CLOSE, egui::Rect::from_center_size(c, egui::vec2(20.0, 20.0)), s.color);
 }
 
 #[cfg(test)]

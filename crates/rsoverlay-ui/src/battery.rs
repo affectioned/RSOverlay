@@ -130,14 +130,9 @@ impl BatteryEstimator {
     }
 }
 
-/// A lightning bolt (charging mark) filling `rect`. Drawn, not a font
-/// glyph, so it shows at any size and in any font.
+/// A lightning bolt (charging mark, Tabler's filled bolt) filling `rect`.
 pub fn paint_bolt(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
-    let p = |x: f32, y: f32| rect.min + egui::vec2(x * rect.width(), y * rect.height());
-    let stroke = egui::Stroke::NONE;
-    painter.add(egui::Shape::convex_polygon(vec![p(0.64, 0.0), p(0.16, 0.58), p(0.52, 0.58)], color, stroke));
-    painter.add(egui::Shape::convex_polygon(vec![p(0.48, 0.42), p(0.84, 0.42), p(0.36, 1.0)], color, stroke));
-    painter.add(egui::Shape::convex_polygon(vec![p(0.40, 0.42), p(0.60, 0.42), p(0.60, 0.58), p(0.40, 0.58)], color, stroke));
+    crate::icons::paint(painter, crate::icons::BOLT, rect.expand(rect.width().min(rect.height()) * 0.15), color);
 }
 
 /// Some devices don't tell SteamVR they're charging until they're full

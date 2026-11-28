@@ -48,6 +48,22 @@ svg_icon!(SAVE,        "save.svg");
 svg_icon!(LOAD,        "load.svg");
 svg_icon!(EDIT,        "edit.svg");
 svg_icon!(LAYOUTS,     "layouts.svg");
+svg_icon!(GAUGE,       "gauge.svg");
+svg_icon!(CLOSE,       "close.svg");
+svg_icon!(ARROW_LEFT,  "arrow_left.svg");
+svg_icon!(ARROW_RIGHT, "arrow_right.svg");
+svg_icon!(ARROW_UP,    "arrow_up.svg");
+svg_icon!(ARROW_DOWN,  "arrow_down.svg");
+svg_icon!(MINUS,       "minus.svg");
+svg_icon!(BACKSPACE,   "backspace.svg");
+svg_icon!(ENTER,       "enter.svg");
+svg_icon!(LOCK,        "lock.svg");
+svg_icon!(LOCK_OPEN,   "lock_open.svg");
+svg_icon!(MIC,         "mic.svg");
+svg_icon!(BOLT,        "bolt.svg");
+svg_icon!(PREV,        "prev.svg");
+svg_icon!(NEXT,        "next.svg");
+svg_icon!(MUTE,        "mute.svg");
 
 /// Install the SVG loader on the egui context. Call once at startup.
 pub fn install_loaders(ctx: &egui::Context) {
@@ -63,6 +79,18 @@ pub fn install_loaders(ctx: &egui::Context) {
 const RASTER_PX_PER_PT: f32 = 2.25 * 1.5;
 /// Tabler's viewBox (the brand mark's 48 units just raster sharper).
 const VIEWBOX: f32 = 24.0;
+
+/// Paint a bundled icon, tinted, into `rect` with a bare painter (for
+/// code that draws without a `Ui`: keyboard keys, toolbar pills). Draws
+/// nothing on the rare frame the SVG isn't rasterised yet.
+pub fn paint(p: &egui::Painter, source: ImageSource<'static>, rect: egui::Rect, tint: egui::Color32) {
+    let size = rect.width().max(rect.height());
+    let img = icon(source, size, tint);
+    if let Ok(egui::load::TexturePoll::Ready { texture }) = img.load_for_size(p.ctx(), rect.size()) {
+        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+        p.image(texture.id, rect, uv, tint);
+    }
+}
 
 /// Build a right-sized image widget for one of the bundled icons, tinted
 /// by the given color. Icons ship as white-fill SVGs so any tint lands cleanly.

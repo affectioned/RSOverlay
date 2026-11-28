@@ -544,9 +544,9 @@ fn chip_content(bit: u32, d: &WristData, accent: egui::Color32) -> (u32, String,
                 } else {
                     format!("{:.0}/{:.0} fps", v.fps, v.hz)
                 };
-                (bit, text, icons::HEADSET, if bad { theme::DANGER } else { accent })
+                (bit, text, icons::GAUGE, if bad { theme::DANGER } else { accent })
             }
-            None => (bit, "VR fps --".into(), icons::HEADSET, theme::FG_MUTED),
+            None => (bit, "VR fps --".into(), icons::GAUGE, theme::FG_MUTED),
         },
         compact::FRAME => match d.vr_perf {
             Some(v) => {
