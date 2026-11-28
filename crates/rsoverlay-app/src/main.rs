@@ -280,9 +280,13 @@ fn init_logging(console: bool) {
     use tracing_subscriber::fmt::writer::MakeWriterExt;
     let filter = || EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let dir = rsoverlay_core::config::logs_dir();
+    // Renders / previews (docs, tests) get their own log, so they never
+    // rotate away a running VR session's log.
+    let tool = std::env::args().any(|a| matches!(a.as_str(), "--settings-cards" | "--screenshot" | "--vr-preview"));
+    let name = if tool { "rsoverlay-tools" } else { "rsoverlay" };
     let file = std::fs::create_dir_all(&dir).ok().and_then(|()| {
-        let log = dir.join("rsoverlay.log");
-        let _ = std::fs::rename(&log, dir.join("rsoverlay.prev.log"));
+        let log = dir.join(format!("{name}.log"));
+        let _ = std::fs::rename(&log, dir.join(format!("{name}.prev.log")));
         std::fs::File::create(log).ok()
     });
     let builder = tracing_subscriber::fmt().with_env_filter(filter()).with_target(false).with_ansi(false);

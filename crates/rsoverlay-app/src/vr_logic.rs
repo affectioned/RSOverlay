@@ -568,6 +568,22 @@ pub(crate) fn pace_sleep(since_vsync: f64, period: f64, work: f64) -> f64 {
     wait
 }
 
+/// Default trigger click point (share of the pull), like XSOverlay's:
+/// Index triggers otherwise only click at their physical click.
+#[cfg(test)]
+pub(crate) const CLICK_POINT: f32 = 0.7;
+
+/// The trigger as the panels see it (they press at
+/// `rsoverlay_ui::laser::PRESS`, release at `RELEASE`): pulling to
+/// `point` of the way presses; the hardware click always does.
+pub(crate) fn trigger_value(pull: f32, click: bool, point: f32) -> f32 {
+    if click {
+        return 1.0;
+    }
+    let point = point.clamp(0.2, 1.0);
+    (pull.clamp(0.0, 1.0) / point * rsoverlay_ui::laser::PRESS).min(1.0)
+}
+
 /// Laser cursor: how far it sits back from the surface along the beam
 /// (keeps it in front of the panel), metres.
 pub(crate) const CURSOR_LIFT_M: f32 = 0.002;
@@ -1183,5 +1199,21 @@ mod sim {
         assert!((88..=91).contains(&frames), "{frames} updates in 1 s at 90 Hz");
         // Work longer than a frame: never a zero / negative sleep.
         assert!(pace_sleep(0.0, p, 0.02) > 0.0);
+    }
+
+    /// Tester (Index): "I need to press the trigger all the way". A
+    /// press now lands at the click point; release needs letting go to
+    /// about half of it, so it doesn't chatter.
+    #[test]
+    fn trigger_clicks_at_the_click_point() {
+        use rsoverlay_ui::laser::{PRESS, RELEASE};
+        let point = CLICK_POINT;
+        assert!(trigger_value(0.69, false, point) < PRESS);
+        assert!(trigger_value(0.71, false, point) >= PRESS, "presses at 70%");
+        assert!(trigger_value(0.4, false, point) > RELEASE, "still held at 40%");
+        assert!(trigger_value(0.3, false, point) < RELEASE, "released below ~33%");
+        assert_eq!(trigger_value(0.1, true, point), 1.0, "the hardware click always clicks");
+        // 100% = only the physical click (old behaviour).
+        assert!(trigger_value(0.99, false, 1.0) < PRESS);
     }
 }

@@ -955,6 +955,8 @@ mod imp {
         let mut prev_win_count = 0usize;
         dev_view.windows_up = true;
         let mut prev_grip = [false; 2];
+        let mut seen_hands: Vec<(Hand, u32)> = Vec::new();
+        let mut seen_input = [(false, false, false, false, false, false, false); 2];
         let mut frame = 0u64;
         // Average frame work, seconds (pacing).
         let mut work_ema = 0.0f64;
@@ -1028,6 +1030,32 @@ mod imp {
             // Buttons/axes from SteamVR Input (user's bindings), poses
             // from the tracking API. [left, right].
             let actions = input.as_ref().map(|i| i.poll(predict));
+            // Diagnostics (hot-swapping controllers): which device is in
+            // each hand, and every button change SteamVR Input gives us.
+            let hands_now: Vec<(Hand, u32)> = controllers.iter().map(|c| (c.hand, c.index)).collect();
+            if hands_now != seen_hands {
+                for &(hand, idx) in &hands_now {
+                    let model = system.as_ref().and_then(|s| s.model_name(idx)).unwrap_or_default();
+                    info!("controller {hand:?}: device {idx} \"{model}\"");
+                }
+                if hands_now.is_empty() {
+                    info!("controllers: none tracked");
+                }
+                seen_hands = hands_now;
+            }
+            if let Some(a) = &actions {
+                for (s, h) in a.iter().enumerate() {
+                    let state = (h.click, h.grab, h.right_mod, h.middle_mod, h.right_click, h.middle_click, h.aim.is_some());
+                    if state != seen_input[s] {
+                        info!(
+                            "input {}: click {} grab {} right-mod {} middle-mod {} right-click {} middle-click {} aim-pose {}",
+                            if s == 0 { "left" } else { "right" },
+                            state.0, state.1, state.2, state.3, state.4, state.5, state.6
+                        );
+                        seen_input[s] = state;
+                    }
+                }
+            }
             let mut mods = [(false, false); 2];
             // Dedicated right / middle click buttons (pressed = clicking).
             let mut direct = [(false, false); 2];
@@ -1035,8 +1063,9 @@ mod imp {
             if let Some(a) = &actions {
                 for c in controllers.iter_mut() {
                     let h = &a[hand_slot(c.hand)];
-                    // The binding's click threshold is authoritative.
-                    c.trigger = if h.click { 1.0 } else { 0.0 };
+                    // Clicks at the Click point of the pull (or the
+                    // trigger's hardware click), like XSOverlay.
+                    c.trigger = trigger_value(h.trigger, h.click, dev_view.pointer.click_point);
                     c.grip = h.grab;
                     c.stick = h.stick;
                     c.menu = false;

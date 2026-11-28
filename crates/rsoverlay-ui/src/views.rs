@@ -1887,13 +1887,15 @@ pub struct PointerPrefs {
     pub block_game_input: bool,
     /// Experimental: SteamVR's own laser drives the panels.
     pub steamvr_laser: bool,
+    /// Trigger pull that clicks (0.2..1; 1 = the trigger's own click).
+    pub click_point: f32,
     /// Window toolbars only while the laser is on the window.
     pub autohide_toolbars: bool,
 }
 
 impl Default for PointerPrefs {
     fn default() -> Self {
-        Self { long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, mouse_follows: true, touch_input: false, block_game_input: false, steamvr_laser: false, autohide_toolbars: false }
+        Self { long_press: false, long_press_s: 0.6, double_click_s: 0.4, haptics: 1.0, grab_smoothing: 0.3, mouse_follows: true, touch_input: false, block_game_input: false, steamvr_laser: false, click_point: 0.7, autohide_toolbars: false }
     }
 }
 
@@ -2025,6 +2027,16 @@ fn pointer_card(ui: &mut egui::Ui, scroll: &mut f32, ptr: &mut PointerPrefs, acc
         ui.set_width(ui.available_width());
         card_header(ui, icons::POINTER, "Pointer", accent);
         ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(theme::body_muted("Click point"));
+            crate::theme::fit_slider(ui);
+            ui.add(egui::Slider::new(&mut ptr.click_point, 0.3..=1.0).fixed_decimals(2).custom_formatter(|v, _| match v {
+                v if v >= 0.995 => "Full click".into(),
+                v => format!("{:.0}%", v * 100.0),
+            }));
+        })
+        .response
+        .on_hover_text("How far you pull the trigger to click. Full click = only the trigger's own click (Index). Lower = lighter clicks.");
         ui.horizontal(|ui| {
             ui.label(theme::body_muted("Scroll speed"));
             crate::theme::fit_slider(ui);

@@ -830,6 +830,11 @@ impl<'a> System<'a> {
         (err == sys::ETrackedPropertyError_Success).then_some(v)
     }
 
+    /// A device's model name ("Knuckles Right", …), for logs.
+    pub fn model_name(&self, i: u32) -> Option<String> {
+        self.string_prop(i, sys::Prop_ModelNumber_String)
+    }
+
     fn string_prop(&self, i: u32, prop: sys::ETrackedDeviceProperty) -> Option<String> {
         // k_unMaxPropertyStringSize is 32 KiB, but model numbers are
         // short; 256 bytes covers every shipping device. Over-long
