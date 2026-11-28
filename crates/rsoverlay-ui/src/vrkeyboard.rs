@@ -114,7 +114,50 @@ fn rows(iso: bool) -> [Vec<Key>; 5] {
 }
 
 pub const TOP_BAR: f32 = 44.0;
+const BACKSPACE: ScanKey = ScanKey::new(0x0E);
 const REPEAT_DELAY: f64 = 0.45;
+
+/// Holding backspace, like an iPhone: a pause, then letters one by one,
+/// then whole words, speeding up. One step per delete; step 0 is the
+/// press itself. Pure: how many deletes `held` seconds of holding has
+/// earned in total.
+pub(crate) fn backspace_steps(held: f64) -> u32 {
+    const DELAY: f64 = 0.5;
+    const CHAR_EVERY: f64 = 0.1;
+    const CHARS: u32 = 12;
+    const WORDS_AT: f64 = DELAY + CHAR_EVERY * CHARS as f64;
+    const WORD_EVERY: f64 = 0.22;
+    const FAST_AT: f64 = WORDS_AT + 2.0;
+    const FAST_EVERY: f64 = 0.12;
+    if held < DELAY {
+        return 1;
+    }
+    if held < WORDS_AT {
+        return 1 + (((held - DELAY) / CHAR_EVERY) as u32 + 1).min(CHARS);
+    }
+    let slow = 1 + CHARS;
+    if held < FAST_AT {
+        return slow + ((held - WORDS_AT) / WORD_EVERY) as u32 + 1;
+    }
+    let slow_words = ((FAST_AT - WORDS_AT) / WORD_EVERY) as u32 + 1;
+    slow + slow_words + ((held - FAST_AT) / FAST_EVERY) as u32
+}
+
+/// Whether delete step `i` (see [`backspace_steps`]) removes a whole
+/// word rather than one character.
+pub(crate) fn backspace_is_word(i: u32) -> bool {
+    i > 12
+}
+
+/// Remove the last word (and the spaces after it) from `buf`.
+fn pop_word(buf: &mut String) {
+    while buf.ends_with(char::is_whitespace) {
+        buf.pop();
+    }
+    while buf.chars().last().is_some_and(|c| !c.is_whitespace()) {
+        buf.pop();
+    }
+}
 const REPEAT_EVERY: f64 = 0.035;
 const DOUBLE_TAP: f64 = 0.40;
 const PRESS: f32 = 0.75;
@@ -135,6 +178,9 @@ pub struct VrKeyboard {
     mods: HashMap<ScanKey, (Mod, ModState)>,
     /// Per hand: char/named key currently held, (key, down-at, last repeat).
     held: [Option<(ScanKey, f64, f64)>; 2],
+    /// Per hand: backspace held since, and deletes done so far (iPhone
+    /// style repeat, every mode).
+    bs_hold: [Option<(f64, u32)>; 2],
     latched: [bool; 2],
     labels: HashMap<ScanKey, String>,
     label_key: Option<(isize, LabelMods)>,
@@ -389,6 +435,9 @@ impl VrKeyboard {
             let was = self.latched[s];
             let now = if was { trigger > RELEASE } else { trigger >= PRESS };
             self.latched[s] = now;
+            if !now {
+                self.bs_hold[s] = None;
+            }
             if now && !was {
                 let Some(p) = pos else { continue };
                 if close_r.contains(p) {
@@ -445,6 +494,9 @@ impl VrKeyboard {
                 if let Some(k) = key_at(p) {
                     out.haptic.push(hand);
                     out.sounds.push(key_sound(k.kind, k.k.scan));
+                    if k.k == BACKSPACE {
+                        self.bs_hold[s] = Some((time, 1));
+                    }
                     match k.kind {
                         Kind::Mod(m, _) => self.press_mod(k.k, m, time, internal || self.vrchat),
                         _ if self.vrchat => {
@@ -485,6 +537,43 @@ impl VrKeyboard {
                     self.release_sticky();
                     // Shift/AltGr may have dropped: relabel now.
                     self.label_at = f64::NEG_INFINITY;
+                }
+            } else if let Some((t0, done)) = self.bs_hold[s] {
+                // Backspace held: letters, then words (iPhone style).
+                let total = backspace_steps(time - t0);
+                for i in done..total {
+                    let word = backspace_is_word(i);
+                    if self.vrchat {
+                        if word {
+                            pop_word(&mut self.vrc_buf);
+                        } else {
+                            self.vrc_buf.pop();
+                        }
+                    } else if internal {
+                        let mut m = self.egui_mods();
+                        if word {
+                            m.ctrl = true;
+                            m.command = true;
+                        }
+                        for pressed in [true, false] {
+                            out.text.push(egui::Event::Key { key: egui::Key::Backspace, physical_key: None, pressed, repeat: false, modifiers: m });
+                        }
+                    } else if word {
+                        // Ctrl+Backspace: delete the previous word.
+                        let ctrl = ScanKey::new(0x1D);
+                        let _ = physical::send_scan(ctrl, true);
+                        let _ = physical::send_scan(BACKSPACE, true);
+                        let _ = physical::send_scan(ctrl, false);
+                    } else {
+                        // Typematic: key-down again (it's still held).
+                        let _ = physical::send_scan(BACKSPACE, true);
+                    }
+                    if word || i % 2 == 0 {
+                        out.sounds.push(key_sound(Kind::Named("⌫"), BACKSPACE.scan));
+                    }
+                }
+                if total > done {
+                    self.bs_hold[s] = Some((t0, total));
                 }
             } else if let Some((k, down_at, last)) = self.held[s].filter(|_| self.auto_repeat) {
                 // Opt-in typematic repeat: key-down again, no key-up.
@@ -612,6 +701,48 @@ pub fn draw_close(p: &egui::Painter, c: egui::Pos2, s: egui::Stroke) {
     let d = 6.0;
     p.line_segment([c + egui::vec2(-d, -d), c + egui::vec2(d, d)], s);
     p.line_segment([c + egui::vec2(-d, d), c + egui::vec2(d, -d)], s);
+}
+
+#[cfg(test)]
+mod backspace_tests {
+    use super::*;
+
+    #[test]
+    fn holding_backspace_goes_letters_then_words_then_faster() {
+        // Just the press until the pause is over.
+        assert_eq!(backspace_steps(0.0), 1);
+        assert_eq!(backspace_steps(0.49), 1);
+        // Then letters, ten a second.
+        assert_eq!(backspace_steps(0.5), 2);
+        assert_eq!(backspace_steps(1.0), 7);
+        assert!(!backspace_is_word(backspace_steps(1.5) - 1));
+        // Then words.
+        let w = backspace_steps(2.0);
+        assert!(backspace_is_word(w - 1));
+        // Words come slower than letters at first, then speed up.
+        let slow = backspace_steps(3.0) - backspace_steps(2.5);
+        let fast = backspace_steps(6.0) - backspace_steps(5.5);
+        assert!(fast > slow, "{slow} then {fast} per half second");
+        // Never goes backwards.
+        let mut last = 0;
+        for i in 0..800 {
+            let n = backspace_steps(i as f64 * 0.01);
+            assert!(n >= last);
+            last = n;
+        }
+    }
+
+    #[test]
+    fn word_delete_takes_the_word_and_its_spaces() {
+        let mut b = String::from("hello there  world  ");
+        pop_word(&mut b);
+        assert_eq!(b, "hello there  ");
+        pop_word(&mut b);
+        assert_eq!(b, "hello ");
+        pop_word(&mut b);
+        pop_word(&mut b);
+        assert_eq!(b, "");
+    }
 }
 
 #[cfg(test)]

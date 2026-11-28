@@ -292,7 +292,20 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         let r3 = row(&mut y, top_h + media_h, full.width() * 0.12);
         slab(ui, r3, accent);
         if let Some((img, dim)) = d.background {
-            crate::backgrounds::paint(ui, img, r3.shrink(1.0), 18.0, dim);
+            let r = r3.shrink(1.0);
+            crate::backgrounds::paint(ui, img, r, 18.0, dim);
+            // Scrim: darker on the left where the clock and title sit,
+            // lighter on the right so the picture stays vivid (tester:
+            // album covers; text got lost on busy ones).
+            let mut m = egui::Mesh::default();
+            let (l, rr) = (egui::Color32::from_black_alpha(150), egui::Color32::from_black_alpha(20));
+            m.colored_vertex(r.left_top(), l);
+            m.colored_vertex(r.right_top(), rr);
+            m.colored_vertex(r.right_bottom(), rr);
+            m.colored_vertex(r.left_bottom(), l);
+            m.add_triangle(0, 1, 2);
+            m.add_triangle(0, 2, 3);
+            ui.painter().add(egui::Shape::mesh(m));
         }
         if show_clock {
         let clock_w = if show_views { r3.width() / 2.0 - 16.0 } else { r3.width() - 20.0 };
@@ -338,7 +351,10 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
         }
         if let Some(title) = title {
             let m = egui::Rect::from_min_max(egui::pos2(r3.left() + 10.0, r3.top() + top_h), egui::pos2(r3.right() - 10.0, r3.bottom() - 8.0));
-            ui.painter().rect_filled(m, theme::RADIUS_CONTROL, theme::BG_CARD);
+            // Translucent over a background (the cover's wash shows
+            // through), solid on plain black.
+            let card = if d.background.is_some() { egui::Color32::from_black_alpha(95) } else { theme::BG_CARD };
+            ui.painter().rect_filled(m, theme::RADIUS_CONTROL, card);
             edits.push((m, compact::MEDIA));
             let text_r = egui::Rect::from_min_max(m.min + egui::vec2(14.0, 6.0), egui::pos2(m.right() - 246.0, m.bottom() - 6.0));
             let tp = ui.painter_at(text_r);
@@ -413,7 +429,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
                 crate::battery::paint_device_icon(ui, b, icon_r, col);
                 // Charging: a bolt badge on the icon, at any level.
                 if b.charging {
-                    let badge = egui::Rect::from_center_size(icon_r.right_bottom() + egui::vec2(0.0, -2.0), egui::vec2(20.0, 20.0));
+                    let badge = egui::Rect::from_center_size(icon_r.right_bottom() + egui::vec2(-7.0, -2.0), egui::vec2(20.0, 20.0));
                     ui.painter().circle_filled(badge.center(), 11.0, theme::BG_CARD);
                     ui.painter().circle_stroke(badge.center(), 10.0, egui::Stroke::new(1.5_f32, theme::CHARGING));
                     crate::battery::paint_bolt(ui.painter(), badge.shrink2(egui::vec2(4.5, 3.5)), theme::CHARGING);

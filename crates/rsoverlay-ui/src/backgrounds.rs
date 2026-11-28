@@ -159,13 +159,16 @@ fn decode(_bytes: &[u8]) -> Option<egui::ColorImage> {
 /// `dim`. Texture cached per image.
 pub fn paint(ui: &egui::Ui, img: &Arc<egui::ColorImage>, r: egui::Rect, rounding: f32, dim: f32) {
     let ctx = ui.ctx();
-    let key = egui::Id::new(("wrist-bg", Arc::as_ptr(img) as usize));
-    let tex = match ctx.data(|d| d.get_temp::<egui::TextureHandle>(key)) {
-        Some(t) => t,
-        None => {
+    // One cached texture, replaced when the image changes (album covers
+    // change every song: a texture per image would pile up).
+    let key = egui::Id::new("wrist-bg");
+    let ptr = Arc::as_ptr(img) as usize;
+    let tex = match ctx.data(|d| d.get_temp::<(usize, egui::TextureHandle)>(key)) {
+        Some((p, t)) if p == ptr => t,
+        _ => {
             // Created outside `data_mut`: load_texture locks the context too.
             let t = ctx.load_texture("wrist-bg", (**img).clone(), egui::TextureOptions::LINEAR);
-            ctx.data_mut(|d| d.insert_temp(key, t.clone()));
+            ctx.data_mut(|d| d.insert_temp(key, (ptr, t.clone())));
             t
         }
     };

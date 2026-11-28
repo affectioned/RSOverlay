@@ -389,7 +389,7 @@ pub struct DevView {
     pub wrist_slot: usize,
     /// Media theme: accent follows the album art while something plays.
     pub media_theme: bool,
-    art_accent: Option<egui::Color32>,
+    art: Option<crate::media::ArtLook>,
     /// Background SMTC poller (spawned on first use).
     media_worker: Option<media::MediaWorker>,
     /// Wrist toolbar: which of the 7 action buttons show (bit i).
@@ -520,7 +520,7 @@ impl Default for DevView {
             layout_request: None,
             wrist_slot: 0,
             media_theme: false,
-            art_accent: None,
+            art: None,
             media_worker: None,
             wrist_buttons: crate::wrist::compact::DEFAULT_ACTIONS,
             wrist_compact: rsoverlay_core::config::DEFAULT_WRIST_COMPACT,
@@ -782,7 +782,13 @@ impl DevView {
             music_volume: music.map(|m| m.1),
             windows_up: self.windows_up,
             dashboard_open: self.dashboard_open,
-            background: self.wrist_bg.image.as_ref().map(|i| (i, self.wrist_bg.dim)),
+            // Media theme while something plays: the album cover behind
+            // clock + media (tester: covers over a blur), darkened for the
+            // text; otherwise the user's own background, if any.
+            background: match (&self.art, self.media.as_ref().is_some_and(|m| !m.title.is_empty())) {
+                (Some(a), true) if self.media_theme => Some((&a.cover, 0.3)),
+                _ => self.wrist_bg.image.as_ref().map(|i| (i, self.wrist_bg.dim)),
+            },
             accent: self.effective_accent(),
             buttons: self.wrist_buttons,
             compact: self.wrist_compact,
@@ -835,7 +841,7 @@ impl DevView {
     /// Accent in effect: the album-art colour while Media theme is on
     /// and something with art is playing, else the user's accent.
     pub fn effective_accent(&self) -> egui::Color32 {
-        match (self.media_theme, self.art_accent) {
+        match (self.media_theme, self.art.as_ref().and_then(|a| a.accent)) {
             (true, Some(c)) if self.media.as_ref().is_some_and(|m| !m.title.is_empty()) => c,
             _ => self.accent,
         }
@@ -1011,7 +1017,7 @@ impl DevView {
         }
         // Off the UI thread: the media service can stall indefinitely.
         let worker = self.media_worker.get_or_insert_with(media::MediaWorker::spawn);
-        (self.media, self.art_accent) = worker.latest(self.media_theme);
+        (self.media, self.art) = worker.latest(self.media_theme);
     }
 
     pub fn ui(&mut self, ctx: &egui::Context) {
