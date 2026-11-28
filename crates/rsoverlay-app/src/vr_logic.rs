@@ -617,6 +617,17 @@ pub(crate) fn cursor_transform(origin: Vec3A, dir: Vec3A, dist: f32, eye: Vec3A,
     Affine3A::from_cols(p.matrix3.x_axis * size, p.matrix3.y_axis * size, p.matrix3.z_axis, p.translation)
 }
 
+/// The cursor pinned flat onto a panel at a laser hit (`uv`, v up from
+/// the bottom, as SteamVR reports it), in the panel's own frame (metres,
+/// origin at its centre, +Z out of its face), lifted 2 mm off it and
+/// scaled to `size`. It can't float in front of / behind the panel while
+/// the beam swings (tester: the cursor at the beam's tip didn't match
+/// where they really pointed; the beam did).
+pub(crate) fn cursor_on_panel(uv: [f32; 2], panel_w: f32, panel_h: f32, size: f32) -> Affine3A {
+    let t = Vec3A::new((uv[0] - 0.5) * panel_w, (uv[1] - 0.5) * panel_h, CURSOR_LIFT_M);
+    Affine3A::from_cols(Vec3A::X * size, Vec3A::Y * size, Vec3A::Z, t)
+}
+
 /// Laser look and feel: fade in / out, the cursor's pop on arrival, and
 /// the click flash (brighter, thicker beam; squeezed cursor). Only
 /// overlay properties change per frame (alpha, width), nothing redraws.
@@ -1366,5 +1377,20 @@ mod sim {
             // Cursor 13 mm across, facing the eye.
             assert!((cursor.transform_vector3a(Vec3A::X).length() - 0.013).abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn pinned_cursor_lands_on_the_hit() {
+        // A 1.4 x 0.875 m monitor panel; hit near its bottom-left (taskbar).
+        let m = cursor_on_panel([0.1, 0.05], 1.4, 0.875, 0.013);
+        assert!((m.translation - Vec3A::new(-0.56, -0.39375, CURSOR_LIFT_M)).length() < 1e-5);
+        assert!((m.transform_vector3a(Vec3A::X).length() - 0.013).abs() < 1e-6, "13 mm across");
+        // Through SimOverlay: the same uv maps back to the same point.
+        let panel = SimOverlay { pose: Affine3A::from_translation(glam::Vec3::new(0.0, 1.5, -1.0)), width: 1.4, aspect: 0.875 / 1.4 };
+        let o = Vec3A::new(-0.3, 1.2, 0.0);
+        let target = panel.pose.transform_point3a(Vec3A::new(-0.56, -0.39375, 0.0));
+        let (uv, _) = panel.intersect(o, (target - o).normalize()).expect("hits");
+        let pinned = panel.pose * cursor_on_panel(uv, 1.4, 0.875, 0.013);
+        assert!((pinned.translation - target).length() < CURSOR_LIFT_M + 1e-4);
     }
 }

@@ -922,6 +922,9 @@ mod imp {
         // fades out where it was instead of vanishing). Per hand.
         let mut laser_anim = [LaserAnim::default(); 2];
         let mut laser_last: [Option<(u32, Affine3A, f32, Affine3A)>; 2] = [None, None];
+        let mut laser_prev_dir: [Option<Vec3A>; 2] = [None, None];
+        let mut cursor_pin: [Option<(rsoverlay_openvr::VROverlayHandle_t, Affine3A)>; 2] = [None, None];
+        let mut laser_diag_at = [f64::NEG_INFINITY; 2];
         let mut wrist_own_hit_logged = false;
         // What each hand's laser was on last frame (diagnostics).
         let mut laser_on: [Option<usize>; 2] = [None, None];
@@ -989,6 +992,7 @@ mod imp {
         let mut steady = [RayStabilizer::default(); 2];
         // The PC mouse: yields laser hover while you use it.
         let mut mouse_owner = MouseYield::default();
+        let mut drawn_pose_logged = false;
         // SteamVR's own laser drives every panel (vr_logic::SteamLaser).
         let mut steam = SteamLaser::default();
         let mut mouse_scales: std::collections::HashMap<rsoverlay_openvr::VROverlayHandle_t, Option<egui::Vec2>> = Default::default();
@@ -1072,6 +1076,7 @@ mod imp {
             let predict = system.as_ref().map_or(0.0, |s| s.seconds_to_photons());
             mouse_owner.observe(rsoverlay_capture::window::cursor_pos(), time);
             let (hmd, mut controllers) = system.as_ref().map(|s| s.tracking(predict)).unwrap_or_default();
+            let tracked_at = Instant::now();
             // Buttons/axes from SteamVR Input (user's bindings), poses
             // from the tracking API. [left, right].
             let actions = input.as_ref().map(|i| i.poll(predict));
@@ -1140,6 +1145,29 @@ mod imp {
                 }
             }
 
+            // Aim from the controller pose SteamVR last *drew* with (its
+            // beam / controller model), not our own prediction: tester saw
+            // the hit (cursor) off the drawn beam, worst moving up / down,
+            // while our prediction jumped 13-41 ms frame to frame. The
+            // pointing offset (tip vs body) is kept, carried onto it.
+            if let Some(comp) = compositor.as_ref() {
+                for c in controllers.iter_mut() {
+                    if let Some(drawn) = comp.last_render_pose(c.index) {
+                        let to_local = to_affine(&c.pose).inverse();
+                        let drawn_a = to_affine(&drawn);
+                        let o = drawn_a.transform_point3a(to_local.transform_point3a(Vec3A::from(c.origin)));
+                        let d = drawn_a.transform_vector3a(to_local.transform_vector3a(Vec3A::from(c.dir))).normalize_or_zero();
+                        c.origin = o.into();
+                        c.dir = d.into();
+                        c.pose = drawn;
+                        if !drawn_pose_logged {
+                            drawn_pose_logged = true;
+                            info!("laser: aiming from SteamVR's last drawn controller pose");
+                        }
+                    }
+                }
+            }
+
             // Steady pointer (Accessibility): the ray itself is smoothed,
             // so beam, cursor, keyboard and clicks agree.
             for c in controllers.iter_mut() {
@@ -1197,6 +1225,7 @@ mod imp {
             let mut hit_by: Vec<[bool; 2]> = vec![[false; 2]; n];
             // Per hand: nearest panel + hit distance (for grab start).
             let mut hand_hit: [Option<(usize, f32)>; 2] = [None, None];
+            let mut hand_uv: [Option<[f32; 2]>; 2] = [None, None];
             for c in &controllers {
                 let hand = match c.hand {
                     Hand::Left => laser::Hand::Left,
@@ -1250,6 +1279,7 @@ mod imp {
                     }
                 }
                 hand_hit[hand_slot(c.hand)] = best.map(|b| (b.0, b.2));
+                hand_uv[hand_slot(c.hand)] = best.map(|b| b.1);
                 // Diagnostics: where a keyboard press lands (panel points).
                 let s = hand_slot(c.hand);
                 let pressed = c.trigger > 0.5;
@@ -1713,6 +1743,58 @@ mod imp {
                         len,
                         inv * cursor_transform(o, d, len, e, CURSOR_M * size),
                     ));
+                    // A/B (tester: beam accurate, cursor not): the left
+                    // hand's cursor is pinned flat onto the panel at the hit.
+                    let panel = hit.map(|(i, _)| i);
+                    let pin = panel.zip(hand_uv[s]).map(|(i, uv)| {
+                        let (h, w, tex) = match i {
+                            0 => (wrist.handle, wrist.width_m, wrist.tex),
+                            1 => (dash.handle, dash.width_m, dash.tex),
+                            2 => (kb.handle, kb.width_m, kb.tex),
+                            k => wins.get(k - WIN0).map_or((kb.handle, kb.width_m, kb.tex), |w| (w.panel.handle, w.panel.width_m, w.panel.tex)),
+                        };
+                        (h, cursor_on_panel(uv, w, w * tex.1 as f32 / tex.0 as f32, CURSOR_M * size))
+                    });
+                    // Pinned cursor kept for comparison but off: the cursor
+                    // rides the beam's tip (both hands).
+                    let _ = pin;
+                    cursor_pin[s] = None;
+                }
+                // Diagnostics (tester: cursor / beam desync, worst moving
+                // up and down): 4x a second while on a panel, re-read the
+                // controller just before sending, move our laser with it
+                // and ask SteamVR where it hits the panel now, vs the
+                // distance we're about to draw the tip / cursor at.
+                if let (Some(c), Some((panel, len)), Some(sys)) = (c, hit, system.as_ref()) {
+                    let d_now = Vec3A::from(c.dir);
+                    let ang = laser_prev_dir[s].map_or(0.0, |p: Vec3A| p.dot(d_now).clamp(-1.0, 1.0).acos().to_degrees() / dt.max(1e-4));
+                    laser_prev_dir[s] = Some(d_now);
+                    if time - laser_diag_at[s] >= 0.25 {
+                        laser_diag_at[s] = time;
+                        let (_, fresh) = sys.tracking(predict);
+                        if let Some(f) = fresh.iter().find(|f| f.index == c.index) {
+                            let local = to_affine(&c.pose).inverse();
+                            let move_now = to_affine(&f.pose) * local;
+                            let (o2, d2) = (move_now.transform_point3a(Vec3A::from(c.origin)), move_now.transform_vector3a(d_now));
+                            let h = match panel {
+                                0 => wrist.handle,
+                                1 => dash.handle,
+                                2 => kb.handle,
+                                k => wins.get(k - WIN0).map_or(kb.handle, |w| w.panel.handle),
+                            };
+                            let now_hit = overlay.intersect(h, o2.into(), d2.into());
+                            let cursor_now = o2 + d2 * len;
+                            let miss_mm = now_hit.map(|(_, d)| ((o2 + d2 * d) - cursor_now).length() * 1000.0);
+                            info!(
+                                "laser {:?} on panel {panel}: turning {ang:.0} deg/s, data {:.1} ms old at send, predicted {:.1} ms; drawn at {len:.3} m, panel now at {:?} m; tip/cursor off the surface by {:?} mm",
+                                c.hand,
+                                tracked_at.elapsed().as_secs_f32() * 1000.0,
+                                predict * 1000.0,
+                                now_hit.map(|(_, d)| d),
+                                miss_mm
+                            );
+                        }
+                    }
                 }
                 let (beam, cur) = (&mut beams[s], &mut cursors[s]);
                 let Some((dev, beam_rel, len, cur_rel)) = laser_last[s].filter(|_| look.beam_alpha > 0.0 || look.cursor_alpha > 0.0) else {
@@ -1733,7 +1815,15 @@ mod imp {
                 let beam_rel = beam_rel * Affine3A::from_scale(glam::Vec3::new(1.0, look.beam_thick, 1.0));
                 let cur_rel = cur_rel * Affine3A::from_scale(glam::Vec3::new(look.cursor_scale, look.cursor_scale, 1.0));
                 let _ = overlay.set_transform_device_relative(beam.handle, dev, &from_affine(&beam_rel));
-                let _ = overlay.set_transform_device_relative(cur.handle, dev, &from_affine(&cur_rel));
+                match cursor_pin[s] {
+                    Some((panel, m)) => {
+                        let m = m * Affine3A::from_scale(glam::Vec3::new(look.cursor_scale, look.cursor_scale, 1.0));
+                        let _ = overlay.set_transform_overlay_relative(cur.handle, panel, &from_affine(&m));
+                    }
+                    None => {
+                        let _ = overlay.set_transform_device_relative(cur.handle, dev, &from_affine(&cur_rel));
+                    }
+                }
                 let a = dev_view.effective_accent();
                 let rgb = [a.r() as f32 / 255.0, a.g() as f32 / 255.0, a.b() as f32 / 255.0];
                 let bt = [rgb[0], rgb[1], rgb[2], look.beam_alpha];

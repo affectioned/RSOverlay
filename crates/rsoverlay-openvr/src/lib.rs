@@ -271,6 +271,17 @@ pub struct Compositor<'a> {
 }
 
 impl<'a> Compositor<'a> {
+    /// The pose SteamVR last rendered device `index` with: where its
+    /// controller-attached overlays (our beam) were actually drawn.
+    pub fn last_render_pose(&self, index: u32) -> Option<HmdMatrix34_t> {
+        let mut render: sys::TrackedDevicePose_t = unsafe { std::mem::zeroed() };
+        let mut game: sys::TrackedDevicePose_t = unsafe { std::mem::zeroed() };
+        // SAFETY: IVRCompositor slot 4; both out-pointers are valid
+        // TrackedDevicePose_t (plain data, zero is valid).
+        let r = unsafe { ((*self.table).GetLastPoseForTrackedDeviceIndex)(index, &mut render, &mut game) };
+        (r == 0 && render.bPoseIsValid).then_some(render.mDeviceToAbsoluteTracking)
+    }
+
     /// The last `n` frames (newest first), at most 128.
     pub fn frame_samples(&self, n: u32) -> Vec<FrameSample> {
         let n = n.clamp(1, 128);
@@ -426,6 +437,13 @@ impl<'a> Overlay<'a> {
     pub fn laser_haptic(&self, handle: VROverlayHandle_t, seconds: f32, amplitude: f32) {
         // SAFETY: IVROverlay_024 slot 52 (pinned).
         let _ = unsafe { (self.table().TriggerLaserMouseHapticVibration)(handle, seconds, 160.0, amplitude.clamp(0.0, 1.0)) };
+    }
+
+    /// Place an overlay relative to another overlay (its centre, +Z its
+    /// face); moves with it, wherever that one is attached.
+    pub fn set_transform_overlay_relative(&self, handle: VROverlayHandle_t, parent: VROverlayHandle_t, m: &HmdMatrix34_t) -> Result<(), OpenVrError> {
+        // SAFETY: IVROverlay_024 slot 37 (pinned in sys.rs).
+        check(unsafe { (self.table().SetOverlayTransformOverlayRelative)(handle, parent, m) }, "SetOverlayTransformOverlayRelative")
     }
 
     /// SteamVR's own dashboard (system menu) is open.

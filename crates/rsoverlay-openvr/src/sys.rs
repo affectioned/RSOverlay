@@ -88,7 +88,9 @@ pub struct IVROverlayFnTable {
     pub SetOverlayTransformAbsolute: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, eTrackingOrigin: ETrackingUniverseOrigin, pMatTrackingOriginToOverlayTransform: *const HmdMatrix34_t) -> EVROverlayError,
     pub _pad_03: [*const c_void; 1], // 31 GetOverlayTransformAbsolute
     pub SetOverlayTransformTrackedDeviceRelative: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, unTrackedDevice: TrackedDeviceIndex_t, pmatTrackedDeviceToOverlayTransform: *const HmdMatrix34_t) -> EVROverlayError, // 32
-    pub _pad_03b: [*const c_void; 7], // 33..=39
+    pub _pad_03b: [*const c_void; 4], // 33..=36
+    pub SetOverlayTransformOverlayRelative: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, ulOverlayHandleParent: VROverlayHandle_t, pmatParentOverlayToOverlayTransform: *const HmdMatrix34_t) -> EVROverlayError, // 37
+    pub _pad_03c: [*const c_void; 2], // 38 SetOverlayTransformCursor, 39 GetOverlayTransformCursor
     pub ShowOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
     pub HideOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
     pub _pad_04: [*const c_void; 1], // 42 IsOverlayVisible
@@ -128,6 +130,7 @@ const _: () = {
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayTransformTrackedDeviceRelative) == 32 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, ComputeOverlayIntersection) == 49 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, PollNextOverlayEvent) == 44 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayTransformOverlayRelative) == 37 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, GetTransformForOverlayCoordinates) == 43 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayIntersectionMask) == 51 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, TriggerLaserMouseHapticVibration) == 52 * P);
@@ -472,7 +475,7 @@ pub struct IVRCompositorFnTable {
     pub GetTrackingSpace: *const c_void,                 // 1
     pub WaitGetPoses: *const c_void,                     // 2
     pub GetLastPoses: *const c_void,                     // 3
-    pub GetLastPoseForTrackedDeviceIndex: *const c_void, // 4
+    pub GetLastPoseForTrackedDeviceIndex: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t, pOutputPose: *mut TrackedDevicePose_t, pOutputGamePose: *mut TrackedDevicePose_t) -> i32, // 4
     pub GetSubmitTexture: *const c_void,                 // 5
     pub Submit: *const c_void,                           // 6
     pub SubmitWithArrayIndex: *const c_void,             // 7
@@ -527,6 +530,7 @@ impl Default for Compositor_FrameTiming {
 
 const _: () = {
     const P: usize = std::mem::size_of::<*const c_void>();
+    assert!(std::mem::offset_of!(IVRCompositorFnTable, GetLastPoseForTrackedDeviceIndex) == 4 * P);
     assert!(std::mem::offset_of!(IVRCompositorFnTable, GetFrameTiming) == 10 * P);
     assert!(std::mem::offset_of!(IVRCompositorFnTable, GetFrameTimings) == 11 * P);
     // 6 × u32, then the f64 at 24 (8-aligned), 16 × f32 → pose at 96,
