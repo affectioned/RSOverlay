@@ -993,6 +993,7 @@ mod imp {
         // The PC mouse: yields laser hover while you use it.
         let mut mouse_owner = MouseYield::default();
         let mut drawn_pose_logged = false;
+        let mut logged_space = -1i32;
         // SteamVR's own laser drives every panel (vr_logic::SteamLaser).
         let mut steam = SteamLaser::default();
         let mut mouse_scales: std::collections::HashMap<rsoverlay_openvr::VROverlayHandle_t, Option<egui::Vec2>> = Default::default();
@@ -1076,7 +1077,6 @@ mod imp {
             let predict = system.as_ref().map_or(0.0, |s| s.seconds_to_photons());
             mouse_owner.observe(rsoverlay_capture::window::cursor_pos(), time);
             let (hmd, mut controllers) = system.as_ref().map(|s| s.tracking(predict)).unwrap_or_default();
-            let tracked_at = Instant::now();
             // Buttons/axes from SteamVR Input (user's bindings), poses
             // from the tracking API. [left, right].
             let actions = input.as_ref().map(|i| i.poll(predict));
@@ -1150,11 +1150,21 @@ mod imp {
             // the hit (cursor) off the drawn beam, worst moving up / down,
             // while our prediction jumped 13-41 ms frame to frame. The
             // pointing offset (tip vs body) is kept, carried onto it.
-            if let Some(comp) = compositor.as_ref() {
+            if let (Some(comp), Some(sys)) = (compositor.as_ref(), system.as_ref()) {
+                // The game's tracking space may not be standing (tester:
+                // the further from the playspace centre, the further the
+                // hit drifted off the beam): bring its poses into ours.
+                let space = comp.tracking_space();
+                if space != logged_space {
+                    logged_space = space;
+                    info!("laser: game tracking space {space} (0 seated, 1 standing, 2 raw)");
+                }
+                let to_standing = to_affine(&sys.space_to_standing(space));
                 for c in controllers.iter_mut() {
                     if let Some(drawn) = comp.last_render_pose(c.index) {
                         let to_local = to_affine(&c.pose).inverse();
-                        let drawn_a = to_affine(&drawn);
+                        let drawn_a = to_standing * to_affine(&drawn);
+                        let drawn = from_affine(&drawn_a);
                         let o = drawn_a.transform_point3a(to_local.transform_point3a(Vec3A::from(c.origin)));
                         let d = drawn_a.transform_vector3a(to_local.transform_vector3a(Vec3A::from(c.dir))).normalize_or_zero();
                         c.origin = o.into();
@@ -1755,10 +1765,13 @@ mod imp {
                         };
                         (h, cursor_on_panel(uv, w, w * tex.1 as f32 / tex.0 as f32, CURSOR_M * size))
                     });
-                    // Pinned cursor kept for comparison but off: the cursor
-                    // rides the beam's tip (both hands).
-                    let _ = pin;
-                    cursor_pin[s] = None;
+                    // The cursor sits flat on the panel at the hit (now from the
+                    // pose SteamVR drew with): it can't float in front of /
+                    // behind the panel while the beam swings with the
+                    // controller (tester: desync moving up / down, worse
+                    // away from the centre, where the hit distance changes
+                    // fastest).
+                    cursor_pin[s] = pin;
                 }
                 // Diagnostics (tester: cursor / beam desync, worst moving
                 // up and down): 4x a second while on a panel, re-read the
@@ -1783,15 +1796,12 @@ mod imp {
                                 k => wins.get(k - WIN0).map_or(kb.handle, |w| w.panel.handle),
                             };
                             let now_hit = overlay.intersect(h, o2.into(), d2.into());
-                            let cursor_now = o2 + d2 * len;
-                            let miss_mm = now_hit.map(|(_, d)| ((o2 + d2 * d) - cursor_now).length() * 1000.0);
+                            let uv = hand_uv[s].map(|uv| [(uv[0] * 100.0).round() / 100.0, (uv[1] * 100.0).round() / 100.0]);
                             info!(
-                                "laser {:?} on panel {panel}: turning {ang:.0} deg/s, data {:.1} ms old at send, predicted {:.1} ms; drawn at {len:.3} m, panel now at {:?} m; tip/cursor off the surface by {:?} mm",
+                                "laser {:?} on panel {panel} at uv {:?}: turning {ang:.0} deg/s, drawn at {len:.3} m, panel now at {:?} m",
                                 c.hand,
-                                tracked_at.elapsed().as_secs_f32() * 1000.0,
-                                predict * 1000.0,
-                                now_hit.map(|(_, d)| d),
-                                miss_mm
+                                uv,
+                                now_hit.map(|(_, d)| d)
                             );
                         }
                     }

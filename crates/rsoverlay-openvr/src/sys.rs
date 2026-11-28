@@ -208,7 +208,10 @@ pub struct IVRSystemFnTable {
     /// Slots 6..=10: adapter / display. Unused here.
     pub _pad_00: [*const c_void; 5],
     pub GetDeviceToAbsoluteTrackingPose: unsafe extern "system" fn(eOrigin: ETrackingUniverseOrigin, fPredictedSecondsToPhotonsFromNow: f32, pTrackedDevicePoseArray: *mut TrackedDevicePose_t, unTrackedDevicePoseArrayCount: u32), // 11
-    pub _pad_00b: [*const c_void; 5], // 12..=16
+    pub _pad_00b: [*const c_void; 1], // 12 ResetSeatedZeroPose
+    pub GetSeatedZeroPoseToStandingAbsoluteTrackingPose: unsafe extern "system" fn() -> HmdMatrix34_t, // 13
+    pub GetRawZeroPoseToStandingAbsoluteTrackingPose: unsafe extern "system" fn() -> HmdMatrix34_t, // 14
+    pub _pad_00c: [*const c_void; 2], // 15..=16
     pub GetTrackedDeviceIndexForControllerRole: unsafe extern "system" fn(unDeviceType: ETrackedControllerRole) -> TrackedDeviceIndex_t, // 17
     pub GetControllerRoleForTrackedDeviceIndex: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t) -> ETrackedControllerRole, // 18
     pub GetTrackedDeviceClass: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t) -> ETrackedDeviceClass, // 19
@@ -355,6 +358,8 @@ pub struct VROverlayIntersectionResults_t {
 const _: () = {
     const P: usize = std::mem::size_of::<*const c_void>();
     assert!(std::mem::offset_of!(IVRSystemFnTable, GetProjectionRaw) == 2 * P);
+    assert!(std::mem::offset_of!(IVRSystemFnTable, GetSeatedZeroPoseToStandingAbsoluteTrackingPose) == 13 * P);
+    assert!(std::mem::offset_of!(IVRSystemFnTable, GetRawZeroPoseToStandingAbsoluteTrackingPose) == 14 * P);
     assert!(std::mem::offset_of!(IVRSystemFnTable, GetTimeSinceLastVsync) == 5 * P);
     assert!(std::mem::offset_of!(IVRSystemFnTable, GetDeviceToAbsoluteTrackingPose) == 11 * P);
     assert!(std::mem::offset_of!(IVRSystemFnTable, GetTrackedDeviceIndexForControllerRole) == 17 * P);
@@ -472,7 +477,7 @@ pub const IVRCompositor_FnTable_Version: &[u8] = b"FnTable:IVRCompositor_029\0";
 #[allow(non_snake_case)]
 pub struct IVRCompositorFnTable {
     pub SetTrackingSpace: *const c_void,                 // 0
-    pub GetTrackingSpace: *const c_void,                 // 1
+    pub GetTrackingSpace: unsafe extern "system" fn() -> ETrackingUniverseOrigin, // 1
     pub WaitGetPoses: *const c_void,                     // 2
     pub GetLastPoses: *const c_void,                     // 3
     pub GetLastPoseForTrackedDeviceIndex: unsafe extern "system" fn(unDeviceIndex: TrackedDeviceIndex_t, pOutputPose: *mut TrackedDevicePose_t, pOutputGamePose: *mut TrackedDevicePose_t) -> i32, // 4
@@ -531,6 +536,7 @@ impl Default for Compositor_FrameTiming {
 const _: () = {
     const P: usize = std::mem::size_of::<*const c_void>();
     assert!(std::mem::offset_of!(IVRCompositorFnTable, GetLastPoseForTrackedDeviceIndex) == 4 * P);
+    assert!(std::mem::offset_of!(IVRCompositorFnTable, GetTrackingSpace) == P);
     assert!(std::mem::offset_of!(IVRCompositorFnTable, GetFrameTiming) == 10 * P);
     assert!(std::mem::offset_of!(IVRCompositorFnTable, GetFrameTimings) == 11 * P);
     // 6 × u32, then the f64 at 24 (8-aligned), 16 × f32 → pose at 96,

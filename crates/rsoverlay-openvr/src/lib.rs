@@ -271,8 +271,16 @@ pub struct Compositor<'a> {
 }
 
 impl<'a> Compositor<'a> {
+    /// The tracking space the game set (its last poses are in it):
+    /// 0 seated, 1 standing, 2 raw.
+    pub fn tracking_space(&self) -> i32 {
+        // SAFETY: IVRCompositor slot 1, no arguments.
+        unsafe { ((*self.table).GetTrackingSpace)() }
+    }
+
     /// The pose SteamVR last rendered device `index` with: where its
-    /// controller-attached overlays (our beam) were actually drawn.
+    /// controller-attached overlays (our beam) were actually drawn. In
+    /// the game's tracking space ([`Self::tracking_space`]).
     pub fn last_render_pose(&self, index: u32) -> Option<HmdMatrix34_t> {
         let mut render: sys::TrackedDevicePose_t = unsafe { std::mem::zeroed() };
         let mut game: sys::TrackedDevicePose_t = unsafe { std::mem::zeroed() };
@@ -742,6 +750,17 @@ impl<'a> System<'a> {
     /// Left + right hand controllers with a valid pose this frame.
     pub fn controllers(&self) -> Vec<Controller> {
         self.tracking(0.0).1
+    }
+
+    /// Matrix from a tracking space (0 seated, 1 standing, 2 raw) to
+    /// standing; identity for standing.
+    pub fn space_to_standing(&self, space: i32) -> HmdMatrix34_t {
+        // SAFETY: IVRSystem slots 13 / 14 (pinned), no arguments.
+        match space {
+            0 => unsafe { (self.table().GetSeatedZeroPoseToStandingAbsoluteTrackingPose)() },
+            2 => unsafe { (self.table().GetRawZeroPoseToStandingAbsoluteTrackingPose)() },
+            _ => HmdMatrix34_t { m: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]] },
+        }
     }
 
     /// Seconds since SteamVR's last vsync (frame pacing).

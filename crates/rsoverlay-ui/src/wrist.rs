@@ -771,4 +771,42 @@ mod tests {
             }
         }
     }
+
+    /// Tester: the music volume - / + did nothing. Click across the wrist
+    /// (with music playing) and check some clicks change the volume.
+    #[test]
+    fn music_volume_buttons_click() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        crate::icons::install_loaders(&ctx);
+        let mut d = data(None, 0);
+        d.title = Some("Song");
+        d.artist = Some("Artist");
+        d.playing = true;
+        d.music_volume = Some(0.5);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 520.0));
+        let frame = |events: Vec<egui::Event>| {
+            let raw = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
+            let mut act = WristAction::default();
+            let _ = ctx.run(raw, |ctx| act = show(ctx, &d));
+            act
+        };
+        frame(vec![]);
+        let mut hits = Vec::new();
+        for y in (0..520).step_by(8) {
+            for x in (0..600).step_by(8) {
+                let p = egui::pos2(x as f32, y as f32);
+                frame(vec![egui::Event::PointerMoved(p)]);
+                let btn = |pressed| egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+                let a = frame(vec![btn(true)]);
+                let b = frame(vec![btn(false)]);
+                let v = a.volume_delta + b.volume_delta;
+                if v != 0.0 {
+                    hits.push((x, y, v));
+                }
+            }
+        }
+        assert!(hits.iter().any(|h| h.2 > 0.0), "no click raised the volume");
+        assert!(hits.iter().any(|h| h.2 < 0.0), "no click lowered the volume");
+    }
 }

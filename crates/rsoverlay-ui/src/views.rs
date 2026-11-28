@@ -793,6 +793,10 @@ impl DevView {
             self.wrist_expanded = !self.wrist_expanded;
         }
         if act.volume_delta != 0.0 {
+            // Diagnostics (tester: wrist volume does nothing).
+            let source = self.media.as_ref().map(|m| m.source.clone()).unwrap_or_default();
+            let apps: Vec<String> = self.volume.mixer().snapshot().apps.iter().map(|a| format!("{}={}", a.name, a.pid)).collect();
+            tracing::info!("wrist volume {:+.2}: media app {source:?} → target {:?}; mixer apps {apps:?}", act.volume_delta, music);
             if let Some((pid, v)) = music {
                 let v = (v + act.volume_delta).clamp(0.0, 1.0);
                 match pid {

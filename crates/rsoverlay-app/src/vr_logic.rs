@@ -623,8 +623,13 @@ pub(crate) fn cursor_transform(origin: Vec3A, dir: Vec3A, dist: f32, eye: Vec3A,
 /// scaled to `size`. It can't float in front of / behind the panel while
 /// the beam swings (tester: the cursor at the beam's tip didn't match
 /// where they really pointed; the beam did).
+///
+/// y: the parent-overlay frame SteamVR places children in runs the
+/// other way from the intersection's v (tester: left / right were right,
+/// up / down mirrored, worse away from the centre; clicks, which use
+/// `1 - v`, were right).
 pub(crate) fn cursor_on_panel(uv: [f32; 2], panel_w: f32, panel_h: f32, size: f32) -> Affine3A {
-    let t = Vec3A::new((uv[0] - 0.5) * panel_w, (uv[1] - 0.5) * panel_h, CURSOR_LIFT_M);
+    let t = Vec3A::new((uv[0] - 0.5) * panel_w, (0.5 - uv[1]) * panel_h, CURSOR_LIFT_M);
     Affine3A::from_cols(Vec3A::X * size, Vec3A::Y * size, Vec3A::Z, t)
 }
 
@@ -1383,14 +1388,15 @@ mod sim {
     fn pinned_cursor_lands_on_the_hit() {
         // A 1.4 x 0.875 m monitor panel; hit near its bottom-left (taskbar).
         let m = cursor_on_panel([0.1, 0.05], 1.4, 0.875, 0.013);
-        assert!((m.translation - Vec3A::new(-0.56, -0.39375, CURSOR_LIFT_M)).length() < 1e-5);
+        assert!((m.translation - Vec3A::new(-0.56, 0.39375, CURSOR_LIFT_M)).length() < 1e-5);
         assert!((m.transform_vector3a(Vec3A::X).length() - 0.013).abs() < 1e-6, "13 mm across");
         // Through SimOverlay: the same uv maps back to the same point.
         let panel = SimOverlay { pose: Affine3A::from_translation(glam::Vec3::new(0.0, 1.5, -1.0)), width: 1.4, aspect: 0.875 / 1.4 };
         let o = Vec3A::new(-0.3, 1.2, 0.0);
         let target = panel.pose.transform_point3a(Vec3A::new(-0.56, -0.39375, 0.0));
         let (uv, _) = panel.intersect(o, (target - o).normalize()).expect("hits");
-        let pinned = panel.pose * cursor_on_panel(uv, 1.4, 0.875, 0.013);
+        let flip = Affine3A::from_scale(glam::Vec3::new(1.0, -1.0, 1.0));
+        let pinned = panel.pose * flip * cursor_on_panel(uv, 1.4, 0.875, 0.013);
         assert!((pinned.translation - target).length() < CURSOR_LIFT_M + 1e-4);
     }
 }
