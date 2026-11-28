@@ -612,9 +612,21 @@ pub(crate) fn beam_transform(origin: Vec3A, dir: Vec3A, len: f32, eye: Vec3A, th
 
 /// The cursor's transform with its size baked in (a 1 m overlay scaled
 /// to `size`), for the same reason as [`beam_transform`].
+#[cfg(test)]
 pub(crate) fn cursor_transform(origin: Vec3A, dir: Vec3A, dist: f32, eye: Vec3A, size: f32) -> Affine3A {
     let p = cursor_pose(origin, dir, dist, eye);
     Affine3A::from_cols(p.matrix3.x_axis * size, p.matrix3.y_axis * size, p.matrix3.z_axis, p.translation)
+}
+
+/// The cursor as a child of the beam overlay: its transform in the
+/// beam's own frame. SteamVR then places the ring from the beam's
+/// current transform in the same frame, so the two can't come apart
+/// (tester: the ring drifted from the beam moving up / down, where the
+/// beam's length changes every frame and two separate overlay updates
+/// could land a frame apart). `beam` and `cursor` are in the same space.
+#[cfg(test)]
+pub(crate) fn cursor_in_beam_frame(beam: Affine3A, cursor: Affine3A) -> Affine3A {
+    beam.inverse() * cursor
 }
 
 /// The cursor pinned flat onto a panel at a laser hit (`uv`, v up from
@@ -628,6 +640,7 @@ pub(crate) fn cursor_transform(origin: Vec3A, dir: Vec3A, dist: f32, eye: Vec3A,
 /// other way from the intersection's v (tester: left / right were right,
 /// up / down mirrored, worse away from the centre; clicks, which use
 /// `1 - v`, were right).
+#[cfg(test)]
 pub(crate) fn cursor_on_panel(uv: [f32; 2], panel_w: f32, panel_h: f32, size: f32) -> Affine3A {
     let t = Vec3A::new((uv[0] - 0.5) * panel_w, (0.5 - uv[1]) * panel_h, CURSOR_LIFT_M);
     Affine3A::from_cols(Vec3A::X * size, Vec3A::Y * size, Vec3A::Z, t)
@@ -1398,5 +1411,24 @@ mod sim {
         let flip = Affine3A::from_scale(glam::Vec3::new(1.0, -1.0, 1.0));
         let pinned = panel.pose * flip * cursor_on_panel(uv, 1.4, 0.875, 0.013);
         assert!((pinned.translation - target).length() < CURSOR_LIFT_M + 1e-4);
+    }
+
+    #[test]
+    fn cursor_as_child_of_the_beam_stays_on_its_tip() {
+        let (o, d, eye) = (Vec3A::new(0.2, 1.1, -0.3), Vec3A::new(0.1, 0.4, -0.9), Vec3A::new(0.0, 1.6, 0.0));
+        for len in [0.1, 0.5, 1.7] {
+            let beam = beam_transform(o, d, len, eye, 0.007, 0.125);
+            let cursor = cursor_transform(o, d, len, eye, 0.013);
+            let child = cursor_in_beam_frame(beam, cursor);
+            // Composed back (what SteamVR does for overlay-relative): the
+            // same place, and that place is the beam's tip.
+            let back = beam * child;
+            assert!((back.translation - cursor.translation).length() < 1e-5);
+            let tip = beam.transform_point3a(Vec3A::new(0.5, 0.0, 0.0));
+            assert!((back.translation - tip).length() <= CURSOR_LIFT_M + 1e-5, "len {len}");
+            // In the beam's frame the ring sits at its tip end (x ~ +0.5).
+            // (2 mm short of it, toward you: CURSOR_LIFT_M / len of the beam.)
+            assert!((child.translation.x - 0.5).abs() <= CURSOR_LIFT_M / len + 1e-4, "len {len}: {:?}", child.translation);
+        }
     }
 }

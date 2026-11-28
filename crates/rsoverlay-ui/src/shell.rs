@@ -433,6 +433,88 @@ pub fn paint_cursor_dot(ctx: &egui::Context) {
     p.circle_filled(c, s * 0.16, egui::Color32::WHITE);
 }
 
+/// One laser's look for [`paint_laser`]: the beam and its cursor ring in
+/// one texture, so the ring is physically the end of the beam (tester:
+/// a separate cursor overlay kept drifting off the beam's tip moving up
+/// and down).
+#[derive(Clone, Copy, Debug)]
+pub struct LaserLook {
+    /// Where the hit (ring centre) is along the texture, 0..1 (the
+    /// overlay runs a ring's radius past it so the ring fits).
+    pub hit_u: f32,
+    /// Texture points per metre along the beam / across it.
+    pub pt_per_m_x: f32,
+    pub pt_per_m_y: f32,
+    /// Bright core thickness and ring radius, metres.
+    pub core_m: f32,
+    pub ring_m: f32,
+    /// How much the beam's plane is foreshortened along its length as you
+    /// see it (sin of the angle between beam and view): the ring is drawn
+    /// that much wider so it looks round.
+    pub foreshorten: f32,
+}
+
+fn ellipse(c: egui::Pos2, rx: f32, ry: f32, n: usize) -> Vec<egui::Pos2> {
+    (0..n)
+        .map(|i| {
+            let a = std::f32::consts::TAU * i as f32 / n as f32;
+            egui::pos2(c.x + rx * a.cos(), c.y + ry * a.sin())
+        })
+        .collect()
+}
+
+/// The laser (VR): a white beam with a soft glow that fades in from the
+/// controller, ending in a cursor ring with a centre dot at the hit.
+/// Tinted to the accent by the overlay colour.
+pub fn paint_laser(ctx: &egui::Context, l: &LaserLook) {
+    let p = ctx.layer_painter(egui::LayerId::background());
+    let r = ctx.screen_rect();
+    let cy = r.center().y;
+    let tip = r.left() + l.hit_u.clamp(0.0, 1.0) * r.width();
+    let ry = l.ring_m * l.pt_per_m_y;
+    let rx = l.ring_m * l.pt_per_m_x / l.foreshorten.clamp(0.2, 1.0);
+    // Beam: up to the ring's outer edge, one smooth strip (fading in from
+    // the controller) for the glow and one for the core.
+    let end = tip - rx * 0.72;
+    let core = (l.core_m * l.pt_per_m_y).max(1.0);
+    let strip = |half: f32, peak: f32| {
+        let mut m = egui::Mesh::default();
+        let n = 32;
+        for i in 0..=n {
+            let t = i as f32 / n as f32;
+            let x = r.left() + (end - r.left()) * t;
+            let k = (t / 0.22).clamp(0.0, 1.0);
+            let a = (peak * k * k * (3.0 - 2.0 * k)) as u8;
+            m.colored_vertex(egui::pos2(x, cy - half), crate::theme::veil(a));
+            m.colored_vertex(egui::pos2(x, cy + half), crate::theme::veil(a));
+            if i > 0 {
+                let b = (2 * i) as u32;
+                m.add_triangle(b - 2, b - 1, b);
+                m.add_triangle(b - 1, b + 1, b);
+            }
+        }
+        egui::Shape::mesh(m)
+    };
+    p.add(strip(core * 1.6, 90.0));
+    p.add(strip(core * 0.5, 255.0));
+    // Ring: dark halo, white annulus, centre dot.
+    let c = egui::pos2(tip, cy);
+    p.add(egui::Shape::convex_polygon(ellipse(c, rx * 1.15, ry * 1.15, 48), egui::Color32::from_black_alpha(110), egui::Stroke::NONE));
+    let (outer, inner) = (ellipse(c, rx, ry, 48), ellipse(c, rx * 0.72, ry * 0.72, 48));
+    let mut mesh = egui::Mesh::default();
+    for i in 0..48 {
+        let j = (i + 1) % 48;
+        let base = mesh.vertices.len() as u32;
+        for q in [outer[i], outer[j], inner[i], inner[j]] {
+            mesh.colored_vertex(q, egui::Color32::WHITE);
+        }
+        mesh.add_triangle(base, base + 1, base + 2);
+        mesh.add_triangle(base + 1, base + 3, base + 2);
+    }
+    p.add(egui::Shape::mesh(mesh));
+    p.add(egui::Shape::convex_polygon(ellipse(c, rx * 0.2, ry * 0.2, 24), egui::Color32::WHITE, egui::Stroke::NONE));
+}
+
 /// The laser beam's texture (VR), white, tinted to the accent by the
 /// overlay colour: across, a bright core with a soft glow; along, it
 /// fades in from the controller and softens at the tip.

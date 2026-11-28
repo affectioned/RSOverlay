@@ -456,4 +456,55 @@ mod native_gpu_tests {
         assert!(a(64, 64) > 200, "centre dot");
         assert!(a(2, 2) < 10, "transparent corners");
     }
+
+    /// The laser texture (beam + ring in one): the ring sits at the hit,
+    /// the beam stops at the ring, nothing after it. Writes the texture
+    /// to RSO_LASER_DUMP (raw BGRA) when set, to look at by eye.
+    #[test]
+    fn laser_texture_ends_in_the_ring() {
+        let Ok(gpu) = pollster::block_on(GpuCtx::new(rsoverlay_core::RuntimeMode::Preview)) else {
+            eprintln!("SKIPPED: no GPU adapter");
+            return;
+        };
+        let (w, h) = (1024u32, 64u32);
+        // A 0.5 m hit, 6.5 mm ring, seen at 40 degrees.
+        let (len, ring) = (0.5f32, 0.0065f32);
+        let fs = 40f32.to_radians().sin();
+        let total = len + ring * 1.3 / fs;
+        let height = 2.4 * ring;
+        let look = rsoverlay_ui::shell::LaserLook {
+            hit_u: len / total,
+            pt_per_m_x: w as f32 / total,
+            pt_per_m_y: h as f32 / height,
+            core_m: 0.0025,
+            ring_m: ring,
+            foreshorten: fs,
+        };
+        let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Bgra8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = target.create_view(&Default::default());
+        let mut panel = EguiPanel::new(&gpu.device, wgpu::TextureFormat::Bgra8Unorm, w, h);
+        panel.set_pixels_per_point(1.0);
+        panel.set_clear(wgpu::Color::TRANSPARENT);
+        let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w as f32, h as f32))), ..Default::default() };
+        panel.render_settled(&gpu.device, &gpu.queue, &view, raw, move |ctx| rsoverlay_ui::shell::paint_laser(ctx, &look));
+        let px = readback(&gpu, &target, w, h);
+        if let Ok(path) = std::env::var("RSO_LASER_DUMP") {
+            std::fs::write(path, &px).unwrap();
+        }
+        let a = |x: usize, y: usize| px[(y * w as usize + x) * 4 + 3];
+        let tip = (look.hit_u * w as f32) as usize;
+        assert!(a(tip, 32) > 200, "centre dot at the hit");
+        assert!(a(w as usize / 2, 32) > 200, "beam core midway");
+        assert!(a(2, 32) < 40, "beam fades in from the controller");
+        assert!(a(w as usize - 1, 32) < 20, "nothing past the ring");
+    }
 }
