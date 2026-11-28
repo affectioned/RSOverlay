@@ -426,9 +426,11 @@ pub fn paint_cursor_dot(ctx: &egui::Context) {
     let p = ctx.layer_painter(egui::LayerId::background());
     let r = ctx.screen_rect();
     let (c, s) = (r.center(), r.width().min(r.height()) / 2.0);
-    p.circle_filled(c, s * 0.95, egui::Color32::from_black_alpha(150));
-    p.circle_stroke(c, s * 0.72, egui::Stroke::new(s * 0.16, egui::Color32::WHITE));
-    p.circle_filled(c, s * 0.2, egui::Color32::WHITE);
+    // Thin ring, dark halo for contrast, and a crisp centre dot that
+    // marks the exact hit (the beam ends there).
+    p.circle_filled(c, s * 0.92, egui::Color32::from_black_alpha(110));
+    p.circle_stroke(c, s * 0.7, egui::Stroke::new(s * 0.1, egui::Color32::WHITE));
+    p.circle_filled(c, s * 0.16, egui::Color32::WHITE);
 }
 
 /// The laser beam's texture (VR), white, tinted to the accent by the
@@ -445,7 +447,9 @@ pub fn paint_beam(ctx: &egui::Context) {
     };
     for i in 0..cols {
         let t = (i as f32 + 0.5) / cols as f32;
-        let along = smooth(t / 0.22) * (1.0 - 0.6 * smooth((t - 0.94) / 0.06));
+        // Solid right up to the tip: the cursor marks the end (a soft
+        // tip made the bright part stop short of it, tester).
+        let along = smooth(t / 0.22);
         for j in 0..rows {
             let v = ((j as f32 + 0.5) / rows as f32) * 2.0 - 1.0;
             let across = ((-(v / 0.22).powi(2)).exp() + 0.35 * (-(v / 0.65).powi(2)).exp()).min(1.0);

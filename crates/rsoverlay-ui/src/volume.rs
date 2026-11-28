@@ -12,6 +12,11 @@ pub struct VolumeCard {
 }
 
 impl VolumeCard {
+    /// The mixer (started on first use).
+    pub fn mixer(&mut self) -> &Mixer {
+        self.mixer.get_or_insert_with(Mixer::spawn)
+    }
+
     pub fn show(&mut self, ui: &mut egui::Ui, accent: egui::Color32) {
         let mixer = self.mixer.get_or_insert_with(Mixer::spawn);
         let snap = mixer.snapshot();

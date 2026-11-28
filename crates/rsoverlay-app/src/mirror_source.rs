@@ -442,7 +442,7 @@ mod native_gpu_tests {
         assert!(a(128, 8) < a(128, 16) && a(128, 8) > 20, "soft glow beside it");
         assert!(a(128, 0) < a(128, 8), "fading to the edges");
         assert!(a(2, 16) < 40, "fades in from the controller");
-        assert!(a(254, 16) < a(128, 16), "soft tip");
+        assert!(a(254, 16) > 230, "solid up to the tip (the cursor marks the end)");
     }
 
     #[test]

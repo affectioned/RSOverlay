@@ -93,6 +93,8 @@ pub struct WristData<'a> {
     pub slot_filled: bool,
     pub slot_favorite: bool,
     pub keyboard_open: bool,
+    /// Volume of the playing app (or master), 0..1, if known.
+    pub music_volume: Option<f32>,
     /// Focus mode is on (lights the Focus button).
     pub focus: bool,
     /// Windows are up without the dashboard (lights the Windows button).
@@ -119,7 +121,7 @@ pub struct WristData<'a> {
     pub unread: usize,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct WristAction {
     pub toggle_dashboard: bool,
     pub toggle_keyboard: bool,
@@ -138,11 +140,15 @@ pub struct WristAction {
     pub toggle_more: bool,
     /// Edit / Done.
     pub toggle_edit: bool,
+    /// Music volume change this frame (+/- buttons, stick on the row).
+    pub volume_delta: f32,
     /// Edit mode: flip this compact bit.
     pub toggle_compact: Option<u32>,
 }
 
 const ROW_GAP: f32 = 8.0;
+/// Music volume per - / + press.
+pub const VOLUME_STEP: f32 = 0.05;
 const CHIPS_PER_ROW: usize = 3;
 /// Battery devices per wrist row.
 const DEVICES_PER_ROW: usize = 3;
@@ -334,11 +340,33 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             let m = egui::Rect::from_min_max(egui::pos2(r3.left() + 10.0, r3.top() + top_h), egui::pos2(r3.right() - 10.0, r3.bottom() - 8.0));
             ui.painter().rect_filled(m, theme::RADIUS_CONTROL, theme::BG_CARD);
             edits.push((m, compact::MEDIA));
-            let text_r = egui::Rect::from_min_max(m.min + egui::vec2(14.0, 6.0), egui::pos2(m.right() - 150.0, m.bottom() - 6.0));
+            let text_r = egui::Rect::from_min_max(m.min + egui::vec2(14.0, 6.0), egui::pos2(m.right() - 246.0, m.bottom() - 6.0));
             let tp = ui.painter_at(text_r);
             tp.text(text_r.left_top(), egui::Align2::LEFT_TOP, title, egui::FontId::proportional(theme::SIZE_BODY), theme::FG_PRIMARY);
             if let Some(a) = d.artist {
                 tp.text(text_r.left_top() + egui::vec2(0.0, 22.0), egui::Align2::LEFT_TOP, a, egui::FontId::proportional(theme::SIZE_CAPTION + 1.0), theme::FG_MUTED);
+            }
+            // Volume of the playing app: a slim level bar under the
+            // title, - / + buttons, and the stick while pointing at the row.
+            let vol = egui::Rect::from_min_max(egui::pos2(m.right() - 242.0, m.top() + 6.0), egui::pos2(m.right() - 148.0, m.bottom() - 6.0));
+            if let Some(v) = d.music_volume {
+                // Level bar under the - / + buttons (clear of the title).
+                let bar = egui::Rect::from_min_size(egui::pos2(vol.left() + 10.0, vol.bottom() - 2.0), egui::vec2(vol.width() - 20.0, 3.0));
+                ui.painter().rect_filled(bar, 1.5, theme::BG_HOVER);
+                ui.painter().rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * v.clamp(0.0, 1.0), 3.0)), 1.5, accent);
+            }
+            let vw = vol.width() / 2.0;
+            for (k, (glyph, tip, step)) in [(crate::glyphs::Glyph::Minus, "Music volume down", -VOLUME_STEP), (crate::glyphs::Glyph::Plus, "Music volume up", VOLUME_STEP)].into_iter().enumerate() {
+                let c = egui::Rect::from_min_size(egui::pos2(vol.left() + k as f32 * vw, vol.top()), egui::vec2(vw, vol.height()));
+                if glyph_button(ui, c.shrink(2.0), glyph, tip, accent) {
+                    act.volume_delta += step;
+                }
+            }
+            if ui.rect_contains_pointer(m) {
+                let dy = ui.input(|i| i.raw_scroll_delta.y);
+                if dy != 0.0 {
+                    act.volume_delta += dy * 0.002;
+                }
             }
             let ctrl = egui::Rect::from_min_max(egui::pos2(m.right() - 146.0, m.top() + 6.0), m.max - egui::vec2(6.0, 6.0));
             let cw = ctrl.width() / 3.0;
@@ -630,6 +658,7 @@ mod tests {
             focus: false,
             windows_up: false,
             dashboard_open: false,
+            music_volume: None,
             background: None,
             compact: rsoverlay_core::config::DEFAULT_WRIST_COMPACT,
             expanded: false,

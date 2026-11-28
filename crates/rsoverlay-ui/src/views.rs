@@ -747,6 +747,17 @@ impl DevView {
                 .map(|b| self.battery_est.estimate(b).filter(|e| !e.charging).map(|e| crate::battery::format_duration(e.secs)))
                 .collect(),
         };
+        // Music volume on the wrist: the playing app's mixer session, or
+        // the master volume when it can't be matched. (pid, volume)
+        let music: Option<(Option<u32>, f32)> = match self.media.as_ref().filter(|m| !m.title.is_empty()).map(|m| m.source.clone()) {
+            Some(source) => {
+                let snap = self.volume.mixer().snapshot();
+                rsoverlay_audio::match_app(&source, &snap.apps)
+                    .map(|a| (Some(a.pid), a.level.volume))
+                    .or(snap.master.map(|m| (None, m.volume)))
+            }
+            None => None,
+        };
         let media = self.media.as_ref().filter(|m| !m.title.is_empty());
         // System load only when a chip needs it: the sampler is a thread.
         use crate::wrist::compact as wc;
@@ -764,6 +775,7 @@ impl DevView {
             slot_favorite: self.layouts.favorite == Some(self.wrist_slot),
             keyboard_open: self.show_keyboard,
             focus: self.focus_mode,
+            music_volume: music.map(|m| m.1),
             windows_up: self.windows_up,
             dashboard_open: self.dashboard_open,
             background: self.wrist_bg.image.as_ref().map(|i| (i, self.wrist_bg.dim)),
@@ -779,6 +791,15 @@ impl DevView {
         let act = crate::wrist::show(ctx, &data);
         if act.toggle_more {
             self.wrist_expanded = !self.wrist_expanded;
+        }
+        if act.volume_delta != 0.0 {
+            if let Some((pid, v)) = music {
+                let v = (v + act.volume_delta).clamp(0.0, 1.0);
+                match pid {
+                    Some(pid) => self.volume.mixer().set_app_volume(pid, v),
+                    None => self.volume.mixer().set_master_volume(v),
+                }
+            }
         }
         if act.toggle_focus {
             self.focus_mode = !self.focus_mode;

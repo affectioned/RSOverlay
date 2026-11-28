@@ -109,6 +109,32 @@ impl Mixer {
     }
 }
 
+/// The mixer session of the app a media session belongs to. `source` is
+/// the media session's app id: `Spotify.exe`, `chrome`, or a Store-app
+/// id like `SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify`; app names are
+/// process names (`Spotify`). Matches when one contains the other after
+/// lower-casing and dropping punctuation / `.exe`; the longest name wins.
+/// None when nothing matches (the caller falls back to the master
+/// volume). Pure.
+pub fn match_app<'a>(source: &str, apps: &'a [AppSession]) -> Option<&'a AppSession> {
+    let norm = |s: &str| -> String {
+        let s = s.to_lowercase();
+        let s = s.strip_suffix(".exe").unwrap_or(&s);
+        s.chars().filter(|c| c.is_ascii_alphanumeric()).collect()
+    };
+    let src = norm(source);
+    if src.is_empty() {
+        return None;
+    }
+    apps.iter()
+        .filter(|a| a.pid != 0)
+        .filter(|a| {
+            let n = norm(&a.name);
+            n.len() >= 3 && (src.contains(&n) || n.contains(&src))
+        })
+        .max_by_key(|a| norm(&a.name).len())
+}
+
 /// `C:\Program Files\Spotify\Spotify.exe` → `Spotify`. Pure so it's
 /// testable off-Windows.
 pub fn app_label(image_path: &str) -> String {
@@ -352,5 +378,21 @@ mod tests {
         let s = m.snapshot();
         assert_eq!(s.master.unwrap().volume, 1.0);
         assert!(s.apps[0].level.muted);
+    }
+
+    #[test]
+    fn media_app_finds_its_mixer_session() {
+        let app = |pid, name: &str| AppSession { pid, name: name.into(), level: Level::default() };
+        let apps = vec![app(0, "System sounds"), app(10, "Spotify"), app(11, "chrome"), app(12, "Discord"), app(13, "msedge")];
+        let pid = |s: &str| match_app(s, &apps).map(|a| a.pid);
+        assert_eq!(pid("Spotify.exe"), Some(10));
+        assert_eq!(pid("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"), Some(10));
+        assert_eq!(pid("Chrome"), Some(11));
+        assert_eq!(pid("MSEdge"), Some(13));
+        // Firefox reports an opaque id: no match → master volume.
+        assert_eq!(pid("308046B0AF4A39CB"), None);
+        assert_eq!(pid(""), None);
+        // Never the system-sounds session.
+        assert_eq!(pid("System sounds"), None);
     }
 }

@@ -123,7 +123,7 @@ mod imp {
     /// Laser cursor: its own overlay on the beam tip (the beam is what
     /// SteamVR moves with the controller, so the cursor rides it).
     const CURSOR_TEX: (u32, u32) = (128, 128);
-    const CURSOR_M: f32 = 0.018;
+    const CURSOR_M: f32 = 0.013;
     /// Grab / release haptic: a firmer tick than a click.
     const GRAB_HAPTIC_S: f32 = 0.025;
 

@@ -11,6 +11,8 @@ pub enum Glyph {
     Down,
     Backspace,
     Enter,
+    Minus,
+    Plus,
 }
 
 impl Glyph {
@@ -63,6 +65,13 @@ pub fn draw(p: &egui::Painter, g: Glyph, c: egui::Pos2, size: f32, color: egui::
             let d = h * 0.75;
             p.line_segment([c + v(-d, -d), c + v(d, d)], s);
             p.line_segment([c + v(-d, d), c + v(d, -d)], s);
+        }
+        Glyph::Minus => {
+            p.line_segment([c + v(-h * 0.7, 0.0), c + v(h * 0.7, 0.0)], s);
+        }
+        Glyph::Plus => {
+            p.line_segment([c + v(-h * 0.7, 0.0), c + v(h * 0.7, 0.0)], s);
+            p.line_segment([c + v(0.0, -h * 0.7), c + v(0.0, h * 0.7)], s);
         }
         Glyph::Left => arrow(v(-1.0, 0.0)),
         Glyph::Right => arrow(v(1.0, 0.0)),
