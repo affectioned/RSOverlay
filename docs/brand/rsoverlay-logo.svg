@@ -1,30 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#17171A"/>
-      <stop offset="1" stop-color="#050506"/>
-    </linearGradient>
-    <linearGradient id="front" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#F4AABB"/>
-      <stop offset="1" stop-color="#DC7690"/>
-    </linearGradient>
-    <linearGradient id="side" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#7A4552"/>
-      <stop offset="1" stop-color="#4E2D37"/>
-    </linearGradient>
-  </defs>
-  <!-- Tile -->
-  <rect x="8" y="8" width="1008" height="1008" rx="232" fill="url(#bg)"/>
-  <rect x="9.5" y="9.5" width="1005" height="1005" rx="230.5" fill="none" stroke="#2C2C31" stroke-width="3"/>
-  <!-- Three window panels arcing around you: the sides turned toward
-       you (perspective), the front one lit. -->
-  <path d="M150 404 L298 384 Q314 382 314 398 L314 626 Q314 642 298 640 L150 620 Q134 618 134 602 L134 422 Q134 406 150 404 Z" fill="url(#side)"/>
-  <path d="M874 404 L726 384 Q710 382 710 398 L710 626 Q710 642 726 640 L874 620 Q890 618 890 602 L890 422 Q890 406 874 404 Z" fill="url(#side)"/>
-  <rect x="342" y="360" width="340" height="304" rx="38" fill="url(#front)"/>
-  <!-- Title bar and lines of content: it's a window. -->
-  <path d="M342 398 A38 38 0 0 1 380 360 L644 360 A38 38 0 0 1 682 398 L682 422 L342 422 Z" fill="#FFFFFF" fill-opacity="0.16"/>
-  <circle cx="384" cy="391" r="11" fill="#FFFFFF" fill-opacity="0.7"/>
-  <rect x="384" y="462" width="196" height="22" rx="11" fill="#FFFFFF" fill-opacity="0.55"/>
-  <rect x="384" y="508" width="256" height="22" rx="11" fill="#FFFFFF" fill-opacity="0.3"/>
-  <rect x="384" y="554" width="148" height="22" rx="11" fill="#FFFFFF" fill-opacity="0.3"/>
+  <rect x="8" y="8" width="1008" height="1008" rx="232" fill="#0B0B0D"/>
+  <rect x="9.5" y="9.5" width="1005" height="1005" rx="230.5" fill="none" stroke="#2A2A2F" stroke-width="3"/>
+  <rect x="264" y="300" width="400" height="290" rx="56" fill="none" stroke="#E88FA2" stroke-opacity="0.4" stroke-width="40"/>
+  <rect x="360" y="434" width="400" height="290" rx="56" fill="#0B0B0D" stroke="#E88FA2" stroke-width="40"/>
 </svg>

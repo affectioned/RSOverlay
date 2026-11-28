@@ -1,14 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
-  <!-- RSOverlay mark: three window panels arcing around you, the front
-       one lit. Same geometry as docs/brand/rsoverlay-logo.svg. White;
-       tinted at runtime. -->
-  <g transform="translate(-5.8 -5.8) scale(0.0582)">
-    <path d="M150 404 L298 384 Q314 382 314 398 L314 626 Q314 642 298 640 L150 620 Q134 618 134 602 L134 422 Q134 406 150 404 Z" fill="#FFFFFF" fill-opacity="0.45"/>
-    <path d="M874 404 L726 384 Q710 382 710 398 L710 626 Q710 642 726 640 L874 620 Q890 618 890 602 L890 422 Q890 406 874 404 Z" fill="#FFFFFF" fill-opacity="0.45"/>
-    <rect x="342" y="360" width="340" height="304" rx="38" fill="#FFFFFF"/>
-    <circle cx="384" cy="391" r="13" fill="#000000" fill-opacity="0.55"/>
-    <rect x="384" y="462" width="196" height="26" rx="13" fill="#000000" fill-opacity="0.5"/>
-    <rect x="384" y="508" width="256" height="26" rx="13" fill="#000000" fill-opacity="0.3"/>
-    <rect x="384" y="554" width="148" height="26" rx="13" fill="#000000" fill-opacity="0.3"/>
+  <!-- RSOverlay mark: two layered windows, the one behind dimmed. White; tinted at runtime. -->
+  <g transform="translate(24 24) scale(0.072) translate(-512 -512)">
+  <rect x="264" y="300" width="400" height="290" rx="56" fill="none" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="40"/>
+  <rect x="360" y="434" width="400" height="290" rx="56" fill="#000000" stroke="#FFFFFF" stroke-width="40"/>
   </g>
 </svg>
