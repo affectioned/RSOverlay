@@ -959,8 +959,9 @@ mod imp {
         let mut mouse_owner = MouseYield::default();
         // SteamVR's own laser drives every panel (vr_logic::SteamLaser).
         let mut steam = SteamLaser::default();
-        let mut mouse_scales: std::collections::HashMap<rsoverlay_openvr::VROverlayHandle_t, egui::Vec2> = Default::default();
+        let mut mouse_scales: std::collections::HashMap<rsoverlay_openvr::VROverlayHandle_t, Option<egui::Vec2>> = Default::default();
         let mut steam_logged = (false, false);
+        let mut steam_move_logged = f64::NEG_INFINITY;
         // Which way y runs in SteamVR's intersection masks (checked once).
         let mut mask_origin = MaskOrigin::Unknown;
         // Window count last frame (a new one shows the windows).
@@ -1243,21 +1244,32 @@ mod imp {
             // ── SteamVR's laser: our ray only starts it (first reach of a
             // panel); SteamVR then draws the beam + dot, decides the hit
             // and sends mouse events, which replace our samples below.
-            let panel_handles: Vec<(usize, rsoverlay_openvr::VROverlayHandle_t, egui::Vec2)> =
-                [(0, wrist.handle, wrist.points), (1, dash.handle, dash.points), (2, kb.handle, kb.points)]
-                    .into_iter()
-                    .chain(wins.iter().enumerate().map(|(k, w)| (k + WIN0, w.panel.handle, w.panel.points)))
-                    .collect();
-            for &(_, h, pts) in &panel_handles {
-                if mouse_scales.get(&h) != Some(&pts) {
-                    mouse_scales.insert(h, pts);
-                    if let Err(e) = overlay.set_mouse_input(h, pts.x, pts.y) {
+            // (handle, size, takes the laser): only panels you can see and
+            // use; a faded / hidden one still "shown" in SteamVR was an
+            // invisible wall in front of the windows (tester).
+            let panel_handles: Vec<(usize, rsoverlay_openvr::VROverlayHandle_t, egui::Vec2, bool)> = [
+                (0, wrist.handle, wrist.points, wrist.interactive()),
+                (1, dash.handle, dash.points, dash.interactive()),
+                (2, kb.handle, kb.points, kb.interactive()),
+            ]
+            .into_iter()
+            .chain(wins.iter().enumerate().map(|(k, w)| (k + WIN0, w.panel.handle, w.panel.points, w.panel.interactive())))
+            .collect();
+            for &(_, h, pts, on) in &panel_handles {
+                let want = on.then_some(pts);
+                if mouse_scales.get(&h).copied() != Some(want) {
+                    mouse_scales.insert(h, want);
+                    let r = match want {
+                        Some(p) => overlay.set_mouse_input(h, p.x, p.y),
+                        None => overlay.set_mouse_off(h),
+                    };
+                    if let Err(e) = r {
                         warn!("SteamVR laser input: {e:#}");
                     }
                 }
             }
             let mut steam_events: Vec<(usize, usize, LaserEv)> = Vec::new();
-            for &(i, h, pts) in &panel_handles {
+            for &(i, h, pts, _) in &panel_handles {
                 for e in overlay.mouse_events(h, pts.y) {
                     let hand = controllers.iter().find(|c| c.index == e.device).map_or(1, |c| hand_slot(c.hand));
                     let ev = match e.kind {
@@ -1272,6 +1284,19 @@ mod imp {
                 }
             }
             let ray_panel = hand_hit[1].or(hand_hit[0]).map(|(i, _)| i);
+            // Diagnostics: SteamVR's mouse position next to our ray's hit
+            // on the same panel (tester: clicks miss, keyboard off).
+            for &(i, hand, ev) in &steam_events {
+                let ours = samples.get(i).and_then(|l| l.iter().find_map(|s| s.hit));
+                let size = panel_handles.iter().find(|p| p.0 == i).map(|p| p.2);
+                let log_it = !matches!(ev, LaserEv::Move(..)) || time - steam_move_logged >= 0.5;
+                if log_it {
+                    if matches!(ev, LaserEv::Move(..)) {
+                        steam_move_logged = time;
+                    }
+                    info!("steamvr mouse panel {i} hand {hand}: {ev:?}; our ray at {ours:?}; panel size {size:?}");
+                }
+            }
             let sf = steam.step(ray_panel, &steam_events, time);
             if sf.engaged && !steam_events.is_empty() && !steam_logged.0 {
                 steam_logged.0 = true;

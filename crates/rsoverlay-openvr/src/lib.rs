@@ -354,6 +354,13 @@ impl<'a> Overlay<'a> {
         check(unsafe { (self.table().SetOverlayFlag)(handle, sys::VROverlayFlags_SendVRSmoothScrollEvents, true) }, "SetOverlayFlag")
     }
 
+    /// Stop SteamVR's laser from hitting this overlay (faded / hidden
+    /// panels must not be an invisible wall in front of others).
+    pub fn set_mouse_off(&self, handle: VROverlayHandle_t) -> Result<(), OpenVrError> {
+        // SAFETY: IVROverlay_024 slot 46 (pinned in sys.rs); 0 = None.
+        check(unsafe { (self.table().SetOverlayInputMethod)(handle, 0) }, "SetOverlayInputMethod")
+    }
+
     /// Drain SteamVR's laser-mouse events for this overlay. Positions are
     /// in the mouse-scale units, y down from the top (SteamVR sends y up
     /// from the bottom; flipped here with `h`).
