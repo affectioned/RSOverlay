@@ -289,6 +289,8 @@ pub struct DevView {
     /// Windows up without the dashboard (wrist Windows button; the VR
     /// shell resets it when the follow-dashboard setting changes).
     pub windows_up: bool,
+    /// The keyboard was open when the Windows button hid everything.
+    pub kb_hidden_with_windows: bool,
     /// The dashboard is up (VR; lights the wrist Dashboard button).
     pub dashboard_open: bool,
     /// Update notifier (Settings > Updates). The app enables it on
@@ -453,6 +455,7 @@ impl Default for DevView {
             updates: Default::default(),
             focus_mode: false,
             windows_up: false,
+            kb_hidden_with_windows: false,
             dashboard_open: false,
             gamepad: Default::default(),
             wrist_bg: Default::default(),
@@ -714,6 +717,21 @@ impl DevView {
 
     /// The wrist watch-face (VR). Shares all state with the dashboard;
     /// returns what the wearer tapped.
+    /// Wrist Windows button. Hiding the windows takes the keyboard with
+    /// them (one press clears everything, tester); showing brings the
+    /// keyboard back if it was open.
+    pub fn toggle_windows(&mut self) {
+        self.windows_up = !self.windows_up;
+        if self.windows_up {
+            if std::mem::take(&mut self.kb_hidden_with_windows) {
+                self.show_keyboard = true;
+            }
+        } else {
+            self.kb_hidden_with_windows = self.show_keyboard;
+            self.show_keyboard = false;
+        }
+    }
+
     pub fn wrist_ui(&mut self, ctx: &egui::Context) -> crate::wrist::WristAction {
         self.tick_state(ctx);
         // Estimates line up with the batteries actually shown.
@@ -759,7 +777,7 @@ impl DevView {
             self.focus_mode = !self.focus_mode;
         }
         if act.toggle_windows {
-            self.windows_up = !self.windows_up;
+            self.toggle_windows();
         }
         if act.toggle_edit {
             self.wrist_editing = !self.wrist_editing;
@@ -2862,5 +2880,30 @@ mod gamepad_capture_tests {
         frame(&ctx, &mut dev, &mut t, b::A);
         assert_eq!(dev.gamepad_capture, None);
         assert_eq!(dev.gamepad.dashboard, rsoverlay_core::config::GamepadCfg::default().dashboard);
+    }
+}
+
+#[cfg(test)]
+mod windows_button_tests {
+    use super::DevView;
+
+    #[test]
+    fn windows_button_hides_the_keyboard_too_and_brings_it_back() {
+        let mut d = DevView { windows_up: true, show_keyboard: true, ..Default::default() };
+        d.toggle_windows();
+        assert!(!d.windows_up && !d.show_keyboard, "one press hides both");
+        d.toggle_windows();
+        assert!(d.windows_up && d.show_keyboard, "keyboard comes back with the windows");
+        // Keyboard wasn't open: it stays closed when the windows return.
+        let mut d = DevView { windows_up: true, show_keyboard: false, ..Default::default() };
+        d.toggle_windows();
+        d.toggle_windows();
+        assert!(d.windows_up && !d.show_keyboard);
+        // Closed with its own button while hidden: not brought back.
+        let mut d = DevView { windows_up: true, show_keyboard: true, ..Default::default() };
+        d.toggle_windows();
+        d.kb_hidden_with_windows = false;
+        d.toggle_windows();
+        assert!(!d.show_keyboard);
     }
 }

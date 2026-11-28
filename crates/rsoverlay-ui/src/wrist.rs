@@ -169,7 +169,7 @@ pub fn show(ctx: &egui::Context, d: &WristData) -> WristAction {
             (icons::SETTINGS, "Settings", "Settings", false),
             (icons::TRASH, "Close all", "Close all floating panels", false),
             (if d.focus { icons::STAR } else { icons::STAR_OUTLINE }, "Focus", "Focus mode: hold back notifications and dim the windows you aren't looking at", d.focus),
-            (icons::MONITOR, "Windows", "Show or hide your windows without the dashboard", d.windows_up),
+            (icons::MONITOR, "Windows", "Show or hide your windows and the keyboard, without the dashboard", d.windows_up),
         ];
         // Compact: the user's compact picks, in reach order. Expanded:
         // every enabled action in toolbar order. Editing: all of them.

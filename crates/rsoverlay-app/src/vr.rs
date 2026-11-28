@@ -1768,6 +1768,8 @@ mod imp {
             toggle_dash |= act.toggle_dashboard;
             if act.toggle_keyboard {
                 dev_view.show_keyboard = !dev_view.show_keyboard;
+                // Your own choice wins over "bring it back with the windows".
+                dev_view.kb_hidden_with_windows = false;
             }
             if let Some(p) = act.open_page {
                 if dash.visible && dev_view.page == p {

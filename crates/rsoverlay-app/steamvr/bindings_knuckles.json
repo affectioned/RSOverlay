@@ -1,7 +1,7 @@
 {
   "controller_type": "knuckles",
   "name": "RSOverlay defaults",
-  "description": "XSOverlay-compatible layout: trigger click, grip grab, stick scroll/push/scale, click modifiers, double-press to show the dashboard",
+  "description": "Trigger click, grip squeeze grab, stick scroll/push/scale, trackpad press down / up = right / middle click modifier, double-press to show the dashboard",
   "bindings": {
     "/actions/rsoverlay": {
       "sources": [
@@ -85,7 +85,7 @@
             }
           },
           "parameters": {
-            "sub_mode": "touch"
+            "sub_mode": "click"
           }
         },
         {
@@ -100,7 +100,7 @@
             }
           },
           "parameters": {
-            "sub_mode": "touch"
+            "sub_mode": "click"
           }
         },
         {
