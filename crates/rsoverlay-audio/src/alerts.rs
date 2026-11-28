@@ -75,8 +75,10 @@ pub fn list_sound_files(dir: &Path) -> Vec<String> {
 /// One soft tone with a bell-ish decay.
 /// Built-in sound per kind: recordings from Kenney's "Interface Sounds"
 /// (www.kenney.nl, CC0; `assets/kenney/License.txt`), converted to 16-bit
-/// mono WAV. notification = confirmation_002, warning = question_001,
-/// error = error_006, low battery = glass_004.
+/// mono WAV. notification = confirmation_004 (~1.4 kHz), warning =
+/// question_002 (~700 Hz), error = error_006 (low buzz), low battery =
+/// minimize_006 (soft falling tone, ~380 Hz). Chosen to stay mellow:
+/// no shrill high tones (see `no_builtin_is_shrill`).
 fn builtin_wav(kind: AlertKind) -> &'static [u8] {
     match kind {
         AlertKind::Notification => include_bytes!("../assets/kenney/notification.wav"),
@@ -194,6 +196,23 @@ mod tests {
             for j in i + 1..all.len() {
                 assert_ne!(all[i], all[j]);
             }
+        }
+    }
+
+    /// Tester: the first low-battery sound (a 7 kHz glass ping) was "really
+    /// squeaky". Guard every built-in against high, thin tones: the energy
+    /// of the signal's first difference vs the signal itself grows with
+    /// frequency, (2 sin(pi f / fs))^2 for a sine, about 0.18 at 3 kHz.
+    #[test]
+    fn no_builtin_is_shrill() {
+        for k in AlertKind::ALL {
+            let w = builtin_wav(k);
+            let x: Vec<f64> = w[44..].as_chunks::<2>().0.iter().map(|c| i16::from_le_bytes(*c) as f64).collect();
+            let e: f64 = x.iter().map(|v| v * v).sum::<f64>().max(1.0);
+            let d: f64 = x.windows(2).map(|p| (p[1] - p[0]).powi(2)).sum();
+            assert!(d / e < 0.18, "{k:?} is mostly above ~3 kHz ({:.2})", d / e);
+            let secs = x.len() as f64 / 44_100.0;
+            assert!((0.2..1.0).contains(&secs), "{k:?} lasts {secs:.2} s");
         }
     }
 }
