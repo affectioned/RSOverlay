@@ -75,10 +75,11 @@ pub fn list_sound_files(dir: &Path) -> Vec<String> {
 /// One soft tone with a bell-ish decay.
 /// Built-in sound per kind: recordings from Kenney's "Interface Sounds"
 /// (www.kenney.nl, CC0; `assets/kenney/License.txt`), converted to 16-bit
-/// mono WAV. notification = confirmation_004 (~1.4 kHz), warning =
-/// question_002 (~700 Hz), error = error_006 (low buzz), low battery =
-/// minimize_006 (soft falling tone, ~380 Hz). Chosen to stay mellow:
-/// no shrill high tones (see `no_builtin_is_shrill`).
+/// mono WAV. notification = confirmation_004 (~1.3 kHz swell), warning =
+/// question_002 (~790 Hz), error = question_004 (~490 Hz), low battery =
+/// minimize_008 (~355 Hz, falling). Chosen for a slow attack and a steady
+/// tone, then mastered soft: rolled off above ~3 kHz, faded in and out,
+/// all at the same quiet level (RMS -22 dBFS). See `builtins_are_soft`.
 fn builtin_wav(kind: AlertKind) -> &'static [u8] {
     match kind {
         AlertKind::Notification => include_bytes!("../assets/kenney/notification.wav"),
@@ -199,18 +200,33 @@ mod tests {
         }
     }
 
-    /// Tester: the first low-battery sound (a 7 kHz glass ping) was "really
-    /// squeaky". Guard every built-in against high, thin tones: the energy
-    /// of the signal's first difference vs the signal itself grows with
-    /// frequency, (2 sin(pi f / fs))^2 for a sine, about 0.18 at 3 kHz.
+    /// Tester: alerts should be "really soft & comfy, like a VR overlay
+    /// should" (the first low-battery sound, a 7 kHz glass ping, was "really
+    /// squeaky"). Every built-in must be:
+    /// - not shrill: the first difference's energy vs the signal's grows
+    ///   with frequency, (2 sin(pi f / fs))^2 for a sine, ~0.18 at 3 kHz;
+    /// - not clicky: it swells in (5 ms envelope reaches its peak after
+    ///   >= 10 ms) and has no spikes (peak / RMS <= 5);
+    /// - quiet: peaks at or below -8 dBFS, before the user's volume;
+    /// - short: 0.2 to 1 s.
     #[test]
-    fn no_builtin_is_shrill() {
+    fn builtins_are_soft() {
         for k in AlertKind::ALL {
             let w = builtin_wav(k);
-            let x: Vec<f64> = w[44..].as_chunks::<2>().0.iter().map(|c| i16::from_le_bytes(*c) as f64).collect();
-            let e: f64 = x.iter().map(|v| v * v).sum::<f64>().max(1.0);
+            let x: Vec<f64> = w[44..].as_chunks::<2>().0.iter().map(|c| i16::from_le_bytes(*c) as f64 / 32768.0).collect();
+            let e: f64 = x.iter().map(|v| v * v).sum::<f64>().max(1e-12);
             let d: f64 = x.windows(2).map(|p| (p[1] - p[0]).powi(2)).sum();
             assert!(d / e < 0.18, "{k:?} is mostly above ~3 kHz ({:.2})", d / e);
+            let peak = x.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+            assert!(peak <= 0.4, "{k:?} peaks at {:.1} dBFS", 20.0 * peak.log10());
+            let loud: Vec<f64> = x.iter().copied().filter(|v| v.abs() > peak * 0.01).collect();
+            let rms = (loud.iter().map(|v| v * v).sum::<f64>() / loud.len() as f64).sqrt();
+            assert!(peak / rms <= 5.0, "{k:?} is spiky (crest {:.1})", peak / rms);
+            let win = 220; // 5 ms
+            let env: Vec<f64> = x.windows(win).map(|w| (w.iter().map(|v| v * v).sum::<f64>() / win as f64).sqrt()).collect();
+            let top = env.iter().cloned().fold(0.0, f64::max);
+            let attack_ms = env.iter().position(|v| *v >= 0.9 * top).unwrap_or(0) as f64 / 44.1;
+            assert!(attack_ms >= 10.0, "{k:?} clicks in ({attack_ms:.1} ms attack)");
             let secs = x.len() as f64 / 44_100.0;
             assert!((0.2..1.0).contains(&secs), "{k:?} lasts {secs:.2} s");
         }

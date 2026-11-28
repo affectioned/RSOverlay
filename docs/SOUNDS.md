@@ -8,9 +8,10 @@ generated and nothing borrowed from other overlays:
   switches, several takes per key, played shuffled.
 - **Notification, warning, error, low battery:** sounds from Kenney's
   [Interface Sounds](https://kenney.nl/assets/interface-sounds) pack
-  (CC0, public domain): `confirmation_004`, `question_002`, `error_006`
-  and `minimize_006`, converted to 16-bit WAV. Picked to stay mellow, no
-  shrill high tones. Thanks, Kenney.
+  (CC0, public domain): `confirmation_004`, `question_002`,
+  `question_004` and `minimize_008`. Picked for a slow, gentle attack
+  and a steady tone, then mastered soft: highs rolled off above ~3 kHz,
+  faded in and out, all four at the same quiet level. Thanks, Kenney.
 
 The typing pack is cut from
 ["Typing on Keychron V1 Ultra (Red Linear Switch)"](https://commons.wikimedia.org/wiki/File:Typing_on_Keychron_V1_Ultra_(Red_Linear_Switch).wav)
