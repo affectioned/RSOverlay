@@ -39,7 +39,9 @@
           },
           "parameters": {
             "force_hold_threshold": "0.35",
-            "force_release_threshold": "0.2"
+            "force_release_threshold": "0.2",
+            "value_hold_threshold": "1.35",
+            "value_release_threshold": "1.2"
           }
         },
         {
@@ -52,7 +54,9 @@
           },
           "parameters": {
             "force_hold_threshold": "0.35",
-            "force_release_threshold": "0.2"
+            "force_release_threshold": "0.2",
+            "value_hold_threshold": "1.35",
+            "value_release_threshold": "1.2"
           }
         },
         {
