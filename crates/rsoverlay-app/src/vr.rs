@@ -167,6 +167,11 @@ mod imp {
         /// Inside the view-angle cone this frame.
         in_view: bool,
         last_render: f64,
+        /// Surfaces drawn on the last render (x, y, w, h points): where
+        /// the laser may hit (SteamVR intersection mask).
+        hits: Vec<[f32; 4]>,
+        /// Mask last sent to SteamVR (None = never sent).
+        applied_mask: Option<Option<Vec<[f32; 4]>>>,
     }
 
     impl VrPanel {
@@ -212,6 +217,8 @@ mod imp {
                 retired: None,
                 in_view: true,
                 last_render: f64::NEG_INFINITY,
+                hits: Vec::new(),
+                applied_mask: None,
             })
         }
 
@@ -296,6 +303,10 @@ mod imp {
                 ..Default::default()
             };
             self.egui.render(&gpu.device, &gpu.queue, &self.view, raw, build);
+            self.hits = rsoverlay_ui::theme::take_hit_areas(&self.egui.ctx)
+                .iter()
+                .map(|r| [r.min.x, r.min.y, r.width(), r.height()])
+                .collect();
             unsafe {
                 if let Err(e) = overlay.set_texture_d3d12(self.handle, self.raw_resource, self.raw_queue) {
                     warn!("SetOverlayTexture (D3D12): {e:#}");
@@ -950,6 +961,8 @@ mod imp {
         let mut steam = SteamLaser::default();
         let mut mouse_scales: std::collections::HashMap<rsoverlay_openvr::VROverlayHandle_t, egui::Vec2> = Default::default();
         let mut steam_logged = (false, false);
+        // Which way y runs in SteamVR's intersection masks (checked once).
+        let mut mask_origin = MaskOrigin::Unknown;
         // Window count last frame (a new one shows the windows).
         let mut prev_win_count = 0usize;
         dev_view.windows_up = true;
@@ -2468,8 +2481,66 @@ mod imp {
                 kb_vrchat: keyboard.vrchat,
             };
 
-            // ── Haptic ticks for clicks on any panel.
-            if let Some(sys) = &system {
+            // ── Laser masks: only the surfaces a panel drew catch the
+            // laser, so gaps and rounded corners let it through.
+            {
+                let mut panels: Vec<&mut VrPanel> = vec![&mut wrist, &mut dash, &mut kb];
+                panels.extend(wins.iter_mut().map(|w| &mut w.panel));
+                for p in panels {
+                    let size = (p.points.x, p.points.y);
+                    let want = mask_rects(&p.hits, size);
+                    let h = p.handle;
+                    if mask_origin == MaskOrigin::Unknown && p.visible {
+                        if let Some(probe) = want.as_deref().and_then(|r| mask_probe(r, size)) {
+                            let rects = want.clone().unwrap_or_default();
+                            mask_origin = calibrate_mask(
+                                |top| {
+                                    let _ = overlay.set_hit_mask(h, &rects, size.1, top);
+                                },
+                                |(x, y)| {
+                                    let Some(m) = overlay.point_pose(h, x, y, size.1) else { return false };
+                                    let a = to_affine(&m);
+                                    let n = a.matrix3.z_axis;
+                                    let o = a.translation + n * 0.3;
+                                    overlay.intersect(h, o.into(), (-n).into()).is_some()
+                                },
+                                probe,
+                            );
+                            info!("laser masks: {:?}", mask_origin);
+                            p.applied_mask = None;
+                            if mask_origin == MaskOrigin::Off {
+                                let _ = overlay.set_hit_mask(h, &[], size.1, true);
+                            }
+                        }
+                    }
+                    let top = match mask_origin {
+                        MaskOrigin::TopDown => true,
+                        MaskOrigin::BottomUp => false,
+                        _ => continue,
+                    };
+                    if p.applied_mask.as_ref() != Some(&want) {
+                        if let Err(e) = overlay.set_hit_mask(h, want.as_deref().unwrap_or(&[]), size.1, top) {
+                            warn!("laser mask: {e:#}");
+                        }
+                        p.applied_mask = Some(want);
+                    }
+                }
+            }
+
+            // ── Haptic ticks for clicks on any panel. On SteamVR's laser
+            // SteamVR plays them on whichever controller it's driving.
+            let clicked = wf.haptic.is_some() || df.haptic.is_some() || !win_haptics.is_empty() || !kb_haptics.is_empty();
+            let steam_panel = sf.panel.or(sf.flag_panel).filter(|_| sf.engaged);
+            if let (true, Some(i)) = (clicked, steam_panel) {
+                let h = match i {
+                    0 => wrist.handle,
+                    1 => dash.handle,
+                    2 => kb.handle,
+                    k => wins.get(k - WIN0).map_or(kb.handle, |w| w.panel.handle),
+                };
+                overlay.laser_haptic(h, 0.012, 0.35 * dev_view.pointer.haptics);
+            }
+            if let (Some(sys), None) = (&system, steam_panel) {
                 for h in [wf.haptic, df.haptic].into_iter().flatten().chain(win_haptics).chain(kb_haptics) {
                     let want = match h {
                         laser::Hand::Left => Hand::Left,

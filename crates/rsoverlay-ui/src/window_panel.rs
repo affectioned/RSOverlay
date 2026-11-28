@@ -110,6 +110,7 @@ pub fn show(
                 );
                 crate::views::paint_mirror_cursor(ui, rect, m.cursor);
                 out.image_rect = Some(rect);
+                theme::mark_hit_area(ui.ctx(), rect.expand(2.0));
                 if input_blocked {
                     uac_banner(ui, rect);
                 } else if let Some(pos) = resp.hover_pos().or_else(|| resp.interact_pointer_pos()) {
@@ -207,6 +208,9 @@ pub fn toolbar(
     opacity: Option<&mut f32>,
     accent: egui::Color32,
 ) -> ToolbarOut {
+    // The toolbar and the strip above it (no laser gap between the
+    // window and its bar).
+    theme::mark_hit_area(ui.ctx(), bar.expand2(egui::vec2(0.0, 4.0)).with_min_y(bar.top() - 8.0));
     ui.painter().rect_filled(bar, 14.0, theme::BG_ROOT);
     ui.painter().rect_stroke(bar, 14.0, egui::Stroke::new(1.0_f32, theme::STROKE_CARD));
     let mut bar_ui = ui.child_ui(bar.shrink2(egui::vec2(16.0, 8.0)), egui::Layout::left_to_right(egui::Align::Center));

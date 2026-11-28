@@ -91,7 +91,10 @@ pub struct IVROverlayFnTable {
     pub _pad_03b: [*const c_void; 7], // 33..=39
     pub ShowOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
     pub HideOverlay: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
-    pub _pad_04: [*const c_void; 2], // 42 IsOverlayVisible, 43 GetTransformForOverlayCoordinates
+    pub _pad_04: [*const c_void; 1], // 42 IsOverlayVisible
+    /// World transform of a point in overlay coordinates (mouse-scale
+    /// units, 0,0 = lower left).
+    pub GetTransformForOverlayCoordinates: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, eTrackingOrigin: ETrackingUniverseOrigin, coordinatesInOverlay: HmdVector2_t, pmatTransform: *mut HmdMatrix34_t) -> EVROverlayError, // 43
     pub PollNextOverlayEvent: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, pEvent: *mut VREvent_t, uncbVREvent: u32) -> bool, // 44
     pub _pad_04a: [*const c_void; 1], // 45 GetOverlayInputMethod
     /// `VROverlayInputMethod` is a C enum (int-sized).
@@ -99,7 +102,10 @@ pub struct IVROverlayFnTable {
     pub _pad_04c: [*const c_void; 1], // 47 GetOverlayMouseScale
     pub SetOverlayMouseScale: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, pvecMouseScale: *const HmdVector2_t) -> EVROverlayError, // 48
     pub ComputeOverlayIntersection: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, pParams: *const VROverlayIntersectionParams_t, pResults: *mut VROverlayIntersectionResults_t) -> bool, // 49
-    pub _pad_04b: [*const c_void; 6], // 50..=55
+    pub _pad_04b: [*const c_void; 1], // 50 IsHoverTargetOverlay
+    pub SetOverlayIntersectionMask: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, pMaskPrimitives: *const VROverlayIntersectionMaskPrimitive_t, unNumMaskPrimitives: u32, unPrimitiveSize: u32) -> EVROverlayError, // 51
+    pub TriggerLaserMouseHapticVibration: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, fDurationSeconds: f32, fFrequency: f32, fAmplitude: f32) -> EVROverlayError, // 52
+    pub _pad_04e: [*const c_void; 3], // 53 SetOverlayCursor, 54..=55 cursor position override
     pub SetOverlayTexture: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t, pTexture: *const Texture_t) -> EVROverlayError,
     pub ClearOverlayTexture: unsafe extern "system" fn(ulOverlayHandle: VROverlayHandle_t) -> EVROverlayError,
     pub _pad_05: [*const c_void; 6], // 58..=63
@@ -122,6 +128,10 @@ const _: () = {
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayTransformTrackedDeviceRelative) == 32 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, ComputeOverlayIntersection) == 49 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, PollNextOverlayEvent) == 44 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, GetTransformForOverlayCoordinates) == 43 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayIntersectionMask) == 51 * P);
+    assert!(std::mem::offset_of!(IVROverlayFnTable, TriggerLaserMouseHapticVibration) == 52 * P);
+    assert!(std::mem::size_of::<VROverlayIntersectionMaskPrimitive_t>() == 20);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayInputMethod) == 46 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayMouseScale) == 48 * P);
     assert!(std::mem::offset_of!(IVROverlayFnTable, SetOverlayWidthInMeters) == 21 * P);
@@ -226,6 +236,15 @@ pub struct VREvent_t {
 }
 
 pub const VREvent_Quit: u32 = 700;
+
+/// One intersection-mask shape: type 0 = rectangle {x, y, w, h},
+/// 1 = circle {cx, cy, r, unused}.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct VROverlayIntersectionMaskPrimitive_t {
+    pub m_nPrimitiveType: i32,
+    pub m_Primitive: [f32; 4],
+}
 pub const VREvent_MouseMove: u32 = 300;
 pub const VREvent_MouseButtonDown: u32 = 301;
 pub const VREvent_MouseButtonUp: u32 = 302;

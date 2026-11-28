@@ -383,6 +383,44 @@ impl<'a> Overlay<'a> {
         out
     }
 
+    /// Where the laser can hit this overlay: rectangles in mouse-scale
+    /// units (x, y, w, h). `y_from_top`: SteamVR's header doesn't say
+    /// which way y runs for masks, so the caller passes the convention
+    /// it verified (see `vr_logic::MaskCalibration`); y is converted
+    /// here. Empty = no mask (the whole overlay). At most 32.
+    pub fn set_hit_mask(&self, handle: VROverlayHandle_t, rects: &[[f32; 4]], h: f32, y_from_top: bool) -> Result<(), OpenVrError> {
+        let prims: Vec<sys::VROverlayIntersectionMaskPrimitive_t> = rects
+            .iter()
+            .take(32)
+            .map(|&[x, y, w, rh]| sys::VROverlayIntersectionMaskPrimitive_t {
+                m_nPrimitiveType: 0,
+                m_Primitive: [x, if y_from_top { y } else { h - y - rh }, w, rh],
+            })
+            .collect();
+        let size = std::mem::size_of::<sys::VROverlayIntersectionMaskPrimitive_t>() as u32;
+        // SAFETY: IVROverlay_024 slot 51 (pinned); `prims` outlives the
+        // call; null + 0 clears the mask.
+        let ptr = if prims.is_empty() { std::ptr::null() } else { prims.as_ptr() };
+        check(unsafe { (self.table().SetOverlayIntersectionMask)(handle, ptr, prims.len() as u32, size) }, "SetOverlayIntersectionMask")
+    }
+
+    /// World pose of a point on the overlay, in mouse-scale units with
+    /// y from the top (converted to SteamVR's lower-left origin here).
+    pub fn point_pose(&self, handle: VROverlayHandle_t, x: f32, y: f32, h: f32) -> Option<HmdMatrix34_t> {
+        let mut m = HmdMatrix34_t { m: [[0.0; 4]; 3] };
+        // SAFETY: IVROverlay_024 slot 43 (pinned); valid out-pointer.
+        let r = unsafe {
+            (self.table().GetTransformForOverlayCoordinates)(handle, sys::ETrackingUniverseOrigin_Standing, sys::HmdVector2_t { v: [x, h - y] }, &mut m)
+        };
+        (r == 0).then_some(m)
+    }
+
+    /// Click tick on whichever controller SteamVR's laser is on.
+    pub fn laser_haptic(&self, handle: VROverlayHandle_t, seconds: f32, amplitude: f32) {
+        // SAFETY: IVROverlay_024 slot 52 (pinned).
+        let _ = unsafe { (self.table().TriggerLaserMouseHapticVibration)(handle, seconds, 160.0, amplitude.clamp(0.0, 1.0)) };
+    }
+
     /// SteamVR's own dashboard (system menu) is open.
     pub fn is_dashboard_visible(&self) -> bool {
         // SAFETY: IVROverlay_024 slot 64 (pinned in sys.rs), no arguments.

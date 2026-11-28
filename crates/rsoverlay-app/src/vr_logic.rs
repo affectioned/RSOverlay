@@ -456,6 +456,96 @@ impl SteamLaser {
     }
 }
 
+/// SteamVR's intersection-mask limit per overlay.
+pub(crate) const MASK_MAX: usize = 32;
+
+/// The laser-catching areas of a panel (x, y, w, h; points, y down) from
+/// what it drew this frame: clipped to the panel, tiny bits dropped,
+/// rounded outward. None = no mask needed (the drawn areas cover the
+/// whole panel, or nothing was drawn). More than [`MASK_MAX`] → one box
+/// around them all.
+pub(crate) fn mask_rects(areas: &[[f32; 4]], size: (f32, f32)) -> Option<Vec<[f32; 4]>> {
+    let mut out: Vec<[f32; 4]> = Vec::new();
+    for &[x, y, w, h] in areas {
+        let (x0, y0) = (x.max(0.0).floor(), y.max(0.0).floor());
+        let (x1, y1) = ((x + w).min(size.0).ceil(), (y + h).min(size.1).ceil());
+        if x1 - x0 < 4.0 || y1 - y0 < 4.0 {
+            continue;
+        }
+        let r = [x0, y0, x1 - x0, y1 - y0];
+        if !out.contains(&r) {
+            out.push(r);
+        }
+    }
+    if out.is_empty() {
+        return None;
+    }
+    if out.iter().any(|r| r[2] >= size.0 - 1.0 && r[3] >= size.1 - 1.0) {
+        return None;
+    }
+    if out.len() > MASK_MAX {
+        let x0 = out.iter().map(|r| r[0]).fold(f32::MAX, f32::min);
+        let y0 = out.iter().map(|r| r[1]).fold(f32::MAX, f32::min);
+        let x1 = out.iter().map(|r| r[0] + r[2]).fold(0.0, f32::max);
+        let y1 = out.iter().map(|r| r[1] + r[3]).fold(0.0, f32::max);
+        out = vec![[x0, y0, x1 - x0, y1 - y0]];
+    }
+    Some(out)
+}
+
+fn in_rect(r: &[f32; 4], p: (f32, f32), margin: f32) -> bool {
+    p.0 >= r[0] - margin && p.0 <= r[0] + r[2] + margin && p.1 >= r[1] - margin && p.1 <= r[1] + r[3] + margin
+}
+
+/// Which way y runs in SteamVR's intersection mask: its header names the
+/// fields "TopLeft" but documents nothing, and OpenVR uses both origins
+/// elsewhere. Checked once at runtime against SteamVR itself.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum MaskOrigin {
+    #[default]
+    Unknown,
+    TopDown,
+    BottomUp,
+    /// Neither checked out: no masks (the whole panel catches the laser,
+    /// as before).
+    Off,
+}
+
+/// A probe pair for the check: a point inside a mask rect whose vertical
+/// mirror is in none (so the wrong convention misses it), and that mirror.
+pub(crate) fn mask_probe(rects: &[[f32; 4]], size: (f32, f32)) -> Option<((f32, f32), (f32, f32))> {
+    let n = 24;
+    for gy in 1..n {
+        for gx in 1..n {
+            let p = (size.0 * gx as f32 / n as f32, size.1 * gy as f32 / n as f32);
+            let m = (p.0, size.1 - p.1);
+            let inside = rects.iter().any(|r| in_rect(r, p, -6.0));
+            let mirror_out = !rects.iter().any(|r| in_rect(r, m, 6.0));
+            if inside && mirror_out {
+                return Some((p, m));
+            }
+        }
+    }
+    None
+}
+
+/// Run the check: set the mask one way, probe both points through
+/// SteamVR; the convention where the inside point hits and its mirror
+/// misses is the real one.
+pub(crate) fn calibrate_mask(
+    mut set_mask: impl FnMut(bool),
+    mut hits: impl FnMut((f32, f32)) -> bool,
+    probe: ((f32, f32), (f32, f32)),
+) -> MaskOrigin {
+    for top_down in [true, false] {
+        set_mask(top_down);
+        if hits(probe.0) && !hits(probe.1) {
+            return if top_down { MaskOrigin::TopDown } else { MaskOrigin::BottomUp };
+        }
+    }
+    MaskOrigin::Off
+}
+
 /// Laser cursor: how far it sits back from the surface along the beam
 /// (keeps it in front of the panel), metres.
 pub(crate) const CURSOR_LIFT_M: f32 = 0.002;
@@ -1000,5 +1090,54 @@ mod sim {
         assert!(l.step(Some(2), &[], STEAM_FALLBACK_S - 0.01).engaged);
         assert!(!l.step(Some(2), &[], STEAM_FALLBACK_S + 0.01).engaged);
         assert!(!l.step(Some(2), &[], 3.0).engaged, "stays on ours while still pointing");
+    }
+
+    /// A compact-wrist-like panel: three rows with gaps between them.
+    const WRIST_PT: (f32, f32) = (600.0, 520.0);
+    fn wrist_rows() -> Vec<[f32; 4]> {
+        vec![[4.0, 4.0, 592.0, 80.0], [40.0, 92.0, 520.0, 220.0], [60.0, 320.0, 480.0, 56.4]]
+    }
+
+    #[test]
+    fn mask_comes_from_what_the_panel_drew() {
+        let m = mask_rects(&wrist_rows(), WRIST_PT).unwrap();
+        assert_eq!(m.len(), 3);
+        assert_eq!(m[2], [60.0, 320.0, 480.0, 57.0], "rounded outward");
+        // A card covering the whole panel: no mask needed.
+        assert_eq!(mask_rects(&[[0.0, 0.0, 600.0, 520.0]], WRIST_PT), None);
+        // Nothing drawn: no mask (never make a panel unclickable).
+        assert_eq!(mask_rects(&[], WRIST_PT), None);
+        // Slivers and duplicates dropped; off-panel parts clipped.
+        let m = mask_rects(&[[0.0, 0.0, 2.0, 50.0], [10.0, 10.0, 50.0, 50.0], [10.0, 10.0, 50.0, 50.0], [580.0, 500.0, 100.0, 100.0]], WRIST_PT).unwrap();
+        assert_eq!(m, vec![[10.0, 10.0, 50.0, 50.0], [580.0, 500.0, 20.0, 20.0]]);
+        // Too many for SteamVR: one box around them all.
+        let many: Vec<[f32; 4]> = (0..40).map(|i| [i as f32 * 10.0, 100.0, 8.0, 8.0]).collect();
+        assert_eq!(mask_rects(&many, WRIST_PT).unwrap(), vec![[0.0, 100.0, 398.0, 8.0]]);
+    }
+
+    /// A stand-in for SteamVR's masked intersection with a given (hidden)
+    /// y convention: the check must find it either way, and switch masks
+    /// off if SteamVR ignores them.
+    #[test]
+    fn mask_convention_is_checked_against_steamvr() {
+        let rects = mask_rects(&wrist_rows(), WRIST_PT).unwrap();
+        let probe = mask_probe(&rects, WRIST_PT).expect("the wrist has an asymmetric gap");
+        for real_top_down in [true, false] {
+            let current = std::cell::Cell::new(true);
+            let origin = calibrate_mask(
+                |top| current.set(top),
+                |p| {
+                    // SteamVR hits where the mask (as it reads it) covers p.
+                    let y = if current.get() == real_top_down { p.1 } else { WRIST_PT.1 - p.1 };
+                    rects.iter().any(|r| in_rect(r, (p.0, y), 0.0))
+                },
+                probe,
+            );
+            assert_eq!(origin, if real_top_down { MaskOrigin::TopDown } else { MaskOrigin::BottomUp });
+        }
+        // SteamVR ignoring masks (everything hits): off, safely.
+        assert_eq!(calibrate_mask(|_| {}, |_| true, probe), MaskOrigin::Off);
+        // A symmetric layout gives no usable probe: wait for another panel.
+        assert_eq!(mask_probe(&[[0.0, 100.0, 600.0, 320.0]], WRIST_PT), None);
     }
 }

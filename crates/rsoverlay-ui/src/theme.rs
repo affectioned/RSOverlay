@@ -151,6 +151,7 @@ pub fn veil(level: u8) -> egui::Color32 {
 /// A free-standing panel surface (VR dashboard, wrist rows, widgets,
 /// keyboard): true black body, one warm hairline. Nothing else.
 pub fn surface(p: &egui::Painter, r: egui::Rect, radius: f32) {
+    mark_hit_area(p.ctx(), r);
     p.rect_filled(r, radius, BG_ROOT);
     p.rect_stroke(r, radius, egui::Stroke::new(1.0_f32, STROKE_CARD));
 }
@@ -195,4 +196,21 @@ pub fn accent_dot_for(c: Color32) -> egui::RichText {
 pub fn fit_slider(ui: &mut egui::Ui) {
     let room = ui.available_width() - 72.0 - ui.spacing().item_spacing.x;
     ui.spacing_mut().slider_width = room.clamp(40.0, 220.0);
+}
+
+fn hit_id() -> egui::Id {
+    egui::Id::new("rsoverlay-hit-areas")
+}
+
+/// Record a visible surface this frame: in VR the laser only catches
+/// these (SteamVR intersection mask), so empty space between the
+/// wrist's rows or around a panel's rounded card lets it pass through
+/// to what's behind.
+pub fn mark_hit_area(ctx: &egui::Context, r: egui::Rect) {
+    ctx.data_mut(|d| d.get_temp_mut_or_default::<Vec<egui::Rect>>(hit_id()).push(r));
+}
+
+/// This frame's hit areas (points), cleared for the next frame.
+pub fn take_hit_areas(ctx: &egui::Context) -> Vec<egui::Rect> {
+    ctx.data_mut(|d| std::mem::take(d.get_temp_mut_or_default::<Vec<egui::Rect>>(hit_id())))
 }
