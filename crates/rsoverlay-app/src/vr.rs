@@ -924,8 +924,9 @@ mod imp {
         // Fade / pop / click flash, and the last placement (so a laser
         // fades out where it was instead of vanishing). Per hand.
         let mut laser_anim = [LaserAnim::default(); 2];
-        // (beam world pose, beam length m, cursor world pose).
-        let mut laser_last: [Option<(Affine3A, f32, Affine3A)>; 2] = [None, None];
+        // (controller, beam pose, beam length m, cursor pose), poses
+        // relative to the controller.
+        let mut laser_last: [Option<(u32, Affine3A, f32, Affine3A)>; 2] = [None, None];
         let mut wrist_own_hit_logged = false;
         // What each hand's laser was on last frame (diagnostics).
         let mut laser_on: [Option<usize>; 2] = [None, None];
@@ -1764,10 +1765,15 @@ mod imp {
                         scaled.matrix3.z_axis,
                         scaled.translation,
                     );
-                    laser_last[s] = Some((beam_pose, len, cursor_pose(o, d, len, e)));
+                    // Attached to the controller: SteamVR re-poses both with
+                    // its freshest pose every frame, so they follow the hand
+                    // without our loop's delay (tester: laggy when they were
+                    // world-placed); we only update length and ring spot.
+                    let inv = to_affine(&c.pose).inverse();
+                    laser_last[s] = Some((c.index, inv * beam_pose, len, inv * cursor_pose(o, d, len, e)));
                 }
                 let (beam, cur) = (&mut beams[s], &mut cursors[s]);
-                let Some((beam_pose, len, cur_pose)) = laser_last[s].filter(|_| look.beam_alpha > 0.0 || look.cursor_alpha > 0.0) else {
+                let Some((dev, beam_pose, len, cur_pose)) = laser_last[s].filter(|_| look.beam_alpha > 0.0 || look.cursor_alpha > 0.0) else {
                     beam.set_visible(&overlay, false);
                     cur.set_visible(&overlay, false);
                     continue;
@@ -1784,9 +1790,9 @@ mod imp {
                 let thick = 3.0 * BEAM_CORE_M * size * look.beam_thick;
                 let _ = overlay.set_width(beam.handle, len);
                 let _ = overlay.set_texel_aspect(beam.handle, len * BEAM_TEX.1 as f32 / (BEAM_TEX.0 as f32 * thick));
-                let _ = overlay.set_transform_absolute(beam.handle, &from_affine(&beam_pose));
+                let _ = overlay.set_transform_device_relative(beam.handle, dev, &from_affine(&beam_pose));
                 let _ = overlay.set_width(cur.handle, CURSOR_M * size * look.cursor_scale);
-                let _ = overlay.set_transform_absolute(cur.handle, &from_affine(&cur_pose));
+                let _ = overlay.set_transform_device_relative(cur.handle, dev, &from_affine(&cur_pose));
                 let a = dev_view.effective_accent();
                 let rgb = [a.r() as f32 / 255.0, a.g() as f32 / 255.0, a.b() as f32 / 255.0];
                 let bt = [rgb[0], rgb[1], rgb[2], look.beam_alpha];
