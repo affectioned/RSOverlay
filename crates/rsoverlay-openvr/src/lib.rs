@@ -545,6 +545,24 @@ impl<'a> System<'a> {
     /// Every connected device that reports battery status, in OpenVR
     /// index order (HMD is always index 0 when present). Lighthouse base
     /// stations are skipped — they're mains-powered.
+    /// How many rendered pixels one radian covers at the centre of the
+    /// left eye's view: SteamVR's render width (with its resolution
+    /// setting applied) over the eye's tangent-space width. Panels sized
+    /// in texels to match look as sharp as the headset can show.
+    pub fn pixels_per_radian(&self) -> Option<f32> {
+        let t = self.table();
+        let (mut w, mut h) = (0u32, 0u32);
+        let (mut l, mut r, mut top, mut bottom) = (0f32, 0f32, 0f32, 0f32);
+        // SAFETY: slots 0 and 2 of IVRSystem_022 (pinned in sys.rs); all
+        // out-pointers are valid locals. Eye 0 = left.
+        unsafe {
+            (t.GetRecommendedRenderTargetSize)(&mut w, &mut h);
+            (t.GetProjectionRaw)(0, &mut l, &mut r, &mut top, &mut bottom);
+        }
+        let span = r - l;
+        (w > 0 && span.is_finite() && span > 0.1).then(|| w as f32 / span)
+    }
+
     /// Headset refresh rate (Hz), if the HMD reports it.
     pub fn display_hz(&self) -> Option<f32> {
         self.float_prop(0, sys::Prop_DisplayFrequency_Float).filter(|hz| *hz > 1.0)

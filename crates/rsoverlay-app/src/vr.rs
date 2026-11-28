@@ -228,9 +228,9 @@ mod imp {
             self.points = egui::vec2(self.tex.0 as f32 / ppp, self.tex.1 as f32 / ppp);
         }
 
-        /// Rebuild the shared texture at `k` x the base size (1..=2).
+        /// Rebuild the shared texture at `k` x the base size (0.5..=2).
         fn set_render_scale(&mut self, gpu: &GpuCtx, k: f32) {
-            let k = k.clamp(1.0, 2.0);
+            let k = k.clamp(RENDER_K.0, RENDER_K.1);
             if (k - self.render_k).abs() < 1e-3 {
                 return;
             }
@@ -411,6 +411,10 @@ mod imp {
         curvature: f32,
         /// Full frame rate even when not looked at (Window menu).
         smooth: bool,
+        /// Auto resolution: debounced texture-size changes.
+        res: ResSettle,
+        /// Share of the panel's width the capture filled last frame.
+        content_frac: f32,
     }
 
     impl WinOverlay {
@@ -507,6 +511,8 @@ mod imp {
             pinned: false,
             curvature: 0.0,
             smooth: false,
+            res: ResSettle::default(),
+            content_frac: 1.0,
         })
     }
 
@@ -603,6 +609,8 @@ mod imp {
             pinned: false,
             curvature: 0.0,
             smooth: false,
+            res: ResSettle::default(),
+            content_frac: 1.0,
         })
     }
 
@@ -908,6 +916,8 @@ mod imp {
         // layout-verified compositor table is used; None = no VR stats.
         let compositor = vr.compositor().map_err(|e| info!("frame stats unavailable: {e}")).ok();
         let mut last_perf: Option<Instant> = None;
+        // Headset pixels per radian (auto resolution, Readable size).
+        let mut px_per_rad: Option<f32> = None;
         // Head-locked toast panel, shown only while toasts are up.
         let mut toasts = VrPanel::new(&overlay, &gpu, "rsoverlay.toasts", "RSOverlay Notifications", TOAST_TEX, TOAST_PPP, 0.30, 0.0)?;
         let _ = overlay.set_sort_order(toasts.handle, 60);
@@ -1466,8 +1476,28 @@ mod imp {
             for p in [&mut wrist, &mut dash, &mut kb, &mut toasts] {
                 p.set_render_scale(&gpu, k);
             }
-            for w in &mut wins {
-                w.panel.set_render_scale(&gpu, k);
+            // Window captures: auto resolution — about as many texels as
+            // the headset shows pixels across the panel (see vr_logic).
+            let held = grab.as_ref().map(|g| g.panel);
+            let head = hmd.as_ref().map(to_affine);
+            for (i, w) in wins.iter_mut().enumerate() {
+                let auto = match (px_per_rad, head, w.mirror.is_some()) {
+                    (Some(ppr), Some(h), true) => {
+                        let p = win_world(w, hmd.as_ref(), &controllers);
+                        let dist = (p.translation - h.translation).length();
+                        Some(auto_render_k(w.panel.width_m, dist, ppr, w.panel.base_tex.0, k))
+                    }
+                    _ => None,
+                };
+                match auto {
+                    Some(want) => {
+                        if let Some(nk) = w.res.step(w.panel.render_k, want, time, held == Some(i + WIN0)) {
+                            info!("window {}: resolution {:.0} texels wide", w.seq, w.panel.base_tex.0 as f32 * nk);
+                            w.panel.set_render_scale(&gpu, nk);
+                        }
+                    }
+                    None => w.panel.set_render_scale(&gpu, k),
+                }
             }
             for w in &mut wins {
                 w.panel.apply_scale(scale);
@@ -1913,6 +1943,9 @@ mod imp {
                         }
                         laser::paint_cursor(ctx, cursor, accent);
                     });
+                    if let Some(r) = act.image_rect {
+                        w.content_frac = (r.width() / w.panel.points.x).clamp(0.05, 1.0);
+                    }
                     // The laser is the real mouse on this window: moves,
                     // separate down/up (drag, select, hold), right/middle
                     // via the click modifiers, stick → wheel.
@@ -2007,6 +2040,19 @@ mod imp {
                 }
                 w.pinned ^= act.toggle_pin;
                 w.smooth ^= act.toggle_smooth;
+                // Readable size: widen (or shrink) the panel so the text
+                // is legible from where you are (see vr_logic).
+                if act.readable {
+                    let src = w.mirror.as_ref().map(|m| m.handle().width);
+                    let head = hmd.as_ref().map(to_affine);
+                    if let (Some(src), Some(ppr), Some(h)) = (src, px_per_rad, head) {
+                        let p = win_world(w, hmd.as_ref(), &controllers);
+                        let dist = (p.translation - h.translation).length();
+                        let (width, capped) = readable_width(src, w.content_frac, dist, ppr);
+                        info!("readable size: {src} px at {dist:.2} m → {width:.2} m wide{}", if capped { " (capped at 90°)" } else { "" });
+                        w.panel.set_width(&overlay, width);
+                    }
+                }
                 if let Some(o) = act.opacity {
                     w.opacity = o.clamp(window_panel::MIN_CONTENT_OPACITY, 1.0);
                 }
@@ -2296,6 +2342,7 @@ mod imp {
             crate::preview::play_alert_sounds(&mut dev_view);
             if last_perf.is_none_or(|t| t.elapsed() >= Duration::from_millis(500)) {
                 last_perf = Some(Instant::now());
+                px_per_rad = system.as_ref().and_then(|s| s.pixels_per_radian());
                 let hz = system.as_ref().and_then(|s| s.display_hz());
                 dev_view.vr_perf = compositor.as_ref().zip(hz).and_then(|(c, hz)| {
                     let frames: Vec<rsoverlay_core::perf::Frame> = c

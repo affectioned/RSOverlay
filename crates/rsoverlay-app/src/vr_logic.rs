@@ -180,6 +180,80 @@ pub(crate) fn toolbar_visible(autohide: bool, now: f64, last_seen: f64) -> bool 
     !autohide || now - last_seen < TOOLBAR_LINGER_S
 }
 
+/// Auto resolution: texels per headset pixel. A little over 1 so
+/// SteamVR's own resampling (lens warp, reprojection) never has to
+/// shrink our texture much; all the real shrinking (a 2560-px desktop
+/// into a few hundred headset pixels) happens in our mipmapped draw.
+pub(crate) const AUTO_SS: f32 = 1.5;
+/// Window panel texture multiplier range (on the 1920-texel base).
+pub(crate) const RENDER_K: (f32, f32) = (0.5, 2.0);
+
+/// Angle a panel `width_m` wide spans at `dist_m`, radians.
+pub(crate) fn angular_width(width_m: f32, dist_m: f32) -> f32 {
+    2.0 * (0.5 * width_m / dist_m.max(0.05)).atan()
+}
+
+/// Texture multiplier for a window panel: as many texels across as the
+/// headset shows pixels across it (x [`AUTO_SS`], x the user's
+/// Resolution setting), quantised to quarter octaves so small moves
+/// don't rebuild the texture.
+pub(crate) fn auto_render_k(width_m: f32, dist_m: f32, px_per_rad: f32, base_w: u32, user_k: f32) -> f32 {
+    let want = angular_width(width_m, dist_m) * px_per_rad * AUTO_SS * user_k.max(0.1);
+    let k = (want / base_w.max(1) as f32).clamp(RENDER_K.0, RENDER_K.1);
+    (4.0 * k.log2()).round().exp2().powf(0.25).clamp(RENDER_K.0, RENDER_K.1)
+}
+
+/// Debounce for texture rebuilds: a new multiplier is applied once it
+/// has been wanted for [`RES_SETTLE_S`] and the panel isn't held.
+pub(crate) const RES_SETTLE_S: f64 = 0.75;
+
+#[derive(Default, Clone, Copy, Debug)]
+pub(crate) struct ResSettle {
+    pending: Option<(f32, f64)>,
+}
+
+impl ResSettle {
+    /// `Some(k)` when the texture should be rebuilt at `k` now.
+    pub fn step(&mut self, current: f32, wanted: f32, now: f64, held: bool) -> Option<f32> {
+        if (wanted - current).abs() < 1e-3 {
+            self.pending = None;
+            return None;
+        }
+        match self.pending {
+            Some((k, since)) if (k - wanted).abs() < 1e-3 => {
+                if !held && now - since >= RES_SETTLE_S {
+                    self.pending = None;
+                    Some(wanted)
+                } else {
+                    None
+                }
+            }
+            _ => {
+                self.pending = Some((wanted, now));
+                None
+            }
+        }
+    }
+}
+
+/// Readable size: source pixels per headset pixel. Around 1.3 small
+/// UI text (9–12 px) still lands on 7–9 headset pixels: legible.
+pub(crate) const READ_RATIO: f32 = 1.3;
+/// Widest the content may get, radians (90°): past this you'd be
+/// turning your head to read a line.
+pub(crate) const READ_MAX_ANGLE: f32 = std::f32::consts::FRAC_PI_2;
+
+/// Panel width that makes `src_px` source pixels across readable at
+/// `dist_m`: the content (`content_frac` of the panel's width) spans
+/// src_px / ([`READ_RATIO`] x headset px per radian), at most
+/// [`READ_MAX_ANGLE`]. Returns (width m, capped).
+pub(crate) fn readable_width(src_px: u32, content_frac: f32, dist_m: f32, px_per_rad: f32) -> (f32, bool) {
+    let want = src_px as f32 / (READ_RATIO * px_per_rad.max(1.0));
+    let angle = want.min(READ_MAX_ANGLE);
+    let content_w = 2.0 * dist_m.max(0.05) * (0.5 * angle).tan();
+    (content_w / content_frac.clamp(0.2, 1.0), want > READ_MAX_ANGLE)
+}
+
 /// A stand-in for a SteamVR overlay (tests): a flat quad `width` metres
 /// wide (`aspect` = height / width) at `pose`, its face along +Z.
 #[cfg(test)]
@@ -418,5 +492,66 @@ mod sim {
         // Laser off, gaze back on 1 and clearly nearer: focus moves.
         focus = pick_focus(focus, None, &[(1, 3.0), (2, 25.0)]);
         assert_eq!(focus, Some(1));
+    }
+
+    /// Steam Frame-ish: ~16 px/deg at the centre (917 px/rad).
+    const PPR: f32 = 917.0;
+
+    #[test]
+    fn auto_resolution_follows_how_big_the_panel_looks() {
+        // Tester's monitor: 1.43 m wide, ~1.6 m away → ~48° → ~770
+        // headset px; x1.5 = ~1150 texels → 0.59 of the 1920 base.
+        let far = auto_render_k(1.43, 1.6, PPR, 1920, 1.0);
+        assert!((0.55..0.65).contains(&far), "{far}");
+        // Pulled in to 0.6 m: fills the view → more texels.
+        let near = auto_render_k(1.43, 0.6, PPR, 1920, 1.0);
+        assert!(near > 1.0 && near <= RENDER_K.1, "{near}");
+        // The Resolution setting biases it up.
+        assert!(auto_render_k(1.43, 1.6, PPR, 1920, 2.0) > far);
+        // Clamped both ways.
+        assert_eq!(auto_render_k(0.2, 5.0, PPR, 1920, 1.0), RENDER_K.0);
+        assert_eq!(auto_render_k(4.0, 0.3, PPR, 1920, 2.0), RENDER_K.1);
+        // Quantised: a few cm of movement gives the same value.
+        assert_eq!(auto_render_k(1.43, 1.60, PPR, 1920, 1.0), auto_render_k(1.43, 1.63, PPR, 1920, 1.0));
+    }
+
+    #[test]
+    fn resolution_changes_wait_until_settled_and_released() {
+        let mut s = ResSettle::default();
+        assert_eq!(s.step(1.0, 1.0, 0.0, false), None, "nothing to do");
+        assert_eq!(s.step(1.0, 0.5, 0.0, false), None, "just changed");
+        assert_eq!(s.step(1.0, 0.5, 0.5, false), None, "not settled");
+        assert_eq!(s.step(1.0, 0.5, 1.0, true), None, "held: wait");
+        assert_eq!(s.step(1.0, 0.5, 1.1, false), Some(0.5));
+        // Wobbling between two values restarts the clock.
+        let mut s = ResSettle::default();
+        s.step(1.0, 0.7, 0.0, false);
+        s.step(1.0, 0.8, 0.5, false);
+        assert_eq!(s.step(1.0, 0.8, 1.0, false), None);
+        assert_eq!(s.step(1.0, 0.8, 1.3, false), Some(0.8));
+        // Back to the current value cancels.
+        let mut s = ResSettle::default();
+        s.step(1.0, 0.5, 0.0, false);
+        assert_eq!(s.step(1.0, 1.0, 0.5, false), None);
+        assert_eq!(s.step(1.0, 0.5, 1.0, false), None, "clock restarted");
+    }
+
+    #[test]
+    fn readable_size_for_a_window_and_a_big_monitor() {
+        // A 1200-px Discord window at 1 m: ~1° per 16 px → ~58°.
+        let (w, capped) = readable_width(1200, 1.0, 1.0, PPR);
+        assert!(!capped);
+        let angle = angular_width(w, 1.0).to_degrees();
+        assert!((50.0..65.0).contains(&angle), "{angle}°");
+        // Content is 80% of the panel width → panel 1/0.8 wider.
+        let (w2, _) = readable_width(1200, 0.8, 1.0, PPR);
+        assert!((w2 - w / 0.8).abs() < 1e-4);
+        // The tester's 2560-px monitor would need ~123°: capped at 90°.
+        let (w3, capped) = readable_width(2560, 1.0, 1.6, PPR);
+        assert!(capped);
+        assert!((angular_width(w3, 1.6).to_degrees() - 90.0).abs() < 0.5);
+        // Readable means ≤ READ_RATIO source px per headset px.
+        let px_on_screen = angular_width(w, 1.0) * PPR;
+        assert!((1200.0 / px_on_screen - READ_RATIO).abs() < 0.01);
     }
 }

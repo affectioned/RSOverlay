@@ -56,6 +56,8 @@ pub struct WindowPanelAction {
     pub resize: Option<(u32, u32)>,
     /// "Keep smooth when not looking" toggled.
     pub toggle_smooth: bool,
+    /// "Readable size": size the panel so its text is legible.
+    pub readable: bool,
 }
 
 /// Window sizes on the toolbar's Size menu (outer size, pixels).
@@ -134,8 +136,8 @@ pub fn show(
         // Auto-hidden toolbars leave their strip empty (no layout jump).
         if show_toolbar {
             let t = toolbar(ui, bar, title, icon, attach, linked, pinned, menu, Some(&mut op), accent);
-            (out.attach, out.close, out.unlink, out.toggle_pin, out.resize, out.toggle_smooth) =
-                (t.attach, t.close, t.unlink, t.toggle_pin, t.resize, t.toggle_smooth);
+            (out.attach, out.close, out.unlink, out.toggle_pin, out.resize, out.toggle_smooth, out.readable) =
+                (t.attach, t.close, t.unlink, t.toggle_pin, t.resize, t.toggle_smooth, t.readable);
         }
         if (op - opacity).abs() > f32::EPSILON {
             out.opacity = Some(op);
@@ -163,6 +165,8 @@ pub struct ToolbarOut {
     pub resize: Option<(u32, u32)>,
     /// "Keep smooth when not looking" toggled.
     pub toggle_smooth: bool,
+    /// "Readable size" picked.
+    pub readable: bool,
 }
 
 /// A window panel's bottom toolbar: app icon + title, dock + close, and
@@ -212,7 +216,7 @@ pub fn toolbar(
         }
         if let Some(m) = menu {
             ui.add_space(12.0);
-            (out.resize, out.toggle_smooth) = window_menu(ui, m);
+            (out.resize, out.toggle_smooth, out.readable) = window_menu(ui, m);
         }
     });
     out
@@ -220,10 +224,18 @@ pub fn toolbar(
 
 /// "Window" menu: keep this panel at full frame rate when you look
 /// away, and (real windows) resize the window so its text reads well at
-/// the panel's size. Returns (size picked, smooth toggled).
-fn window_menu(ui: &mut egui::Ui, m: WindowMenu) -> (Option<(u32, u32)>, bool) {
-    let (mut pick, mut toggle) = (None, false);
+/// the panel's size. Returns (size picked, smooth toggled, readable).
+fn window_menu(ui: &mut egui::Ui, m: WindowMenu) -> (Option<(u32, u32)>, bool, bool) {
+    let (mut pick, mut toggle, mut readable) = (None, false, false);
     ui.menu_button("Window", |ui| {
+        if ui
+            .button("Readable size")
+            .on_hover_text("Make this panel big enough to read its text from where you are (up to 90° of your view)")
+            .clicked()
+        {
+            readable = true;
+            ui.close_menu();
+        }
         let mut on = m.smooth;
         if ui
             .checkbox(&mut on, "Keep smooth when not looking")
@@ -246,7 +258,7 @@ fn window_menu(ui: &mut egui::Ui, m: WindowMenu) -> (Option<(u32, u32)>, bool) {
     })
     .response
     .on_hover_text("Refresh and size options for this window");
-    (pick, toggle)
+    (pick, toggle, readable)
 }
 
 /// Shown over an elevated window's capture when RSOverlay isn't elevated:
