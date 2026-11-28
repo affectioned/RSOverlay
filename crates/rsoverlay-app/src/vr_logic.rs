@@ -456,6 +456,15 @@ impl SteamLaser {
     }
 }
 
+/// Does a laser hit at `p` (panel points) count? Only on what the panel
+/// drew (its hit areas, a few points of slack); a panel that drew none
+/// counts everywhere. Tester: with the keyboard under Monitor 0 the
+/// taskbar couldn't be clicked: the keyboard's invisible margin, which
+/// outranks windows, caught the laser.
+pub(crate) fn hit_allowed(hits: &[[f32; 4]], p: (f32, f32)) -> bool {
+    hits.is_empty() || hits.iter().any(|r| in_rect(r, p, 4.0))
+}
+
 /// SteamVR's intersection-mask limit per overlay.
 pub(crate) const MASK_MAX: usize = 32;
 
@@ -1215,5 +1224,16 @@ mod sim {
         assert_eq!(trigger_value(0.1, true, point), 1.0, "the hardware click always clicks");
         // 100% = only the physical click (old behaviour).
         assert!(trigger_value(0.99, false, 1.0) < PRESS);
+    }
+
+    #[test]
+    fn laser_passes_through_what_a_panel_did_not_draw() {
+        // Keyboard card inset from its panel; the margin lets the laser
+        // through to the window behind (the taskbar).
+        let card = [[10.0, 10.0, 1004.0, 380.0]];
+        assert!(hit_allowed(&card, (500.0, 200.0)));
+        assert!(hit_allowed(&card, (8.0, 200.0)), "a little slack at the edge");
+        assert!(!hit_allowed(&card, (500.0, 2.0)), "top margin: passes through");
+        assert!(hit_allowed(&[], (0.0, 0.0)), "nothing recorded: whole panel");
     }
 }

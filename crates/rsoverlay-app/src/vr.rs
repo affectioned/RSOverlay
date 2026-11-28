@@ -1185,6 +1185,19 @@ mod imp {
                             }
                         }
                     }
+                    // Only what the panel drew catches the laser (its
+                    // margins / gaps pass through to what's behind).
+                    let (_, _, pts) = target(i);
+                    let drawn = match i {
+                        0 => &wrist.hits,
+                        1 => &dash.hits,
+                        2 => &kb.hits,
+                        k => &wins[k - WIN0].panel.hits,
+                    };
+                    let hit = hit.filter(|(uv, _)| {
+                        let p = LaserInput::uv_to_points(*uv, pts);
+                        hit_allowed(drawn, (p.x, p.y))
+                    });
                     if let Some((uv, d)) = hit {
                         if best.is_none_or(|b| hit_beats((i, d), (b.0, b.2))) {
                             best = Some((i, uv, d));
