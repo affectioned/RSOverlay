@@ -11,8 +11,8 @@ UI frame time); "overlay fps 90" is representative of a 90 Hz headset.
 | --- | --- |
 | `settings-overview.png` | every Settings card, default config (`--settings-cards` + `python tools/make-settings-overview.py`) |
 | `overview.png` | all of the below in one shareable image (`python tools/make-overview.py`) |
-| `vr-work.png` | editor + notes + terminal arc, stats widget, keyboard |
-| `vr-gaming.png` | game guide, media/macros + battery widgets, wrist expanded |
+| `vr-work.png` | editor + notes + terminal arc, keyboard |
+| `vr-gaming.png` | game guide, media/macros widget, wrist expanded |
 | `vr-social.png` | dashboard on Chat, keyboard, notifications + media |
 | `vr-dashboard.png` | dashboard Home, popped-out stats widget |
 | `vr-wrist-compact.png` | wrist close-up, compact set (More), Media theme with a demo album cover |

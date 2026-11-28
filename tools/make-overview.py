@@ -8,13 +8,13 @@ import sys
 from PIL import Image, ImageDraw, ImageFont
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else 'docs/store/overview.png'
-WRIST_CROP = (400, 400, 1520, 1030)  # 16:9 around the wrist
+WRIST_CROP = (240, 180, 1680, 990)  # 16:9 around the wrist
 SHOTS = [
-    ('vr-work', 'Working in VR', 'editor, notes and terminal around you · stats · keyboard', None),
+    ('vr-work', 'Working in VR', 'editor, notes and terminal around you · keyboard', None),
     ('vr-dashboard', 'Dashboard', 'labelled sidebar · search · pop-out widgets', None),
     ('vr-social', 'Social VR', 'chatbox + keyboard · notifications · now playing', None),
-    ('vr-gaming', 'In game', 'guide pinned aside · media and battery widgets · wrist', None),
-    ('vr-wrist-compact', 'Wrist toolbar', 'the everyday buttons + More · album cover while music plays', WRIST_CROP),
+    ('vr-gaming', 'In game', 'guide pinned aside · media widget · wrist with every battery', None),
+    ('vr-wrist-compact', 'Wrist toolbar', 'the everyday buttons + More · album cover while music plays', (240, 270, 1680, 1080)),
     ('vr-wrist-expanded', 'Wrist toolbar, More', 'every action, layout slots, batteries, stats', WRIST_CROP),
 ]
 TW, TH = 1152, 648

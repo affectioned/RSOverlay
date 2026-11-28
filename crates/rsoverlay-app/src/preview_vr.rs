@@ -58,7 +58,7 @@ const HEAD: Vec3 = Vec3::new(0.0, 1.6, 0.0);
 // Panel textures, pixels-per-point and widths: the VR shell's values
 // (`vr.rs`), so text and layout match the headset exactly.
 const DASH: PanelSize = PanelSize { tex: (2048, 1280), ppp: 2.0 };
-const WRIST: PanelSize = PanelSize { tex: (1200, 1040), ppp: 2.0 };
+const WRIST: PanelSize = PanelSize { tex: (1200, 1180), ppp: 2.0 };
 const WIN: PanelSize = PanelSize { tex: (1920, 1200), ppp: 1.5 };
 const WID: PanelSize = PanelSize { tex: (1200, 1000), ppp: 2.0 };
 const KB: PanelSize = PanelSize { tex: (2048, 800), ppp: 2.0 };
@@ -128,13 +128,13 @@ impl Preset {
     /// (yaw, pitch, dolly) the preset is framed from.
     fn camera(self) -> (f32, f32, f32) {
         match self {
-            Self::Work => (0.0, -0.20, -0.12),
-            Self::Gaming => (-0.12, -0.30, 0.0),
-            Self::Social => (0.0, -0.30, 0.0),
-            Self::Dashboard => (-0.08, -0.16, 0.0),
-            Self::WristCompact => (-0.46, -0.60, 0.20),
+            Self::Work => (0.0, -0.20, -0.42),
+            Self::Gaming => (-0.02, -0.32, -0.05),
+            Self::Social => (0.0, -0.30, -0.36),
+            Self::Dashboard => (-0.10, -0.16, -0.18),
+            Self::WristCompact => (-0.46, -0.60, 0.25),
             // Taller (two rows of status chips): look a little lower, step back.
-            Self::WristExpanded => (-0.46, -0.62, 0.13),
+            Self::WristExpanded => (-0.42, -0.70, 0.17),
         }
     }
 
@@ -142,7 +142,7 @@ impl Preset {
         let wrist = |expanded: bool, pos: Vec3, laser| Spec {
             content: Content::Wrist { expanded },
             size: WRIST,
-            width_m: 0.24,
+            width_m: rsoverlay_core::config::WRIST_WIDTH_M,
             pose: face_head(pos),
             laser,
         };
@@ -170,22 +170,19 @@ impl Preset {
         };
         match self {
             // A workday in VR: code front and centre, notes and a
-            // terminal either side, stats up high, keyboard under hand.
+            // terminal either side, keyboard under hand.
             Self::Work => vec![
-                window(MockApp::Notes, -44.0, 1.0, 1.58, 0.72, None),
-                window(MockApp::Editor, 0.0, 1.05, 1.60, 1.05, Some((0.46, 0.34))),
-                window(MockApp::Terminal, 44.0, 1.0, 1.50, 0.72, None),
-                widget(vec![WidgetKind::System], 30.0, 0.95, 2.02),
+                window(MockApp::Notes, -37.0, 1.15, 1.58, 0.56, None),
+                window(MockApp::Editor, 0.0, 1.05, 1.60, 0.9, Some((0.46, 0.34))),
+                window(MockApp::Terminal, 37.0, 1.15, 1.54, 0.56, None),
                 keyboard(arc(0.0, 0.48, 1.16), None),
-                wrist(false, Vec3::new(-0.26, 1.08, -0.34), None),
             ],
             // Mid-game: a guide pinned off to the side, glanceable
             // widgets, the wrist up for a quick check.
             Self::Gaming => vec![
-                window(MockApp::Guide, 34.0, 1.35, 1.60, 0.80, None),
-                widget(vec![WidgetKind::NowPlaying, WidgetKind::Macros], -42.0, 0.75, 1.36),
-                widget(vec![WidgetKind::Battery], -14.0, 1.15, 1.74),
-                wrist(true, Vec3::new(-0.10, 1.30, -0.36), Some((0.70, 0.11))),
+                window(MockApp::Guide, 30.0, 1.0, 1.50, 0.62, None),
+                widget(vec![WidgetKind::NowPlaying, WidgetKind::Macros], -27.0, 0.80, 1.40),
+                wrist(true, Vec3::new(-0.02, 1.42, -0.31), Some((0.70, 0.11))),
             ],
             // Social VR: chatting through the dashboard and keyboard,
             // notifications and music to the sides.
@@ -194,12 +191,10 @@ impl Preset {
                 widget(vec![WidgetKind::Notifications], -40.0, 0.80, 1.58),
                 widget(vec![WidgetKind::NowPlaying], 40.0, 0.80, 1.55),
                 keyboard(arc(0.0, 0.46, 1.17), Some((0.42, 0.55))),
-                wrist(false, Vec3::new(-0.27, 1.06, -0.32), None),
             ],
             Self::Dashboard => vec![
-                widget(vec![WidgetKind::System, WidgetKind::NowPlaying], -46.0, 0.75, 1.52),
+                widget(vec![WidgetKind::System, WidgetKind::NowPlaying], -40.0, 0.75, 1.52),
                 dash(Page::Home, 0.0, 0.72, 1.48, Some((0.07, 0.27))),
-                wrist(false, Vec3::new(-0.27, 1.07, -0.33), None),
             ],
             Self::WristCompact => vec![wrist(false, Vec3::new(-0.15, 1.30, -0.30), Some((0.90, 0.07)))],
             Self::WristExpanded => vec![wrist(true, Vec3::new(-0.15, 1.30, -0.30), Some((0.90, 0.07)))],
@@ -439,7 +434,7 @@ pub fn run(
                                     let body = egui::Rect::from_min_max(full.min, egui::pos2(full.right(), bar.top() - 6.0));
                                     app.paint(ui, body);
                                     let mut opacity = 1.0;
-                                    let _ = window_panel::toolbar(ui, bar, app.title(), None, Attach::World, false, None, Some(window_panel::WindowMenu { resizable: true, smooth: false, tilt: Some(false), snap: Some(true) }), Some(&mut opacity), accent);
+                                    let _ = window_panel::toolbar(ui, bar, app.title(), None, Attach::World, false, None, Some(window_panel::WindowMenu { resizable: true, smooth: false, tilt: Some(false), snap: Some(true), switch: true }), Some(&mut opacity), accent);
                                 });
                             }
                         }
@@ -580,8 +575,9 @@ impl OrbitCamera {
     }
 
     fn proj(&self, aspect: f32) -> Mat4 {
-        // ~100° horizontal is typical of modern HMDs.
-        let hfov_rad = 100f32.to_radians();
+        // Narrower than a headset's ~100°: a flat 16:9 shot at 100° makes
+        // everything small and stretched at the edges.
+        let hfov_rad = 80f32.to_radians();
         let vfov = 2.0 * ((hfov_rad * 0.5).tan() / aspect).atan();
         Mat4::perspective_rh(vfov, aspect, 0.05, 100.0)
     }
