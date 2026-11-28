@@ -36,6 +36,10 @@
             "grab": {
               "output": "/actions/rsoverlay/in/grab"
             }
+          },
+          "parameters": {
+            "force_hold_threshold": "0.35",
+            "force_release_threshold": "0.2"
           }
         },
         {
@@ -45,6 +49,10 @@
             "grab": {
               "output": "/actions/rsoverlay/in/grab"
             }
+          },
+          "parameters": {
+            "force_hold_threshold": "0.35",
+            "force_release_threshold": "0.2"
           }
         },
         {
