@@ -127,6 +127,35 @@ macros, DPI-correct input, dock-anywhere panels. The VR preview's
      isn't translated yet. Choosing a language in Settings overrides it
      and is kept.
 
+## Replacing OpenVR Advanced Settings
+
+Planned 2026-11-28 with testers. OVRAS's playspace features (drag and
+turn, offsets, recenter handling, fix floor, auto-turn) live in the
+separate app **RSPlayspace**. The rest worth keeping comes into
+RSOverlay, in this order:
+
+1. **Mic mute and push-to-talk, system-wide.** A wrist button and a
+   SteamVR binding to mute the Windows mic itself (WASAPI), so Discord,
+   VRChat and everything else are muted at once. Modes: toggle, hold to
+   talk, hold to mute. A mute icon on the wrist and a short sound on mute
+   and unmute. Reuses the mic code from voice typing.
+   - **Discord mute preset:** for people who want Discord's own mute (the
+     red icon), the button can also send Discord's mute hotkey through a
+     ready-made macro. Ties in with the Discord button bar below.
+2. **Audio device switching in VR.** Pick the output (headset, speakers)
+   and the mic from the volume panel, without taking the headset off.
+3. **Session stats on the wrist.** Cable turn counter (how far you've
+   physically turned; RSPlayspace already has a tested counter that
+   survives recenters and tracking gaps), distance walked, dropped and
+   reprojected frames.
+4. **Chaperone helpers** (least certain; SteamVR covers some of this):
+   saved chaperone profiles, show the bounds when you get close, a
+   proximity warning.
+
+Left out on purpose: video and colour tweaks, motion smoothing toggles
+and SteamVR settings mirrors (SteamVR's own settings do these), and
+OVRAS's keyboard tools (RSOverlay's keyboard already covers them).
+
 ## Mid-term
 
 - **Notifications polish.** History (also as a pop-out widget),
